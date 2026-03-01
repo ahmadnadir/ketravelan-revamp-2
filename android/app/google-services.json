@@ -1,0 +1,37 @@
+{
+  "project_info": {
+    "project_number": "597159324842",
+    "project_id": "devketravelanapp",
+    "storage_bucket": "devketravelanapp.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:597159324842:android:5b09df6bb446f9ee8af4d3",
+        "android_client_info": {
+          "package_name": "dev.ketravelan.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "597159324842-5l7j39f2429cdqs21pbpplrivabbp68g.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "dev.ketravelan.app"
+          }
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC2SRVs9p_cn7ZYfGzgUOCCKdz3lWV3whI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

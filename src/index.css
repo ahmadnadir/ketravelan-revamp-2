@@ -1,0 +1,326 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Ketravelan Design System - iOS-like, clean, airy */
+
+@layer base {
+  :root {
+    /* Ketravelan Brand Colors */
+    --background: 30 20% 97%; /* Off-white #F8F8F8 */
+    --foreground: 220 20% 15%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 220 20% 15%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 20% 15%;
+
+    /* Black/Dark brand color */
+    --primary: 220 20% 15%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 220 14% 96%;
+    --secondary-foreground: 220 20% 20%;
+
+    --muted: 220 14% 95%;
+    --muted-foreground: 220 10% 50%;
+
+    --accent: 220 14% 95%;
+    --accent-foreground: 220 20% 20%;
+
+    --destructive: 0 72% 55%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 14% 90%;
+    --input: 220 14% 90%;
+    --ring: 220 20% 15%;
+
+    --radius: 1rem;
+
+    /* Ketravelan specific tokens */
+    --success: 142 70% 45%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 95% 55%;
+    --warning-foreground: 38 95% 20%;
+    --info: 200 80% 50%;
+    --info-foreground: 0 0% 100%;
+
+    /* Stat card colors */
+    --stat-blue: 200 80% 50%;
+    --stat-green: 142 70% 45%;
+    --stat-orange: 25 95% 55%;
+    --stat-red: 0 72% 55%;
+
+    /* Category colors */
+    --category-transport: 200 80% 50%;
+    --category-food: 25 95% 55%;
+    --category-accommodation: 270 60% 55%;
+    --category-activities: 142 70% 45%;
+    --category-shopping: 330 70% 55%;
+    --category-misc: 220 14% 50%;
+
+    /* Bottom nav */
+    --nav-inactive: 220 10% 60%;
+    --nav-active: 220 20% 15%;
+
+    /* Member contribution colors - vibrant, playful palette */
+    --member-coral: 16 85% 60%;
+    --member-teal: 175 70% 45%;
+    --member-violet: 280 65% 60%;
+    --member-sky: 195 80% 55%;
+    --member-rose: 340 75% 60%;
+    --member-amber: 45 95% 55%;
+    --member-mint: 160 60% 50%;
+    --member-indigo: 240 60% 60%;
+
+    /* Sidebar kept for compatibility */
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 220 20% 15%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 14% 95%;
+    --sidebar-accent-foreground: 220 20% 20%;
+    --sidebar-border: 220 14% 90%;
+    --sidebar-ring: 220 20% 15%;
+  }
+
+  .dark {
+    --background: 220 20% 10%;
+    --foreground: 220 14% 95%;
+
+    --card: 220 20% 13%;
+    --card-foreground: 220 14% 95%;
+
+    --popover: 220 20% 13%;
+    --popover-foreground: 220 14% 95%;
+
+    --primary: 220 20% 85%;
+    --primary-foreground: 220 20% 10%;
+
+    --secondary: 220 20% 18%;
+    --secondary-foreground: 220 14% 95%;
+
+    --muted: 220 20% 18%;
+    --muted-foreground: 220 14% 60%;
+
+    --accent: 220 20% 20%;
+    --accent-foreground: 220 14% 90%;
+
+    --destructive: 0 62% 40%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 20% 20%;
+    --input: 220 20% 20%;
+    --ring: 220 20% 85%;
+
+    --sidebar-background: 220 20% 10%;
+    --sidebar-foreground: 220 14% 95%;
+    --sidebar-primary: 220 20% 85%;
+    --sidebar-primary-foreground: 220 20% 10%;
+    --sidebar-accent: 220 20% 20%;
+    --sidebar-accent-foreground: 220 14% 90%;
+    --sidebar-border: 220 20% 20%;
+    --sidebar-ring: 220 20% 85%;
+
+    /* Member contribution colors - dark mode adjustments */
+    --member-coral: 16 75% 55%;
+    --member-teal: 175 60% 50%;
+    --member-violet: 280 55% 65%;
+    --member-sky: 195 70% 60%;
+    --member-rose: 340 65% 55%;
+    --member-amber: 45 85% 50%;
+    --member-mint: 160 50% 55%;
+    --member-indigo: 240 50% 65%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
+  }
+
+  @media (max-width: 640px) {
+    body {
+      font-size: 1.03rem;
+      line-height: 1.6;
+    }
+  }
+
+  /* Keyboard open state - adjust layout when virtual keyboard is visible */
+  body.keyboard-open {
+    --keyboard-offset: 0px;
+  }
+
+  /* iOS-like typography */
+  h1 {
+    @apply text-2xl font-bold tracking-tight;
+  }
+
+  h2 {
+    @apply text-xl font-semibold tracking-tight;
+  }
+
+  h3 {
+    @apply text-lg font-semibold;
+  }
+}
+
+@layer utilities {
+  /* Safe area padding for mobile - all sides */
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .safe-top {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+
+  .safe-left {
+    padding-left: env(safe-area-inset-left, 0px);
+  }
+
+  .safe-right {
+    padding-right: env(safe-area-inset-right, 0px);
+  }
+
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .pt-safe {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+
+  .pl-safe {
+    padding-left: env(safe-area-inset-left, 0px);
+  }
+
+  .pr-safe {
+    padding-right: env(safe-area-inset-right, 0px);
+  }
+
+
+.native-splash {
+  position: fixed;
+  inset: 0;
+  background: #1a1a2e;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.native-splash img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+  /* Hide scrollbar but keep functionality */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Glass effect for overlays */
+  .glass {
+    @apply bg-card/80 backdrop-blur-md;
+  }
+
+  /* === SCROLL CONTAINMENT UTILITIES === */
+  
+  /* Viewport lock - prevents body scroll for focused flows */
+  .viewport-lock {
+    height: 100dvh;
+    overflow: hidden;
+    position: fixed;
+    inset: 0;
+    width: 100%;
+  }
+
+  /* Scroll container - single scroll authority */
+  .scroll-container {
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
+
+  /* Prevent scroll chaining / rubber-banding */
+  .overscroll-contain {
+    overscroll-behavior: contain;
+  }
+
+  /* iOS-safe dynamic viewport height */
+  .h-dvh {
+    height: 100dvh;
+  }
+
+  .min-h-dvh {
+    min-height: 100dvh;
+  }
+
+  .max-h-dvh {
+    max-height: 100dvh;
+  }
+
+  /* Hide scrollbar on mobile */
+  @media (max-width: 767px) {
+    * {
+      scrollbar-width: none; /* Firefox */
+      -ms-overflow-style: none; /* IE/Edge */
+    }
+    *::-webkit-scrollbar {
+      display: none; /* Chrome, Safari, Opera */
+    }
+  }
+
+  /* Chart bar grow animation */
+  @keyframes growWidth {
+    from {
+      transform: scaleX(0);
+      transform-origin: left;
+    }
+    to {
+      transform: scaleX(1);
+      transform-origin: left;
+    }
+  }
+
+  /* Fixed element positioned above bottom nav with safe-area support */
+  .bottom-above-nav {
+    bottom: calc(4rem + env(safe-area-inset-bottom, 0px));
+  }
+  /* Raised version for desktop floating CTAs */
+  .bottom-above-nav-lg {
+    bottom: calc(5rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* Safe area padding for notched devices */
+  .safe-area {
+    padding-left: max(1rem, env(safe-area-inset-left, 0px));
+    padding-right: max(1rem, env(safe-area-inset-right, 0px));
+  }
+
+  /* Disable scroll helper for focused flows (auth) */
+  html.no-scroll,
+  body.no-scroll {
+    overflow: hidden;
+    height: 100dvh;
+  }
+
+  /* Force Sonner toasts below sticky header on mobile */
+  @media (max-width: 639px) {
+    [data-sonner-toaster][data-y-position="top"] {
+      top: calc(env(safe-area-inset-top, 0px) + 5.25rem) !important;
+    }
+  }
+}

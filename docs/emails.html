@@ -1,0 +1,261 @@
+<h1 id="ketravelan-email-inventory">Ketravelan Email Inventory</h1>
+<p>This document lists all email-related Supabase edge functions in this
+repo, including purpose, recipients, subject patterns, and notable rules
+(such as preference checks).</p>
+<h2 id="trip-and-invite-emails">Trip and Invite Emails</h2>
+<h3 id="create-trip-invite">create-trip-invite</h3>
+<ul>
+<li>Purpose: Send invite email to a specific user for a trip and create
+a notification record.</li>
+<li>Recipient: Invitee email (auth.users matched by email).</li>
+<li>Subject: “You are invited: <trip title>”.</li>
+<li>Trigger: Called by the trip creator when inviting a user.</li>
+<li>Preference checks: Respects invitee profile
+<code>email_notifications</code>.</li>
+<li>Notes: Includes cover image, approvals link, and trip link.</li>
+</ul>
+<h3 id="send-trip-created-email">send-trip-created-email</h3>
+<ul>
+<li>Purpose: Tell the trip creator their trip is live.</li>
+<li>Recipient: Trip creator.</li>
+<li>Subject: “Your trip”
+<title>
+” is now live!” (emoji in code).</li>
+<li>Trigger: First time a trip is published.</li>
+<li>Preference checks: Respects creator
+<code>email_notifications</code>.</li>
+</ul>
+<h3 id="send-trip-reminder-email">send-trip-reminder-email</h3>
+<ul>
+<li>Purpose: Remind the trip creator that a trip start date is coming
+up.</li>
+<li>Recipient: Trip creator.</li>
+<li>Subject: “Get ready! Your trip to <destination> starts <date>”
+(emoji in code).</li>
+<li>Trigger: Scheduled reminders (7, 3, 1 days before start).</li>
+<li>Preference checks: Respects <code>trip_reminders</code> and
+<code>email_notifications</code>.</li>
+</ul>
+<h3 id="send-trip-ended">send-trip-ended</h3>
+<ul>
+<li>Purpose: Notify the creator that the trip ended.</li>
+<li>Recipient: Trip creator.</li>
+<li>Subject: “Trip wrapped:
+<title>
+“.</li>
+<li>Trigger: Scheduled reminder on trip end date.</li>
+<li>Preference checks: Respects <code>trip_reminders</code> and
+<code>email_notifications</code>.</li>
+</ul>
+<h3
+id="send-trip-ended-expenses-complete">send-trip-ended-expenses-complete</h3>
+<ul>
+<li>Purpose: Notify the creator that the trip ended and expenses are
+settled.</li>
+<li>Recipient: Trip creator.</li>
+<li>Subject: “Trip complete:
+<title>
+“.</li>
+<li>Trigger: Scheduled reminder on trip end date when expenses are fully
+settled.</li>
+<li>Preference checks: Respects <code>trip_reminders</code> and
+<code>email_notifications</code>.</li>
+</ul>
+<h3 id="send-trip-participant-joined">send-trip-participant-joined</h3>
+<ul>
+<li>Purpose: Notify the trip creator that a participant joined.</li>
+<li>Recipient: Trip creator.</li>
+<li>Subject: “Fresh energy on your trip:
+<title>
+“.</li>
+<li>Trigger: When a participant joins the trip.</li>
+<li>Preference checks: Respects creator
+<code>email_notifications</code>.</li>
+<li>Notes: Includes cover image.</li>
+</ul>
+<h3 id="send-trip-invite-accepted">send-trip-invite-accepted</h3>
+<ul>
+<li>Purpose: Notify the trip creator that an invite was accepted.</li>
+<li>Recipient: Trip creator.</li>
+<li>Subject: “Invite accepted:
+<title>
+“.</li>
+<li>Trigger: When invitee accepts.</li>
+<li>Preference checks: Respects creator
+<code>email_notifications</code>.</li>
+</ul>
+<h3 id="send-trip-join-notification">send-trip-join-notification</h3>
+<ul>
+<li>Purpose: Notify the trip creator that someone requested to
+join.</li>
+<li>Recipient: Trip creator.</li>
+<li>Subject: “Join request for
+<title>
+“.</li>
+<li>Trigger: When a user requests to join a trip.</li>
+<li>Preference checks: Respects creator
+<code>email_notifications</code>.</li>
+<li>Notes: Includes approvals link.</li>
+</ul>
+<h3
+id="send-join-status-notification">send-join-status-notification</h3>
+<ul>
+<li>Purpose: Notify a requester that their join request was approved or
+declined.</li>
+<li>Recipient: Requester (user who asked to join).</li>
+<li>Subject: “Your join request was approved” or “Your join request was
+declined”.</li>
+<li>Trigger: When the organizer updates a join request.</li>
+<li>Preference checks: Respects requester
+<code>email_notifications</code>.</li>
+</ul>
+<h3 id="send-trip-cancelled">send-trip-cancelled</h3>
+<ul>
+<li>Purpose: Notify trip members that a trip was cancelled.</li>
+<li>Recipient: Trip members (excluding the creator).</li>
+<li>Subject: “Trip cancelled:
+<title>
+“.</li>
+<li>Trigger: When the trip is cancelled.</li>
+<li>Preference checks: Respects member
+<code>email_notifications</code>.</li>
+<li>Notes: Includes cover image, optional reason.</li>
+</ul>
+<h2 id="expense-emails">Expense Emails</h2>
+<h3 id="send-expense-added">send-expense-added</h3>
+<ul>
+<li>Purpose: Notify participants and payer about a new expense.</li>
+<li>Recipients:
+<ul>
+<li>Participants who owe money.</li>
+<li>The payer (summary that they are owed).</li>
+</ul></li>
+<li>Subject:
+<ul>
+<li>“New expense added — you owe <currency> <amount>”.</li>
+<li>“Expense added — you are owed <currency> <amount>”.</li>
+</ul></li>
+<li>Trigger: When an expense is created.</li>
+<li>Preference checks: Respects each recipient
+<code>email_notifications</code>.</li>
+</ul>
+<h3 id="send-expense-updated">send-expense-updated</h3>
+<ul>
+<li>Purpose: Notify all involved users that an expense changed.</li>
+<li>Recipients: Payer and participants.</li>
+<li>Subject: “Expense updated — <description>”.</li>
+<li>Trigger: When an expense is updated.</li>
+<li>Preference checks: Respects each recipient
+<code>email_notifications</code>.</li>
+</ul>
+<h3 id="send-expense-deleted">send-expense-deleted</h3>
+<ul>
+<li>Purpose: Notify all involved users that an expense was deleted.</li>
+<li>Recipients: Payer and participants.</li>
+<li>Subject: “Expense deleted — <description>”.</li>
+<li>Trigger: When an expense is deleted.</li>
+<li>Preference checks: Respects each recipient
+<code>email_notifications</code>.</li>
+</ul>
+<h3 id="send-expense-payment-marked">send-expense-payment-marked</h3>
+<ul>
+<li>Purpose: Notify payer and participant when a payment is marked as
+paid.</li>
+<li>Recipients:
+<ul>
+<li>Payer: “Payment marked as paid — <currency> <amount>”.</li>
+<li>Participant: “Payment recorded — <description>”.</li>
+</ul></li>
+<li>Trigger: When participant marks their payment as paid.</li>
+<li>Preference checks: Respects each recipient
+<code>email_notifications</code>.</li>
+</ul>
+<h3
+id="send-expense-overdue-reminder">send-expense-overdue-reminder</h3>
+<ul>
+<li>Purpose: Remind participants with unpaid balances.</li>
+<li>Recipients: Unpaid participants (optionally filtered by
+member).</li>
+<li>Subject: “Payment reminder — action needed” or “Payment reminder —
+<days> days overdue”.</li>
+<li>Trigger: Reminder flow for overdue expenses.</li>
+<li>Preference checks: Respects each recipient
+<code>email_notifications</code>.</li>
+</ul>
+<h3 id="send-payment-reminder">send-payment-reminder</h3>
+<ul>
+<li>Purpose: Send payment reminder emails for a specific expense.</li>
+<li>Recipients: Unpaid participants for the expense (or a specific
+member if provided).</li>
+<li>Subject: “Payment Reminder: <expense> - <trip>”.</li>
+<li>Trigger: Explicit invocation (manual or scheduled by caller).</li>
+<li>Preference checks: No <code>email_notifications</code> check in this
+function; it only checks for email presence.</li>
+</ul>
+<h3 id="send-settlement-reminder">send-settlement-reminder</h3>
+<ul>
+<li>Purpose: Send a payment reminder to a specific user and optionally
+via chat/notification too.</li>
+<li>Recipients: One recipient (email), optional notification and direct
+chat.</li>
+<li>Subject: “Payment reminder - <trip>”.</li>
+<li>Trigger: Explicit invocation with <code>channels</code> array
+(default includes notification, chat, email).</li>
+<li>Preference checks: No <code>email_notifications</code> check in this
+function.</li>
+</ul>
+<h2 id="auth-and-onboarding-emails">Auth and Onboarding Emails</h2>
+<h3 id="send-signup-confirmation">send-signup-confirmation</h3>
+<ul>
+<li>Purpose: Email verification for new accounts.</li>
+<li>Recipient: User email provided in the request.</li>
+<li>Subject: “Welcome onboard to Ketravelan” (overrideable).</li>
+<li>Trigger: Signup flow.</li>
+<li>Notes: Supports Resend template or raw HTML fallback; generates
+Supabase invite/confirm link.</li>
+</ul>
+<h3 id="send-password-reset">send-password-reset</h3>
+<ul>
+<li>Purpose: Password recovery email.</li>
+<li>Recipient: User email provided in the request.</li>
+<li>Subject: “Reset your Ketravelan password” (overrideable).</li>
+<li>Trigger: Password reset flow.</li>
+<li>Notes: Uses Supabase recovery link and Resend template if
+configured.</li>
+</ul>
+<h3 id="send-welcome-email">send-welcome-email</h3>
+<ul>
+<li>Purpose: Welcome email after onboarding.</li>
+<li>Recipient: User email provided in the request.</li>
+<li>Subject: “Thank you for onboarding with Ketravelan”.</li>
+<li>Trigger: Post-onboarding flow.</li>
+</ul>
+<h2 id="generic-notification-email">Generic Notification Email</h2>
+<h3 id="send-notification-email">send-notification-email</h3>
+<ul>
+<li>Purpose: Simple notification email with title and message.</li>
+<li>Recipient: Email passed in the request.</li>
+<li>Subject: Uses <code>notificationTitle</code> from the request.</li>
+<li>Trigger: Generic notification flow.</li>
+<li>Notes: Uses a basic HTML template with optional action URL. Does not
+check email preferences.</li>
+</ul>
+<h3 id="send-notification-email-v2">send-notification-email-v2</h3>
+<ul>
+<li>Purpose: Folder exists but no handler file is present.</li>
+<li>Recipient: None (no implementation found).</li>
+<li>Subject: None (no implementation found).</li>
+</ul>
+<h2 id="scheduler-integration">Scheduler Integration</h2>
+<h3 id="send-scheduled-reminders">send-scheduled-reminders</h3>
+<ul>
+<li>Purpose: Daily job that sends scheduled reminders for trips.</li>
+<li>Emails triggered:
+<ul>
+<li>send-trip-reminder-email for start-date reminders.</li>
+<li>send-trip-ended or send-trip-ended-expenses-complete for end-date
+reminders.</li>
+</ul></li>
+<li>Notes: End-date routing depends on whether all expenses are
+settled.</li>
+</ul>

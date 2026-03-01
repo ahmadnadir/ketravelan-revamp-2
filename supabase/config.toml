@@ -1,0 +1,179 @@
+
+[functions.send-notification-email]
+enabled = true
+verify_jwt = false
+import_map = "./functions/send-notification-email/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/send-notification-email/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/send-notification-email/*.html" ]
+
+[functions.send-trip-join-notification]
+enabled = true
+verify_jwt = false
+import_map = "./functions/send-trip-join-notification/deno.json"
+entrypoint = "./functions/send-trip-join-notification/index.ts"
+[functions.send-join-status-notification]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/send-join-status-notification/index.ts"
+
+[functions.send-welcome-email]
+enabled = true
+verify_jwt = false
+import_map = "./functions/send-welcome-email/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/send-welcome-email/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/send-welcome-email/*.html" ]
+
+[functions.send-signup-confirmation]
+enabled = true
+verify_jwt = false
+# No import map needed; using direct URLs for Deno modules
+entrypoint = "./functions/send-signup-confirmation/index.ts"
+
+[functions.send-password-reset]
+enabled = true
+verify_jwt = false
+# No import map needed; using direct URLs for Deno modules
+entrypoint = "./functions/send-password-reset/index.ts"
+
+[functions.send-trip-created-email]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/send-trip-created-email/index.ts"
+
+[functions.send-trip-reminder-email]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/send-trip-reminder-email/index.ts"
+
+[functions.send-trip-participant-joined]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/send-trip-participant-joined/index.ts"
+
+[functions.send-trip-invite-accepted]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/send-trip-invite-accepted/index.ts"
+
+[functions.send-trip-cancelled]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/send-trip-cancelled/index.ts"
+
+[functions.send-trip-ended]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/send-trip-ended/index.ts"
+
+[functions.send-trip-ended-expenses-complete]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/send-trip-ended-expenses-complete/index.ts"
+
+[functions.create-trip-invite]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/create-trip-invite/index.ts"
+
+[functions.send-scheduled-reminders]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/send-scheduled-reminders/index.ts"
+
+[functions.send-payment-reminder]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/send-payment-reminder/index.ts"
+
+[functions.send-settlement-reminder]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/send-settlement-reminder/index.ts"
+
+[functions.send-expense-added]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/send-expense-added/index.ts"
+
+[functions.send-expense-payment-marked]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/send-expense-payment-marked/index.ts"
+
+[functions.send-expense-updated]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/send-expense-updated/index.ts"
+
+[functions.send-expense-deleted]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/send-expense-deleted/index.ts"
+
+[functions.send-expense-overdue-reminder]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/send-expense-overdue-reminder/index.ts"
+
+[functions.send-chat-push]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/send-chat-push/index.ts"
+[functions.send-chat-mention]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/send-chat-mention/index.ts"
+
+[functions.send-system-push]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/send-system-push/index.ts"
+
+[functions.send-trip-updated]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/send-trip-updated/index.ts"
+
+[functions.send-trip-full]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/send-trip-full/index.ts"
+
+[functions.send-trip-recommendation]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/send-trip-recommendation/index.ts"
+
+[functions.send-notification-email-v2]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/send-notification-email-v2/index.ts"
+
+[functions.migrate-trip-images]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/migrate-trip-images/index.ts"
+
+[functions.test-push-notification]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/test-push-notification/index.ts"
+
+[functions.send-join-request-received]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/send-join-request-received/index.ts"
+
+[functions.diagnose-payment-notification]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/diagnose-payment-notification/index.ts"
+

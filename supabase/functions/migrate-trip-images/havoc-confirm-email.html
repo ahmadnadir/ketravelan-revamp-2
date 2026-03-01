@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>🎉 Confirm Your Ketravelan Signup! 🎉</title>
+  <style>
+    body { background: #1a1a2e; color: #fff; font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 0; }
+    .container { max-width: 480px; margin: 40px auto; background: #22223b; border-radius: 18px; box-shadow: 0 8px 32px rgba(0,0,0,0.25); padding: 32px 28px; text-align: center; }
+    h2 { font-size: 2.2em; margin-bottom: 0.5em; color: #fbbf24; letter-spacing: 1px; }
+    .emoji { font-size: 2.5em; margin-bottom: 0.2em; }
+    .confetti { font-size: 1.5em; }
+    a.button { display: inline-block; margin-top: 28px; padding: 16px 36px; background: linear-gradient(90deg, #fbbf24 0%, #a78bfa 100%); color: #22223b; font-weight: bold; border-radius: 8px; text-decoration: none; font-size: 1.2em; box-shadow: 0 2px 8px #0003; transition: background 0.2s; }
+    a.button:hover { background: linear-gradient(90deg, #a78bfa 0%, #fbbf24 100%); }
+    .footer { margin-top: 36px; color: #a0aec0; font-size: 0.95em; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="emoji">🚀🤪🎉</div>
+    <h2>Confirm your signup <span class="confetti">🎊✨</span></h2>
+    <p style="font-size: 1.1em; margin-bottom: 1.5em;">You're just one click away from joining the <b>Ketravelan</b> adventure!<br>Let's get this party started! 🥳</p>
+    <a href="{{ .ConfirmationURL }}" class="button">🔥 Confirm your email &amp; join the fun! 🔥</a>
+    <div class="footer">
+      <p>If you didn't sign up, just ignore this email. <span style="font-size:1.2em;">🤷‍♂️</span></p>
+      <p>See you inside!<br><b>The Ketravelan Crew</b> 🏝️</p>
+    </div>
+  </div>
+</body>
+</html>

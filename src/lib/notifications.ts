@@ -1,0 +1,217 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { supabase } from './supabase';
+
+export interface Notification {
+  id: string;
+  user_id: string;
+  type:
+    | 'join_request'
+    | 'message'
+    | 'expense'
+    | 'trip_update'
+    | 'member_joined'
+    | 'member_left'
+    | 'trip_invite'
+    | 'trip_join_request'
+    | 'trip_join_approved'
+    | 'trip_join_rejected'
+    | 'trip_cancelled'
+    | 'trip_updated'
+    | 'trip_reminder'
+    | 'new_message'
+    | 'new_expense'
+    | 'expense_paid'
+    | 'expense_reminder'
+    | 'new_follower'
+    | 'new_review'
+    | 'new_tip'
+    | 'trip_published'
+    | 'system_announcement'
+    | 'achievement_unlocked'
+    | 'receipt_submitted'
+    | 'receipt_approved'
+    | 'receipt_rejected'
+    | 'trip_settlement_required';
+  title: string;
+  message: string | null;
+  read: boolean;
+  action_url: string | null;
+  metadata?: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface NotificationFilters {
+  type?: Notification['type'];
+  read?: boolean;
+  limit?: number;
+}
+
+/**
+ * Fetch notifications for the current user
+ */
+export async function fetchNotifications(filters?: NotificationFilters) {
+  const { data: { user } } = await supabase.auth.getUser();
+  
+  if (!user) {
+    throw new Error('User not authenticated');
+  }
+
+  let query = supabase
+    .from('notifications')
+    .select('*')
+    .eq('user_id', user.id)
+    .order('created_at', { ascending: false });
+
+  if (filters?.type) {
+    query = query.eq('type', filters.type);
+  }
+
+  if (filters?.read !== undefined) {
+    query = query.eq('read', filters.read);
+  }
+
+  if (filters?.limit) {
+    query = query.limit(filters.limit);
+  } else {
+    query = query.limit(50); // Default limit
+  }
+
+  const { data, error } = await query;
+
+  if (error) throw error;
+  return data as Notification[];
+}
+
+/**
+ * Get unread notification count for the current user
+ */
+export async function fetchUnreadCount(): Promise<number> {
+  const { data: { user } } = await supabase.auth.getUser();
+  
+  if (!user) return 0;
+
+  const { count, error } = await supabase
+    .from('notifications')
+    .select('*', { count: 'exact', head: true })
+    .eq('user_id', user.id)
+    .eq('read', false);
+
+  if (error) {
+    console.error('Error fetching unread count:', error);
+    return 0;
+  }
+
+  return count || 0;
+}
+
+/**
+ * Mark a single notification as read
+ */
+export async function markNotificationAsRead(notificationId: string) {
+  const { error } = await supabase
+    .from('notifications')
+    .update({ read: true })
+    .eq('id', notificationId);
+
+  if (error) throw error;
+}
+
+/**
+ * Mark multiple notifications as read
+ */
+export async function markNotificationsAsRead(notificationIds: string[]) {
+  const { error } = await supabase.rpc('mark_notifications_read', {
+    p_notification_ids: notificationIds
+  });
+
+  if (error) throw error;
+}
+
+/**
+ * Mark all notifications as read for the current user
+ */
+export async function markAllNotificationsAsRead() {
+  const { error } = await supabase.rpc('mark_all_notifications_read');
+
+  if (error) throw error;
+}
+
+/**
+ * Delete a notification
+ */
+export async function deleteNotification(notificationId: string) {
+  const { error } = await supabase
+    .from('notifications')
+    .delete()
+    .eq('id', notificationId);
+
+  if (error) throw error;
+}
+
+/**
+ * Delete all notifications for the current user
+ */
+export async function deleteAllNotifications() {
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (!user) {
+    throw new Error('User not authenticated');
+  }
+
+  const { error } = await supabase
+    .from('notifications')
+    .delete()
+    .eq('user_id', user.id);
+
+  if (error) throw error;
+}
+
+/**
+ * Subscribe to real-time notification updates
+ */
+export function subscribeToNotifications(
+  userId: string,
+  callback: (notification: Notification) => void
+) {
+  const channel = supabase
+    .channel(`notifications:${userId}`)
+    .on(
+      'postgres_changes',
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'notifications',
+        filter: `user_id=eq.${userId}`
+      },
+      (payload) => {
+        callback(payload.new as Notification);
+      }
+    )
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}
+
+/**
+ * Send a notification (for testing or admin purposes)
+ */
+export async function sendNotification(
+  userId: string,
+  type: Notification['type'],
+  title: string,
+  message?: string,
+  actionUrl?: string
+) {
+  const { data, error } = await supabase.rpc('send_notification', {
+    p_user_id: userId,
+    p_type: type,
+    p_title: title,
+    p_message: message || null,
+    p_action_url: actionUrl || null
+  });
+
+  if (error) throw error;
+  return data;
+}

@@ -1,0 +1,28 @@
+name: Send Scheduled Trip Reminders
+
+on:
+  schedule:
+    # Run daily at 12 AM UTC (midnight)
+    - cron: '0 0 * * *'
+  # Also allow manual trigger
+  workflow_dispatch:
+
+jobs:
+  send-reminders:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger send-scheduled-reminders function
+        run: |
+          curl -X POST \
+            https://sspvqhleqlycsiniywkg.functions.supabase.co/functions/v1/send-scheduled-reminders \
+            -H "Content-Type: application/json" \
+            -d '{}' \
+            --fail
+      
+      - name: Log success
+        if: success()
+        run: echo "Trip reminders sent successfully"
+      
+      - name: Log failure
+        if: failure()
+        run: echo "Failed to send trip reminders"

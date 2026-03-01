@@ -1,0 +1,106 @@
+import { ReactNode, useState } from "react";
+import { Header } from "./Header";
+import { BottomNav } from "./BottomNav";
+import { MenuDrawer } from "./MenuDrawer";
+import { NotificationsSheet } from "@/components/notifications/NotificationsSheet";
+import { useAuth } from "@/contexts/AuthContext";
+import { useRealtimeNotifications } from "@/hooks/useNotifications";
+
+interface AppLayoutProps {
+  children: ReactNode;
+  hideHeader?: boolean;
+  hideBottomNav?: boolean;
+  headerContent?: ReactNode;
+  footerContent?: ReactNode;
+  showBottomNav?: boolean;
+  focusedFlow?: boolean;
+  className?: string;
+  mainClassName?: string;
+}
+
+export function AppLayout({ 
+  children, 
+  hideHeader = false, 
+  hideBottomNav = false,
+  headerContent,
+  footerContent,
+  showBottomNav: showBottomNavProp,
+  focusedFlow = false,
+  className,
+  mainClassName
+}: AppLayoutProps) {
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const { isAuthenticated } = useAuth();
+
+  // Subscribe to real-time notifications
+  useRealtimeNotifications();
+
+  // Only show bottom nav for authenticated users
+  const showBottomNav = isAuthenticated && (showBottomNavProp !== undefined ? showBottomNavProp : !hideBottomNav);
+
+  // Focused flow layout for single scroll authority
+  if (focusedFlow) {
+    return (
+      <div className="fixed inset-0 flex flex-col h-dvh overflow-hidden bg-background">
+        {/* Header zone - truly anchored */}
+        {headerContent && (
+          <div className="flex-none z-10">
+            {headerContent}
+          </div>
+        )}
+
+        {/* Scrollable content - ONLY this element scrolls */}
+        <div 
+          className={`flex-1 overflow-y-auto overflow-x-hidden overscroll-contain ${showBottomNav ? 'pb-28' : 'pb-4'} ${className || ""}`}
+        >
+          {children}
+        </div>
+
+        {/* Footer zone - truly anchored */}
+        {footerContent && (
+          <div className="flex-none z-10 safe-bottom">
+            {footerContent}
+          </div>
+        )}
+
+        {/* Bottom nav - truly anchored */}
+        {showBottomNav && (
+          <div className="flex-none">
+            <BottomNav />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Standard layout
+  return (
+    <div className="min-h-screen bg-background">
+      {!hideHeader && (
+        <Header 
+          onNotificationsClick={() => setNotificationsOpen(true)} 
+          onMenuClick={() => setMenuOpen(true)}
+        />
+      )}
+      
+      <main className={`container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto px-5 sm:px-6 pt-[env(safe-area-inset-top)] ${showBottomNav ? 'pb-[calc(7rem+env(safe-area-inset-bottom))]' : 'pb-[env(safe-area-inset-bottom)]'} ${mainClassName || ""}`}>
+        {children}
+      </main>
+
+      {showBottomNav && (
+        <BottomNav />
+      )}
+
+      <NotificationsSheet 
+        open={notificationsOpen} 
+        onOpenChange={setNotificationsOpen} 
+      />
+
+      <MenuDrawer
+        open={menuOpen}
+        onOpenChange={setMenuOpen}
+      />
+    </div>
+  );
+}
