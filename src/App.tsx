@@ -108,7 +108,12 @@ function AuthDeepLinkHandler() {
     }
 
     const handleUrl = async (url: string) => {
-      if (!url.startsWith("ketravelan://login-callback")) {
+      const normalizedUrl = url.toLowerCase();
+      const isSupportedAuthCallback =
+        normalizedUrl.startsWith("ketravelan://login-callback") ||
+        normalizedUrl.startsWith("ketravelan://auth/callback");
+
+      if (!isSupportedAuthCallback) {
         return;
       }
       const hasCode = url.includes("code=");

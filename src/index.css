@@ -259,6 +259,38 @@
     overscroll-behavior: contain;
   }
 
+  .native-ios-no-safe-area .pt-\[env\(safe-area-inset-top\)\] {
+    padding-top: 0 !important;
+  }
+
+  .native-ios-no-safe-area .pt-\[calc\(env\(safe-area-inset-top\)\+2rem\)\] {
+    padding-top: 2rem !important;
+  }
+
+  .native-ios-no-safe-area .pt-\[calc\(env\(safe-area-inset-top\)\+2\.5rem\)\] {
+    padding-top: 2.5rem !important;
+  }
+
+  .native-ios-no-safe-area .pt-\[calc\(env\(safe-area-inset-top\)\+3\.5rem\)\] {
+    padding-top: 3.5rem !important;
+  }
+
+  .native-ios-no-safe-area .pb-\[env\(safe-area-inset-bottom\)\] {
+    padding-bottom: 0 !important;
+  }
+
+  .native-ios-no-safe-area .pb-\[calc\(7rem\+env\(safe-area-inset-bottom\)\)\] {
+    padding-bottom: 7rem !important;
+  }
+
+  .native-ios-no-safe-area .pb-\[calc\(env\(safe-area-inset-bottom\)\+2rem\)\] {
+    padding-bottom: 2rem !important;
+  }
+
+  .native-ios-no-safe-area .bottom-\[calc\(env\(safe-area-inset-bottom\)\+64px\)\] {
+    bottom: 64px !important;
+  }
+
   /* iOS-safe dynamic viewport height */
   .h-dvh {
     height: 100dvh;

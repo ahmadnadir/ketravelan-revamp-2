@@ -1573,7 +1573,7 @@ export default function TripDetails() {
 
       {/* Organizer actions: Edit + Trip Chat */}
       {isDbTrip && isOrganizer && (
-        <div className="fixed bottom-16 left-0 right-0 z-40 bg-background/95 backdrop-blur-sm border-t border-border/50">
+        <div className="fixed bottom-above-nav left-0 right-0 z-40 bg-background/95 backdrop-blur-sm border-t border-border/50">
           <div className="container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto px-4 py-3">
             <div className="grid grid-cols-2 gap-3">
               <Button
@@ -1601,7 +1601,7 @@ export default function TripDetails() {
 
       {/* Sticky CTA Bar */}
       {isDbTrip && !isOrganizer && (
-        <div className="fixed bottom-16 left-0 right-0 z-40 bg-background/95 backdrop-blur-sm border-t border-border/50">
+        <div className="fixed bottom-above-nav left-0 right-0 z-40 bg-background/95 backdrop-blur-sm border-t border-border/50">
           <div className="container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto px-4 py-3">
             <div className="grid grid-cols-2 gap-3">
               {joinRequestStatus === 'member' ? (

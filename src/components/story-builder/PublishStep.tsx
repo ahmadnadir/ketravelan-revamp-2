@@ -347,7 +347,7 @@ export function PublishStep({
       </div>
 
       {/* Action Buttons - Fixed at bottom */}
-      <div className="fixed bottom-[70px] left-0 right-0 p-4 bg-background/95 backdrop-blur-sm border-t border-border/50">
+      <div className="fixed bottom-above-nav left-0 right-0 p-4 bg-background/95 backdrop-blur-sm border-t border-border/50">
         <div className="max-w-2xl mx-auto flex gap-3">
           <Button
             onClick={handleSaveDraft}

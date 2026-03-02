@@ -27,14 +27,50 @@ export async function initializeCapacitor() {
     // Initialize Keyboard for better form handling on iOS
     const { Keyboard } = await import("@capacitor/keyboard");
     
+    const scrollFocusedFieldIntoView = () => {
+      const activeElement = document.activeElement;
+      if (!(activeElement instanceof HTMLElement)) {
+        return;
+      }
+
+      const isTextInput = activeElement.matches(
+        "input, textarea, [contenteditable=''], [contenteditable='true'], [role='textbox']"
+      );
+
+      if (!isTextInput) {
+        return;
+      }
+
+      window.setTimeout(() => {
+        activeElement.scrollIntoView({
+          block: "center",
+          inline: "nearest",
+          behavior: "smooth",
+        });
+      }, 120);
+    };
+
     // Add keyboard event listeners for iOS scroll adjustments
     if (Capacitor.getPlatform() === "ios") {
+      document.body.classList.add("native-ios-no-safe-area");
+
       Keyboard.addListener("keyboardWillShow", () => {
         document.body.classList.add("keyboard-open");
+        scrollFocusedFieldIntoView();
+      });
+
+      Keyboard.addListener("keyboardDidShow", () => {
+        scrollFocusedFieldIntoView();
       });
 
       Keyboard.addListener("keyboardWillHide", () => {
         document.body.classList.remove("keyboard-open");
+      });
+
+      document.addEventListener("focusin", () => {
+        if (document.body.classList.contains("keyboard-open")) {
+          scrollFocusedFieldIntoView();
+        }
       });
     }
 

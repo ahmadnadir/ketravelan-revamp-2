@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable no-useless-escape */
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowLeft, Mail, Lock, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -18,31 +18,12 @@ export default function Auth() {
   const navigate = useNavigate();
   const { signInWithGoogle, signInWithEmail, signUpWithEmail, isAuthenticated, loading, profile } = useAuth();
 
-  const isProfileComplete = (profileToCheck: typeof profile) => {
+  const isProfileComplete = useCallback((profileToCheck: typeof profile) => {
     if (!profileToCheck) return false;
     if (profileToCheck.onboarding_completed) return true;
     const hasName = Boolean((profileToCheck.full_name || "").trim() || (profileToCheck.username || "").trim());
     const hasLocation = Boolean((profileToCheck.country || "").trim() || (profileToCheck.location || "").trim());
     return hasName && hasLocation;
-  };
-
-  useEffect(() => {
-    const prevBodyOverflow = document.body.style.overflow;
-    const prevBodyHeight = document.body.style.height;
-    const prevHtmlOverflow = document.documentElement.style.overflow;
-    const prevHtmlHeight = document.documentElement.style.height;
-
-    document.body.style.overflow = "hidden";
-    document.body.style.height = "100%";
-    document.documentElement.style.overflow = "hidden";
-    document.documentElement.style.height = "100%";
-
-    return () => {
-      document.body.style.overflow = prevBodyOverflow;
-      document.body.style.height = prevBodyHeight;
-      document.documentElement.style.overflow = prevHtmlOverflow;
-      document.documentElement.style.height = prevHtmlHeight;
-    };
   }, []);
 
   const [mode, setMode] = useState<"login" | "signup">(
@@ -73,7 +54,7 @@ export default function Auth() {
       }
       // If profile is undefined (still loading), don't navigate
     }
-  }, [isAuthenticated, loading, profile, navigate]);
+  }, [isAuthenticated, loading, profile, navigate, isProfileComplete]);
 
 
 

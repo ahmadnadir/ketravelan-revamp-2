@@ -607,7 +607,7 @@ export function StoryBuilder({
       </div>
 
       {/* Bottom Action Buttons */}
-      <div className="fixed bottom-[70px] left-0 right-0 z-40 p-4 bg-background/95 backdrop-blur-sm border-t border-border/50">
+      <div className="fixed bottom-above-nav left-0 right-0 z-40 p-4 bg-background/95 backdrop-blur-sm border-t border-border/50">
         <div className="flex gap-3">
           <Button
             variant="outline"

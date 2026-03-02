@@ -1,29 +1,9 @@
-import { useEffect } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
 import { ExternalLink } from "lucide-react";
 import feedbackIllustration from "@/assets/feedback-illustration.png";
 export default function Feedback() {
   const googleFormUrl = "https://forms.google.com/your-form-id"; // Replace with actual Google Form URL
-
-  useEffect(() => {
-    const prevBodyOverflow = document.body.style.overflow;
-    const prevBodyHeight = document.body.style.height;
-    const prevHtmlOverflow = document.documentElement.style.overflow;
-    const prevHtmlHeight = document.documentElement.style.height;
-
-    document.body.style.overflow = "hidden";
-    document.body.style.height = "100%";
-    document.documentElement.style.overflow = "hidden";
-    document.documentElement.style.height = "100%";
-
-    return () => {
-      document.body.style.overflow = prevBodyOverflow;
-      document.body.style.height = prevBodyHeight;
-      document.documentElement.style.overflow = prevHtmlOverflow;
-      document.documentElement.style.height = prevHtmlHeight;
-    };
-  }, []);
 
   return (
     <AppLayout hideHeader hideBottomNav>
