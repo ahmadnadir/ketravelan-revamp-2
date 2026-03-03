@@ -1,4 +1,4 @@
-import { Home, Map, FileText, Heart, MessageSquare, Settings, LogOut, Wallet } from "lucide-react";
+import { Home, Map, FileText, Heart, MessageSquare, Settings, LogOut, Wallet, BookOpen } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import {
   Sheet,
@@ -18,6 +18,7 @@ const menuItems = [
   { icon: Home, label: "Home", path: "/" },
   { icon: Map, label: "My Trips", path: "/my-trips" },
   { icon: Wallet, label: "Expenses", path: "/expenses" },
+  { icon: BookOpen, label: "My Stories", path: "/my-stories" },
   { icon: FileText, label: "Approvals & Requests", path: "/approvals" },
   { icon: FileText, label: "Draft Trips", path: "/my-trips?tab=draft" },
   { icon: Heart, label: "Favourites", path: "/favourites" },

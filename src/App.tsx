@@ -12,6 +12,7 @@ import { ScrollToTop } from "./components/layout/ScrollToTop";
 import { AuthProvider } from "./contexts/AuthContext";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { ExpenseProvider } from "./contexts/ExpenseContext";
+import { CommunityProvider } from "./contexts/CommunityContext";
 import Home from "./pages/Home";
 import Explore from "./pages/Explore";
 import MainPage from "./pages/MainPage";
@@ -29,6 +30,7 @@ import NotFound from "./pages/NotFound";
 import UserProfileView from "./pages/UserProfileView";
 import Favourites from "./pages/Favourites";
 import Approvals from "./pages/Approvals";
+import MyStories from "./pages/MyStories";
 import Auth from "./pages/Auth";
 import AuthCallback from "./pages/AuthCallback";
 import ForgotPassword from "./pages/ForgotPassword";
@@ -252,6 +254,16 @@ const App = () => (
               <Route path="/create" element={<ProtectedRoute><CreateTrip /></ProtectedRoute>} />
               <Route path="/create-story" element={<ProtectedRoute><CreateStory /></ProtectedRoute>} />
               <Route path="/my-trips" element={<ProtectedRoute><MyTrips /></ProtectedRoute>} />
+              <Route
+                path="/my-stories"
+                element={
+                  <ProtectedRoute>
+                    <CommunityProvider>
+                      <MyStories />
+                    </CommunityProvider>
+                  </ProtectedRoute>
+                }
+              />
               <Route path="/chat" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
               <Route path="/community" element={<Community />} />
               <Route path="/community/stories/:slug" element={<StoryDetail />} />

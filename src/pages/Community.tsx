@@ -31,7 +31,7 @@ function CommunityContent() {
         description="Join the Ketravelan community. Read travel stories, ask questions, and connect with fellow DIY travelers."
       />
       <CommunityHeader />
-      <div className="w-full max-w-5xl mx-auto px-3 sm:px-4 py-5 sm:py-4">
+      <div className="w-full max-w-5xl mx-auto px-0 sm:px-4 py-5 sm:py-4">
         {mode === "stories" ? <StoriesFeed /> : <DiscussionsFeed onAskQuestion={() => setAskQuestionOpen(true)} />}
       </div>
       

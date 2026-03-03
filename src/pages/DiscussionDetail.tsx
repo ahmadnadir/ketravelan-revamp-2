@@ -1,5 +1,5 @@
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, MapPin, CheckCircle2, Send, Pencil, Trash2, Share2, MoreVertical, Flag, Copy, Check, MessageCircle, Eye, ArrowUp, ArrowDown, ChevronUp, ChevronDown, Reply as ReplyIcon } from "lucide-react";
+import { ArrowLeft, MapPin, CheckCircle2, Send, Pencil, Trash2, Share2, MoreVertical, Flag, Copy, Check, MessageCircle, Eye, ArrowUp, ArrowDown, ChevronUp, ChevronDown, Reply as ReplyIcon, Heart, Bookmark } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -11,7 +11,7 @@ import { SEOHead } from "@/components/seo/SEOHead";
 import { formatDistanceToNow } from "date-fns";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { createDiscussionReply, deleteDiscussionReply, fetchDiscussionById, fetchDiscussionReplies, toggleAcceptDiscussionReply, updateDiscussionReply, incrementDiscussionViews, toggleDiscussionReplyVote } from "@/lib/community";
+import { createDiscussionReply, deleteDiscussionReply, fetchDiscussionById, fetchDiscussionReplies, toggleAcceptDiscussionReply, updateDiscussionReply, incrementDiscussionViews, toggleDiscussionReplyVote, toggleDiscussionReaction } from "@/lib/community";
 import { toast } from "@/hooks/use-toast";
 import {
   DropdownMenu,
@@ -289,7 +289,7 @@ export default function DiscussionDetail() {
       setIsLoading(true);
       try {
         const [discussionData, repliesData] = await Promise.all([
-          fetchDiscussionById(id),
+          fetchDiscussionById(id, user?.id),
           fetchDiscussionReplies(id),
         ]);
 
@@ -316,7 +316,7 @@ export default function DiscussionDetail() {
     return () => {
       isMounted = false;
     };
-  }, [id]);
+  }, [id, user?.id]);
 
   if (isLoading) {
     return (
@@ -402,7 +402,7 @@ export default function DiscussionDetail() {
         title: "Reply posted!",
         description: "Your reply has been added to the discussion."
       });
-      const updatedDiscussion = await fetchDiscussionById(id);
+      const updatedDiscussion = await fetchDiscussionById(id, user?.id);
       setDiscussion(updatedDiscussion);
     } catch (error) {
       toast({
@@ -475,6 +475,41 @@ export default function DiscussionDetail() {
 
   const isDiscussionOwner = user && discussion && discussion.author.id === user.id;
 
+  const handleDiscussionReaction = async (reactionType: "like" | "bookmark") => {
+    if (!discussion) return;
+    if (!isAuthenticated) {
+      toast({
+        title: "Sign in required",
+        description: `Please sign in to ${reactionType === "like" ? "like" : "save"} discussions.`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const previous = discussion;
+    const isLike = reactionType === "like";
+    const toggledOn = isLike ? !discussion.isLiked : !discussion.isSaved;
+
+    setDiscussion({
+      ...discussion,
+      isLiked: isLike ? toggledOn : discussion.isLiked,
+      isSaved: isLike ? discussion.isSaved : toggledOn,
+      likes: isLike ? (discussion.likes ?? 0) + (toggledOn ? 1 : -1) : discussion.likes,
+      saves: isLike ? discussion.saves : (discussion.saves ?? 0) + (toggledOn ? 1 : -1),
+    });
+
+    try {
+      await toggleDiscussionReaction(discussion.id, reactionType);
+    } catch (error) {
+      setDiscussion(previous);
+      toast({
+        title: `Failed to ${reactionType === "like" ? "update like" : "update save"}`,
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
+
   return (
     <AppLayout>
       {!discussion ? null : (
@@ -531,6 +566,26 @@ export default function DiscussionDetail() {
               <Badge variant="outline" className="px-2.5 py-1 text-xs font-medium">
                 {discussion?.topic ? discussionTopicLabels[discussion.topic] : ""}
               </Badge>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2"
+                onClick={() => handleDiscussionReaction("like")}
+              >
+                <Heart className={`h-3.5 w-3.5 ${(discussion?.isLiked ?? false) ? "fill-current text-red-500" : ""}`} />
+                <span className="ml-1 text-[11px]">{discussion?.likes ?? 0}</span>
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2"
+                onClick={() => handleDiscussionReaction("bookmark")}
+              >
+                <Bookmark className={`h-3.5 w-3.5 ${(discussion?.isSaved ?? false) ? "fill-current" : ""}`} />
+                <span className="ml-1 text-[11px]">{discussion?.saves ?? 0}</span>
+              </Button>
             </div>
           </div>
         </div>

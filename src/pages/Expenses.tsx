@@ -205,19 +205,6 @@ export default function Expenses() {
                     </div>
                   </Card>
                 </Link>
-                {/* Who Owes Who summary */}
-                {whoOwesWho[trip.id] && whoOwesWho[trip.id].length > 0 && (
-                  <Card className="p-3 mt-1 bg-muted/20">
-                    <div className="text-xs text-muted-foreground font-medium mb-1">Who owes who:</div>
-                    <ul className="text-xs">
-                      {whoOwesWho[trip.id].map((row, idx) => (
-                        <li key={idx}>
-                          <span className="font-semibold">{row.debtor_name}</span> owes <span className="font-semibold">{row.creditor_name}</span>: ${Number(row.amount).toFixed(2)}
-                        </li>
-                      ))}
-                    </ul>
-                  </Card>
-                )}
               </div>
             ))}
           </div>

@@ -52,6 +52,7 @@ type DiscussionRow = {
   location_city: string | null;
   reply_count: number | null;
   like_count: number | null;
+  bookmark_count?: number | null;
   view_count: number | null;
   created_at: string;
   author?: ProfileRow | ProfileRow[] | null;
@@ -250,7 +251,12 @@ const mapStoryRow = (row: StoryRow, reactions?: Map<string, { liked: boolean; sa
   } as Story;
 };
 
-const mapDiscussionRow = (row: DiscussionRow, isAnsweredOverride?: boolean) => {
+const mapDiscussionRow = (
+  row: DiscussionRow,
+  isAnsweredOverride?: boolean,
+  reactions?: Map<string, { liked: boolean; saved: boolean }>
+) => {
+  const discussionReactions = reactions?.get(row.id) || { liked: false, saved: false };
   const authorProfile = normalizeProfile(row.author);
   return {
   id: row.id,
@@ -266,6 +272,10 @@ const mapDiscussionRow = (row: DiscussionRow, isAnsweredOverride?: boolean) => {
   replyCount: row.reply_count ?? 0,
   isAnswered: typeof isAnsweredOverride === "boolean" ? isAnsweredOverride : row.status === "resolved",
   views: row.view_count ?? 0,
+  likes: row.like_count ?? 0,
+  saves: row.bookmark_count ?? 0,
+  isLiked: discussionReactions.liked,
+  isSaved: discussionReactions.saved,
   createdAt: new Date(row.created_at),
   } as Discussion;
 };
@@ -436,7 +446,7 @@ export async function fetchStoryById(storyId: string) {
   return mapStoryRow(data as StoryRow, new Map());
 }
 
-export async function fetchDiscussions() {
+export async function fetchDiscussions(userId?: string | null) {
   const { data, error } = await supabase
     .from("discussions")
     .select(
@@ -451,6 +461,7 @@ export async function fetchDiscussions() {
       location_city,
       reply_count,
       like_count,
+      bookmark_count,
       view_count,
       created_at,
       author:profiles!discussions_author_id_fkey(id, full_name, username, avatar_url)
@@ -478,10 +489,12 @@ export async function fetchDiscussions() {
   if (acceptedError) throw acceptedError;
   const acceptedSet = new Set((acceptedRows || []).map((row) => row.discussion_id));
 
-  return discussions.map((row) => mapDiscussionRow(row, acceptedSet.has(row.id)));
+  const reactions = await fetchDiscussionReactions(userId, discussions);
+
+  return discussions.map((row) => mapDiscussionRow(row, acceptedSet.has(row.id), reactions));
 }
 
-export async function fetchDiscussionById(id: string) {
+export async function fetchDiscussionById(id: string, userId?: string | null) {
   const { data, error } = await supabase
     .from("discussions")
     .select(
@@ -496,6 +509,7 @@ export async function fetchDiscussionById(id: string) {
       location_city,
       reply_count,
       like_count,
+      bookmark_count,
       view_count,
       created_at,
       author:profiles!discussions_author_id_fkey(id, full_name, username, avatar_url)
@@ -518,7 +532,9 @@ export async function fetchDiscussionById(id: string) {
   if (acceptedError) throw acceptedError;
   const hasAccepted = (acceptedRows || []).length > 0;
 
-  return mapDiscussionRow(data as DiscussionRow, hasAccepted);
+  const reactions = await fetchDiscussionReactions(userId, [data as DiscussionRow]);
+
+  return mapDiscussionRow(data as DiscussionRow, hasAccepted, reactions);
 }
 
 export async function fetchDiscussionReplies(discussionId: string) {
@@ -596,6 +612,31 @@ async function fetchStoryReactions(userId: string | null | undefined, stories: A
   return reactionMap;
 }
 
+async function fetchDiscussionReactions(
+  userId: string | null | undefined,
+  discussions: Array<{ id: string }>
+) {
+  if (!userId || discussions.length === 0) return new Map<string, { liked: boolean; saved: boolean }>();
+  const discussionIds = discussions.map((discussion) => discussion.id);
+  const { data, error } = await supabase
+    .from("reactions")
+    .select("content_id, reaction_type")
+    .eq("user_id", userId)
+    .eq("content_type", "discussion")
+    .in("content_id", discussionIds);
+
+  if (error) throw error;
+
+  const reactionMap = new Map<string, { liked: boolean; saved: boolean }>();
+  (data || []).forEach((row) => {
+    const current = reactionMap.get(row.content_id) || { liked: false, saved: false };
+    if (row.reaction_type === "like") current.liked = true;
+    if (row.reaction_type === "bookmark") current.saved = true;
+    reactionMap.set(row.content_id, current);
+  });
+  return reactionMap;
+}
+
 export async function toggleStoryReaction(storyId: string, reactionType: "like" | "bookmark") {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
@@ -611,6 +652,43 @@ export async function toggleStoryReaction(storyId: string, reactionType: "like" 
   if (data && !data.success) throw new Error(data.error || "Failed to toggle reaction");
 
   return { toggledOn: data?.toggledOn ?? false };
+}
+
+export async function toggleDiscussionReaction(discussionId: string, reactionType: "like" | "bookmark") {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  const { data: existingReaction, error: fetchError } = await supabase
+    .from("reactions")
+    .select("id")
+    .eq("user_id", user.id)
+    .eq("content_type", "discussion")
+    .eq("content_id", discussionId)
+    .eq("reaction_type", reactionType)
+    .maybeSingle();
+
+  if (fetchError) throw fetchError;
+
+  if (existingReaction?.id) {
+    const { error: deleteError } = await supabase
+      .from("reactions")
+      .delete()
+      .eq("id", existingReaction.id);
+    if (deleteError) throw deleteError;
+    return { toggledOn: false };
+  }
+
+  const { error: insertError } = await supabase.from("reactions").insert({
+    user_id: user.id,
+    content_type: "discussion",
+    content_id: discussionId,
+    reaction_type: reactionType,
+  });
+
+  if (insertError) throw insertError;
+  return { toggledOn: true };
 }
 
 export async function createDiscussion(input: {

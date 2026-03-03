@@ -1,15 +1,18 @@
-import { MessageCircle, MapPin } from "lucide-react";
+import { MessageCircle, MapPin, Heart, Bookmark } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Discussion, discussionTopicLabels } from "@/data/communityMockData";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { formatDistanceToNow } from "date-fns";
+import { useCommunity } from "@/contexts/CommunityContext";
 
 interface DiscussionCardProps {
   discussion: Discussion;
 }
 
 export function DiscussionCard({ discussion }: DiscussionCardProps) {
+  const { toggleDiscussionLike, toggleDiscussionSave } = useCommunity();
   const timeAgo = formatDistanceToNow(discussion.createdAt, { addSuffix: true });
 
   return (
@@ -58,6 +61,42 @@ export function DiscussionCard({ discussion }: DiscussionCardProps) {
               </span>
               <span>·</span>
               <span>{timeAgo}</span>
+            </div>
+
+            {/* Line 3: Like + Save */}
+            <div className="flex items-center gap-1 pt-1">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  toggleDiscussionLike(discussion.id);
+                }}
+              >
+                <Heart
+                  className={`h-3.5 w-3.5 ${discussion.isLiked ? "fill-current text-red-500" : ""}`}
+                />
+                <span className="ml-1 text-[11px]">{discussion.likes ?? 0}</span>
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  toggleDiscussionSave(discussion.id);
+                }}
+              >
+                <Bookmark
+                  className={`h-3.5 w-3.5 ${discussion.isSaved ? "fill-current" : ""}`}
+                />
+                <span className="ml-1 text-[11px]">{discussion.saves ?? 0}</span>
+              </Button>
             </div>
           </div>
         </div>

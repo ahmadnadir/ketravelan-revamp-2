@@ -7,7 +7,7 @@ import {
   DiscussionTopic,
 } from "@/data/communityMockData";
 import { useAuth } from "@/contexts/AuthContext";
-import { fetchDiscussions, fetchStories, toggleStoryReaction } from "@/lib/community";
+import { fetchDiscussions, fetchStories, toggleDiscussionReaction, toggleStoryReaction } from "@/lib/community";
 import { toast } from "@/hooks/use-toast";
 
 type CommunityMode = "stories" | "discussions";
@@ -35,6 +35,8 @@ interface CommunityContextType {
   setDiscussionSearchQuery: (query: string) => void;
   toggleStoryLike: (storyId: string) => void;
   toggleStorySave: (storyId: string) => void;
+  toggleDiscussionLike: (discussionId: string) => void;
+  toggleDiscussionSave: (discussionId: string) => void;
   refreshStories: () => Promise<void>;
   refreshDiscussions: () => Promise<void>;
   filteredStories: Story[];
@@ -77,7 +79,7 @@ export function CommunityProvider({ children }: { children: React.ReactNode }) {
   const refreshDiscussions = useCallback(async () => {
     setIsDiscussionsLoading(true);
     try {
-      const data = await fetchDiscussions();
+      const data = await fetchDiscussions(user?.id);
       setDiscussions(data);
     } catch (error) {
       toast({
@@ -88,7 +90,7 @@ export function CommunityProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setIsDiscussionsLoading(false);
     }
-  }, []);
+  }, [user?.id]);
 
   useEffect(() => {
     refreshStories();
@@ -193,6 +195,84 @@ export function CommunityProvider({ children }: { children: React.ReactNode }) {
     [user]
   );
 
+  const toggleDiscussionLike = useCallback(
+    async (discussionId: string) => {
+      if (!user) {
+        toast({
+          title: "Sign in required",
+          description: "Please sign in to like discussions.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      let snapshot: Discussion[] | null = null;
+      setDiscussions((prev) => {
+        snapshot = prev;
+        return prev.map((discussion) =>
+          discussion.id === discussionId
+            ? {
+                ...discussion,
+                isLiked: !discussion.isLiked,
+                likes: (discussion.likes ?? 0) + (discussion.isLiked ? -1 : 1),
+              }
+            : discussion
+        );
+      });
+
+      try {
+        await toggleDiscussionReaction(discussionId, "like");
+      } catch (error) {
+        if (snapshot) setDiscussions(snapshot);
+        toast({
+          title: "Unable to update like",
+          description: error instanceof Error ? error.message : "Please try again.",
+          variant: "destructive",
+        });
+      }
+    },
+    [user]
+  );
+
+  const toggleDiscussionSave = useCallback(
+    async (discussionId: string) => {
+      if (!user) {
+        toast({
+          title: "Sign in required",
+          description: "Please sign in to save discussions.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      let snapshot: Discussion[] | null = null;
+      setDiscussions((prev) => {
+        snapshot = prev;
+        return prev.map((discussion) =>
+          discussion.id === discussionId
+            ? {
+                ...discussion,
+                isSaved: !discussion.isSaved,
+                saves: (discussion.saves ?? 0) + (discussion.isSaved ? -1 : 1),
+              }
+            : discussion
+        );
+      });
+
+      try {
+        await toggleDiscussionReaction(discussionId, "bookmark");
+      } catch (error) {
+        if (snapshot) setDiscussions(snapshot);
+        toast({
+          title: "Unable to update save",
+          description: error instanceof Error ? error.message : "Please try again.",
+          variant: "destructive",
+        });
+      }
+    },
+    [user]
+  );
+
   const filteredStories = stories.filter((story) => {
     if (filters.storyType !== "all") {
       const storyTypes = story.storyTypes?.length ? story.storyTypes : [story.storyType];
@@ -252,6 +332,8 @@ export function CommunityProvider({ children }: { children: React.ReactNode }) {
         setDiscussionSearchQuery,
         toggleStoryLike,
         toggleStorySave,
+        toggleDiscussionLike,
+        toggleDiscussionSave,
         refreshStories,
         refreshDiscussions,
         filteredStories,
@@ -269,4 +351,8 @@ export function useCommunity() {
     throw new Error("useCommunity must be used within a CommunityProvider");
   }
   return context;
+}
+
+export function useOptionalCommunity() {
+  return useContext(CommunityContext);
 }

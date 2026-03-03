@@ -140,6 +140,10 @@ export interface Discussion {
   createdAt: Date;
   relatedStoryId?: string;
   views: number;
+  likes?: number;
+  saves?: number;
+  isLiked?: boolean;
+  isSaved?: boolean;
 }
 
 export const storyTypeLabels: Record<StoryType, string> = {
