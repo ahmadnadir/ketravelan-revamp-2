@@ -18,9 +18,9 @@ interface AppLayoutProps {
   mainClassName?: string;
 }
 
-export function AppLayout({ 
-  children, 
-  hideHeader = false, 
+export function AppLayout({
+  children,
+  hideHeader = false,
   hideBottomNav = false,
   headerContent,
   footerContent,
@@ -51,22 +51,22 @@ export function AppLayout({
         )}
 
         {/* Scrollable content - ONLY this element scrolls */}
-        <div 
-          className={`flex-1 overflow-y-auto overflow-x-hidden overscroll-contain ${showBottomNav ? 'pb-28' : 'pb-4'} ${className || ""}`}
+        <div
+          className={`flex-1 overflow-y-auto overflow-x-hidden overscroll-contain ${showBottomNav ? 'pb-[calc(10rem+env(safe-area-inset-bottom))]' : 'pb-[calc(2rem+env(safe-area-inset-bottom))]'} ${className || ""}`}
         >
           {children}
         </div>
 
         {/* Footer zone - truly anchored */}
         {footerContent && (
-          <div className="flex-none z-10 safe-bottom">
+          <div className="flex-none z-20 safe-bottom">
             {footerContent}
           </div>
         )}
 
         {/* Bottom nav - truly anchored */}
         {showBottomNav && (
-          <div className="flex-none">
+          <div className="flex-none z-10">
             <BottomNav />
           </div>
         )}
@@ -78,13 +78,13 @@ export function AppLayout({
   return (
     <div className="min-h-screen bg-background">
       {!hideHeader && (
-        <Header 
-          onNotificationsClick={() => setNotificationsOpen(true)} 
+        <Header
+          onNotificationsClick={() => setNotificationsOpen(true)}
           onMenuClick={() => setMenuOpen(true)}
         />
       )}
-      
-      <main className={`container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto px-5 sm:px-6 pt-[env(safe-area-inset-top)] ${showBottomNav ? 'pb-[calc(7rem+env(safe-area-inset-bottom))]' : 'pb-[env(safe-area-inset-bottom)]'} ${mainClassName || ""}`}>
+
+      <main className={`container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto px-5 sm:px-6 pt-[env(safe-area-inset-top)] ${showBottomNav ? 'pb-[calc(10rem+env(safe-area-inset-bottom))]' : 'pb-[env(safe-area-inset-bottom)]'} ${mainClassName || ""}`}>
         {children}
       </main>
 
@@ -92,9 +92,10 @@ export function AppLayout({
         <BottomNav />
       )}
 
-      <NotificationsSheet 
-        open={notificationsOpen} 
-        onOpenChange={setNotificationsOpen} 
+
+      <NotificationsSheet
+        open={notificationsOpen}
+        onOpenChange={setNotificationsOpen}
       />
 
       <MenuDrawer
