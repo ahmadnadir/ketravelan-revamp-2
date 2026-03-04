@@ -17,6 +17,9 @@ export async function initializeCapacitor() {
 
     // iOS: dark content over white background to match header
     if (platform === "ios") {
+      // Ensure the status bar does NOT overlay the WebView so the
+      // background color actually appears behind the system icons.
+      await StatusBar.setOverlaysWebView({ overlay: false });
       await StatusBar.setStyle({ style: Style.Dark });
       await StatusBar.setBackgroundColor({ color: "#ffffff" });
     }

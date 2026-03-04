@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
-import { Bell, MessageCircle, UserPlus, DollarSign, Calendar, Users, type LucideIcon } from "lucide-react";
+import { Bell, MessageCircle, UserPlus, DollarSign, Calendar, Users, X, type LucideIcon } from "lucide-react";
 import {
   Sheet,
   SheetContent,
   SheetHeader,
   SheetTitle,
+  SheetClose,
 } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -296,12 +297,21 @@ export function NotificationsSheet({ open, onOpenChange }: NotificationsSheetPro
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full sm:max-w-md px-4 sm:px-6 pt-[calc(env(safe-area-inset-top)+2.5rem)] h-[100dvh] flex flex-col">
-        <SheetHeader>
+      <SheetContent
+        side="right"
+        className="w-full sm:max-w-md px-4 sm:px-6 pt-[calc(env(safe-area-inset-top)+2.5rem)] h-[100dvh] flex flex-col [&>button]:hidden"
+      >
+        <SheetHeader className="flex flex-row items-center justify-between gap-2">
           <SheetTitle className="flex items-center gap-2 text-base sm:text-lg">
             <Bell className="h-4 w-4 sm:h-5 sm:w-5" />
             Notifications
           </SheetTitle>
+          <SheetClose asChild>
+            <button className="h-8 w-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors focus:outline-none">
+              <X className="h-5 w-5" />
+              <span className="sr-only">Close</span>
+            </button>
+          </SheetClose>
         </SheetHeader>
 
         <div className="mt-4 sm:mt-6 space-y-1.5 sm:space-y-2 overflow-y-auto flex-1 pb-4">

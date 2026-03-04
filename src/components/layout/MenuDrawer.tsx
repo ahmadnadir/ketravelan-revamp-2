@@ -1,10 +1,11 @@
-import { Home, Map, FileText, Heart, MessageSquare, Settings, LogOut, Wallet, BookOpen } from "lucide-react";
+import { Home, Map, FileText, Heart, MessageSquare, Settings, LogOut, Wallet, BookOpen, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import {
   Sheet,
   SheetContent,
   SheetHeader,
   SheetTitle,
+  SheetClose,
 } from "@/components/ui/sheet";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
@@ -77,8 +78,11 @@ export function MenuDrawer({ open, onOpenChange }: MenuDrawerProps) {
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full sm:max-w-md px-4 sm:px-6">
-        <SheetHeader>
+      <SheetContent
+        side="right"
+        className="w-full sm:max-w-md px-4 sm:px-6 [&>button]:hidden"
+      >
+        <SheetHeader className="flex flex-row items-center justify-between gap-3">
           <SheetTitle className="flex items-center gap-3 text-base sm:text-lg">
             <div className="h-10 w-10 rounded-full overflow-hidden bg-muted">
               <img
@@ -93,6 +97,12 @@ export function MenuDrawer({ open, onOpenChange }: MenuDrawerProps) {
             </div>
             <span>{displayName}</span>
           </SheetTitle>
+          <SheetClose asChild>
+            <button className="h-8 w-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors focus:outline-none">
+              <X className="h-5 w-5" />
+              <span className="sr-only">Close menu</span>
+            </button>
+          </SheetClose>
         </SheetHeader>
         
         <div className="mt-6 space-y-1">

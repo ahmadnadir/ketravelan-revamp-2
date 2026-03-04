@@ -242,7 +242,7 @@ Use this as a quick reference when native iOS push is not working even though to
     - Create (or reuse) an APNs key with **Apple Push Notifications service (APNs)** enabled.
     - Download the `.p8` file and note:
       - Key ID (from Apple Developer)
-      - Team ID (from Apple Developer)
+      - Team ID (from Apple Developer; you can find it in the Apple Member Center under the **Membership** tab)
       - Bundle ID used by the app → **dev.ketravelan.app**
 - Make sure the key is linked to the **same Apple account** used for the app’s provisioning profiles.
 
