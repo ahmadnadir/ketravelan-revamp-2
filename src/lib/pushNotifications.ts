@@ -15,7 +15,29 @@ function isNative() {
 }
 
 async function upsertToken(token: string) {
-  if (!activeUserId) return;
+  if (!activeUserId) {
+    console.warn("upsertToken called without activeUserId; skipping", { token });
+    return;
+  }
+
+  // Ensure we actually have an authenticated Supabase user before calling the RPC.
+  // If there is no session, auth.uid() will be null inside the database function
+  // and the insert will fail on the NOT NULL user_id constraint.
+  try {
+    const { data: userResult, error: userError } = await supabase.auth.getUser();
+    if (userError) {
+      console.warn("upsertToken: failed to get Supabase user; skipping RPC", userError);
+      return;
+    }
+    if (!userResult?.user?.id) {
+      console.warn("upsertToken: no authenticated Supabase user; skipping RPC", { token });
+      return;
+    }
+  } catch (err) {
+    console.warn("upsertToken: exception when checking Supabase user; skipping RPC", err);
+    return;
+  }
+
   const platform = Capacitor.getPlatform();
   let deviceId: string | null = null;
   try {
@@ -25,11 +47,23 @@ async function upsertToken(token: string) {
     deviceId = null;
   }
 
-  await supabase.rpc("upsert_push_token", {
+  console.info("upsertToken: calling RPC upsert_push_token", {
+    tokenPreview: token.slice(0, 12),
+    platform,
+    deviceId,
+  });
+
+  const { error } = await supabase.rpc("upsert_push_token", {
     p_token: token,
     p_platform: platform,
     p_device_id: deviceId,
   });
+
+  if (error) {
+    console.warn("upsertToken: failed to call upsert_push_token", error);
+  } else {
+    console.info("upsertToken: successfully upserted push token");
+  }
 }
 
 async function deleteStoredToken(storageKey: string) {
