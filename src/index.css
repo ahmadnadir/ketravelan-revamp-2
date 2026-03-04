@@ -375,7 +375,7 @@
 
   /* Fixed element positioned above bottom nav with safe-area support */
   .bottom-above-nav {
-    bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px));
+    bottom: calc(4rem + env(safe-area-inset-bottom, 0px));
   }
   /* Raised version for desktop floating CTAs */
   .bottom-above-nav-lg {
