@@ -9,6 +9,7 @@ import { Preferences } from "@capacitor/preferences";
 import { supabase } from "@/lib/supabase";
 import { isNativePlatform } from "@/lib/capacitor";
 import { ScrollToTop } from "./components/layout/ScrollToTop";
+import { SafeAreaLayout } from "./components/layout/SafeAreaLayout";
 import { AuthProvider } from "./contexts/AuthContext";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { ExpenseProvider } from "./contexts/ExpenseContext";
@@ -239,11 +240,12 @@ const App = () => (
         <Toaster />
         <Sonner />
         <BrowserRouter>
-          <ScrollToTop />
-          <NativeSplashOverlay />
-          <AuthDeepLinkHandler />
-          <RecoveryBootstrap />
-          <PageTransition>
+          <SafeAreaLayout>
+            <ScrollToTop />
+            <NativeSplashOverlay />
+            <AuthDeepLinkHandler />
+            <RecoveryBootstrap />
+            <PageTransition>
           <Suspense fallback={null}>
             <Routes>
               <Route path="/" element={<MainPage />} />
@@ -293,7 +295,8 @@ const App = () => (
               <Route path="*" element={<NotFound />} />
             </Routes>
           </Suspense>
-          </PageTransition> 
+          </PageTransition>
+          </SafeAreaLayout>
         </BrowserRouter>
       </TooltipProvider>
       </QueryClientProvider>

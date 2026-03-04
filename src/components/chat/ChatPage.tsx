@@ -203,7 +203,7 @@ export function ChatPage({
       } catch (err) {
         console.error('Polling messages failed:', err);
       }
-    }, 5000);
+    }, 10000);
 
     return () => clearInterval(interval);
   }, [conversationId]);

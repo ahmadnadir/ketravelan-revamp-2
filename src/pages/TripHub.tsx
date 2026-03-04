@@ -32,7 +32,7 @@ export default function TripHub() {
   const [trip, setTrip] = useState<any>(null);
   const [members, setMembers] = useState<any[]>([]);
 
-  // Load trip and conversation data
+  // Load trip, conversation and members data in parallel for faster initial load
   useEffect(() => {
     const loadData = async () => {
       if (!tripId) {
@@ -43,30 +43,35 @@ export default function TripHub() {
 
       try {
         setIsLoading(true);
-        // Fetch trip details
-        const tripData = await fetchTripDetails(tripId);
+
+        const [tripData, convData, membersRes] = await Promise.all([
+          fetchTripDetails(tripId),
+          fetchTripConversation(tripId),
+          supabase
+            .from('trip_members')
+            .select(`
+              id,
+              role,
+              is_admin,
+              user:profiles(id, username, full_name, avatar_url)
+            `)
+            .eq('trip_id', tripId)
+            .is('left_at', null),
+        ]);
+
         if (!tripData) {
           setError("Trip not found");
+          setTrip(null);
+          setConversation(null);
+          setMembers([]);
           setIsLoading(false);
           return;
         }
-        setTrip(tripData);
 
-        // Fetch conversation for this trip
-        const convData = await fetchTripConversation(tripId);
+        setTrip(tripData);
         setConversation(convData);
 
-        // Fetch trip members
-        const { data: tripMembers, error: membersError } = await supabase
-          .from('trip_members')
-          .select(`
-            id,
-            role,
-            is_admin,
-            user:profiles(id, username, full_name, avatar_url)
-          `)
-          .eq('trip_id', tripId)
-          .is('left_at', null);
+        const { data: tripMembers, error: membersError } = membersRes;
 
         if (!membersError && tripMembers) {
           const processedMembers = tripMembers.map((m: any) => ({
@@ -79,6 +84,8 @@ export default function TripHub() {
             role: m.is_admin ? 'Admin' : m.role || 'Member'
           }));
           setMembers(processedMembers);
+        } else {
+          setMembers([]);
         }
 
         setError(null);

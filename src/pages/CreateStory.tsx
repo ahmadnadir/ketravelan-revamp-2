@@ -280,7 +280,7 @@ export default function CreateStory() {
         description="Share your travel experiences with the Ketravelan community. Write about your adventures, lessons learned, and tips for fellow travelers."
       />
       
-      <AppLayout>
+      <AppLayout hideHeader={false}>
         {/* Step Sub-Header (sticky within content) */}
         <div className="sticky top-0 z-10 -mx-4 sm:-mx-6 px-4 sm:px-6 bg-background -mt-4 mb-4">
           <div className="flex items-center justify-between h-14">

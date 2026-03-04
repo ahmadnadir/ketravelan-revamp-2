@@ -16,7 +16,7 @@ const config: CapacitorConfig = {
     : undefined,
   ios: {
     contentInset: "automatic",
-    backgroundColor: "#1a1a2e",
+    backgroundColor: "#ffffff",
     preferredContentMode: "mobile",
   },
   android: {
@@ -39,7 +39,7 @@ const config: CapacitorConfig = {
     },
     StatusBar: {
       style: "dark",
-      backgroundColor: "#1a1a2e",
+      backgroundColor: "#ffffff",
     },
   },
 };

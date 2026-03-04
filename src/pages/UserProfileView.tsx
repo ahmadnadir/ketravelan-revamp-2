@@ -91,6 +91,7 @@ const UserProfilePage = () => {
   const [showAllStyles, setShowAllStyles] = useState(false);
   const [coverPhoto, setCoverPhoto] = useState<string | null>(null);
   const [showCoverImage, setShowCoverImage] = useState(false);
+  const [showAvatarImage, setShowAvatarImage] = useState(false);
 
   // Fetch profile on mount
   useEffect(() => {
@@ -222,12 +223,18 @@ const UserProfilePage = () => {
         {/* Avatar - Centered, overlapping cover */}
         <div className="container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto px-3 sm:px-4">
           <div className="flex flex-col items-center -mt-16 sm:-mt-20">
-            <Avatar className="h-24 w-24 border-4 border-background shadow-lg bg-white">
-              <AvatarImage src={avatarUrl} alt={displayName} />
-              <AvatarFallback>
-                {displayName.charAt(0)}
-              </AvatarFallback>
-            </Avatar>
+            <button
+              type="button"
+              onClick={() => setShowAvatarImage(true)}
+              className="rounded-full focus:outline-none focus:ring-2 focus:ring-primary/60"
+            >
+              <Avatar className="h-24 w-24 border-4 border-background shadow-lg bg-white">
+                <AvatarImage src={avatarUrl} alt={displayName} />
+                <AvatarFallback>
+                  {displayName.charAt(0)}
+                </AvatarFallback>
+              </Avatar>
+            </button>
           </div>
         </div>
       </div>
@@ -410,7 +417,8 @@ const UserProfilePage = () => {
         </div>
       </div>
 
-      {/* Cover Image Viewer Dialog */}      <Dialog open={showCoverImage} onOpenChange={setShowCoverImage}>
+      {/* Cover Image Viewer Dialog */}
+      <Dialog open={showCoverImage} onOpenChange={setShowCoverImage}>
         <DialogContent className="max-w-4xl w-[95vw] border-border/50 p-0 overflow-hidden">
           <DialogHeader className="p-4 pb-2">
             <DialogTitle>Cover Photo</DialogTitle>
@@ -426,6 +434,36 @@ const UserProfilePage = () => {
             ) : (
               <div className="w-full h-64 flex items-center justify-center bg-muted">
                 <p className="text-muted-foreground">No cover photo</p>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Full-screen Avatar Viewer Dialog */}
+      <Dialog open={showAvatarImage} onOpenChange={setShowAvatarImage}>
+        <DialogContent className="max-w-4xl w-[100vw] h-[100vh] sm:w-[90vw] border-border/50 p-0 overflow-hidden flex flex-col [&>button]:hidden">
+          <DialogHeader className="p-4 pb-2 border-b border-border/50 flex-none relative">
+            <DialogTitle className="text-center w-full">Profile Photo</DialogTitle>
+            <button
+              type="button"
+              onClick={() => setShowAvatarImage(false)}
+              className="h-8 w-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors absolute right-4 top-1"
+              aria-label="Close profile photo"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </DialogHeader>
+          <div className="flex-1 bg-black flex items-center justify-center">
+            {avatarUrl ? (
+              <img
+                src={avatarUrl}
+                alt={displayName}
+                className="max-w-full max-h-[85vh] object-contain"
+              />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center">
+                <p className="text-muted-foreground">No profile photo</p>
               </div>
             )}
           </div>

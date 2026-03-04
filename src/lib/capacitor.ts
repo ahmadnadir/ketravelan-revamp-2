@@ -13,10 +13,16 @@ export async function initializeCapacitor() {
   try {
     // Initialize Status Bar
     const { StatusBar, Style } = await import("@capacitor/status-bar");
-    await StatusBar.setStyle({ style: Style.Dark });
-    
-    // On Android, set the background color
-    if (Capacitor.getPlatform() === "android") {
+    const platform = Capacitor.getPlatform();
+
+    // iOS: dark content over white background to match header
+    if (platform === "ios") {
+      await StatusBar.setStyle({ style: Style.Dark });
+      await StatusBar.setBackgroundColor({ color: "#ffffff" });
+    }
+
+    // Android: keep dark background to blend with app shell
+    if (platform === "android") {
       await StatusBar.setBackgroundColor({ color: "#1a1a2e" });
     }
 

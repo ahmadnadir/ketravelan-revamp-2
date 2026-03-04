@@ -172,6 +172,36 @@
 }
 
 @layer utilities {
+  /* Global safe-area-aware layout wrapper */
+  .safe-area-layout {
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    min-height: 100vh;
+    background-color: #ffffff;
+  }
+
+  .safe-area-layout::before,
+  .safe-area-layout::after {
+    content: "";
+    position: fixed;
+    left: 0;
+    right: 0;
+    z-index: 0;
+    pointer-events: none;
+  }
+
+  .safe-area-layout::before {
+    top: 0;
+    height: env(safe-area-inset-top, 0px);
+    background-color: #ffffff; /* matches header background */
+  }
+
+  .safe-area-layout::after {
+    bottom: 0;
+    height: env(safe-area-inset-bottom, 0px);
+    background-color: #ffffff; /* matches bottom nav container background */
+  }
+
   /* Safe area padding for mobile - all sides */
   .safe-bottom {
     padding-bottom: env(safe-area-inset-bottom, 0px);
@@ -228,6 +258,22 @@
   }
   .scrollbar-hide::-webkit-scrollbar {
     display: none;
+  }
+
+  /* iOS native shell: lock viewport, scroll only main content so header and bottom nav stay fixed */
+  body.native-ios-no-safe-area .app-shell {
+    position: fixed;
+    inset: 0;
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  body.native-ios-no-safe-area .app-shell main {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
 
   /* Glass effect for overlays */

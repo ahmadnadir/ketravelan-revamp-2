@@ -10,8 +10,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { toast } from "sonner";
 
 const getDefaultAvatar = (userId: string) => {
-  const timestamp = Date.now();
-  return `https://api.dicebear.com/7.x/notionists/svg?seed=${userId}&t=${timestamp}`;
+  return `https://api.dicebear.com/7.x/notionists/svg?seed=${userId}`;
 };
 
 export default function DirectChat() {

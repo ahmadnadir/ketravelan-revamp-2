@@ -18,7 +18,7 @@ export function Header({ onNotificationsClick, onMenuClick }: HeaderProps) {
   });
 
   return (
-    <header className="sticky top-0 z-50 glass border-b border-border/50 pt-[env(safe-area-inset-top)]">
+    <header className="sticky top-0 z-50 glass border-b border-border/50">
       <div className="container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto flex h-20 sm:h-18 items-center justify-between px-6 sm:px-6">
         {/* Logo */}
         <Link to="/" className="flex items-center gap-2">

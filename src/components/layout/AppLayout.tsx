@@ -16,6 +16,7 @@ interface AppLayoutProps {
   focusedFlow?: boolean;
   className?: string;
   mainClassName?: string;
+  fullWidth?: boolean;
 }
 
 export function AppLayout({
@@ -27,7 +28,8 @@ export function AppLayout({
   showBottomNav: showBottomNavProp,
   focusedFlow = false,
   className,
-  mainClassName
+  mainClassName,
+  fullWidth = false,
 }: AppLayoutProps) {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -76,7 +78,7 @@ export function AppLayout({
 
   // Standard layout
   return (
-    <div className="min-h-screen bg-background">
+    <div className="app-shell min-h-screen bg-background">
       {!hideHeader && (
         <Header
           onNotificationsClick={() => setNotificationsOpen(true)}
@@ -84,7 +86,17 @@ export function AppLayout({
         />
       )}
 
-      <main className={`container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto px-5 sm:px-6 pt-[env(safe-area-inset-top)] ${showBottomNav ? 'pb-[calc(10rem+env(safe-area-inset-bottom))]' : 'pb-[env(safe-area-inset-bottom)]'} ${mainClassName || ""}`}>
+      <main
+        className={`${
+          fullWidth
+            ? "w-full"
+            : "container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto px-5 sm:px-6"
+        } ${
+          showBottomNav
+            ? "pb-24"
+            : "pb-4"
+        } ${mainClassName || ""}`}
+      >
         {children}
       </main>
 

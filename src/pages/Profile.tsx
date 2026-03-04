@@ -12,7 +12,7 @@ import {
   Twitter,
   Ghost,
   AtSign,
-  Settings,
+  X,
   Loader2,
   AlertCircle,
   Link2,
@@ -41,6 +41,7 @@ import { uploadImageFromDataUrl } from "@/lib/imageStorage";
 import { getCurrencyInfo, type CurrencyCode } from "@/lib/currencyUtils";
 import { cn } from "@/lib/utils";
 import { createDirectConversation } from "@/lib/conversations";
+import { ImageCropModal } from "@/components/profile/ImageCropModal";
 
 
 // Helper to map stored travel style id/label to display label + emoji for consistent rendering
@@ -105,8 +106,10 @@ export default function Profile() {
   const { toast } = useToast();
   const [showAllStyles, setShowAllStyles] = useState(false);
   const [uploadingCover, setUploadingCover] = useState(false);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [showCoverImage, setShowCoverImage] = useState(false);
   const coverInputRef = useRef<HTMLInputElement>(null);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
   
   // State for viewing another user's profile
   const [viewedProfile, setViewedProfile] = useState<any>(null);
@@ -116,6 +119,10 @@ export default function Profile() {
   const isOwnProfile = !userId || userId === user?.id;
   const profile = isOwnProfile ? currentUserProfile : viewedProfile;
   const [coverPhoto, setCoverPhoto] = useState<string | null>(profile?.cover_image || null);
+  const [avatarModalOpen, setAvatarModalOpen] = useState(false);
+  const [avatarViewOpen, setAvatarViewOpen] = useState(false);
+  const [avatarCropOpen, setAvatarCropOpen] = useState(false);
+  const [avatarImageToCrop, setAvatarImageToCrop] = useState<string>("");
   
   // Fetch other user's profile if viewing someone else's profile
   useEffect(() => {
@@ -229,6 +236,40 @@ export default function Profile() {
     e.target.value = "";
   };
 
+  const handleAvatarFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user) return;
+
+    if (!file.type.startsWith("image/")) {
+      toast({
+        title: "Invalid file",
+        description: "Please select an image file.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      toast({
+        title: "File too large",
+        description: "Please select an image under 5MB.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const dataUrl = event.target?.result as string;
+      if (!dataUrl) return;
+      setAvatarImageToCrop(dataUrl);
+      setAvatarCropOpen(true);
+    };
+
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  };
+
   const handleLogout = async () => {
     try {
       await signOut();
@@ -243,6 +284,33 @@ export default function Profile() {
         description: error instanceof Error ? error.message : "Failed to log out",
         variant: "destructive",
       });
+    }
+  };
+
+  const handleAvatarCropComplete = async (croppedImage: string) => {
+    if (!user) return;
+    try {
+      setUploadingAvatar(true);
+      const publicUrl = await uploadImageFromDataUrl(croppedImage, {
+        bucket: (import.meta as unknown as { env?: { VITE_PROFILE_AVATARS_BUCKET?: string } }).env?.VITE_PROFILE_AVATARS_BUCKET || "profile-avatars",
+        folder: `profiles/${user.id}`,
+        filename: `avatar-${Date.now()}`,
+      });
+
+      const { error } = await supabase
+        .from("profiles")
+        .update({ avatar_url: publicUrl, updated_at: new Date().toISOString() })
+        .eq("id", user.id);
+
+      if (error) throw error;
+
+      await refreshProfile();
+      toast({ title: "Photo updated", description: "Your profile photo has been saved." });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to update profile photo.";
+      toast({ title: "Update failed", description: message, variant: "destructive" });
+    } finally {
+      setUploadingAvatar(false);
     }
   };
 
@@ -266,28 +334,11 @@ export default function Profile() {
     }
   };
 
-  const headerContent = (
-    <header className="glass border-b border-border/50 w-full pt-[env(safe-area-inset-top)]">
-      <div className="w-full px-3 sm:px-4">
-        <div className="flex items-center justify-between h-20 sm:h-18">
-          <h1 className="font-semibold text-foreground">Profile</h1>
-          <Link
-            to="/settings"
-            className="p-2 -mr-2 text-muted-foreground hover:text-foreground transition-colors"
-            aria-label="Settings"
-          >
-            <Settings className="h-5 w-5" />
-          </Link>
-        </div>
-      </div>
-    </header>
-  );
-
   // No footer content - buttons will be at the bottom of scrollable area instead
 
   if (loading || loadingProfile) {
     return (
-      <AppLayout headerContent={headerContent} showBottomNav={true} focusedFlow={true}>
+      <AppLayout showBottomNav={true} fullWidth mainClassName="px-0 sm:px-4">
         <div className="flex items-center justify-center min-h-[60vh]">
           <div className="text-center space-y-4">
             <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary" />
@@ -300,7 +351,7 @@ export default function Profile() {
 
   if (!user) {
     return (
-      <AppLayout headerContent={headerContent} showBottomNav={true} focusedFlow={true}>
+      <AppLayout showBottomNav={true} fullWidth mainClassName="px-0 sm:px-4">
         <div className="flex items-center justify-center min-h-[60vh]">
           <Card className="p-6 max-w-md w-full text-center">
             <AlertCircle className="h-12 w-12 mx-auto text-destructive mb-4" />
@@ -323,13 +374,21 @@ export default function Profile() {
     const avatarUrl = `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.id}`;
     
     return (
-      <AppLayout headerContent={headerContent} showBottomNav={true} focusedFlow={true}>
+      <AppLayout showBottomNav={true} fullWidth mainClassName="px-0 sm:px-4">
         {/* Hidden file input for cover photo */}
         <input
           ref={coverInputRef}
           type="file"
           accept="image/*"
           onChange={handleCoverPhotoChange}
+          className="hidden"
+        />
+        {/* Hidden file input for avatar photo */}
+        <input
+          ref={avatarInputRef}
+          type="file"
+          accept="image/*"
+          onChange={handleAvatarFileSelect}
           className="hidden"
         />
 
@@ -340,19 +399,25 @@ export default function Profile() {
           </div>
 
           {/* Avatar - Centered, overlapping cover */}
-          <div className="container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto px-3 sm:px-4">
+          <div className="max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto px-4">
             <div className="flex flex-col items-center -mt-12">
-              <Avatar className="h-24 w-24 border-4 border-background shadow-lg">
-                <AvatarImage src={avatarUrl} alt={displayName} />
-                <AvatarFallback>{displayName.charAt(0)}</AvatarFallback>
-              </Avatar>
+              <button
+                type="button"
+                onClick={() => setAvatarModalOpen(true)}
+                className="rounded-full focus:outline-none focus:ring-2 focus:ring-primary/60"
+              >
+                <Avatar className="h-24 w-24 border-4 border-background shadow-lg">
+                  <AvatarImage src={avatarUrl} alt={displayName} />
+                  <AvatarFallback>{displayName.charAt(0)}</AvatarFallback>
+                </Avatar>
+              </button>
             </div>
           </div>
         </div>
 
         {/* Main Content */}
         <div className="pt-3 pb-6">
-          <div className="container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto px-3 sm:px-4 space-y-4">
+          <div className="max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto px-4 space-y-4">
             {/* Profile Header - Identity */}
             <div className="flex flex-col items-center text-center space-y-1">
               <h2 className="text-xl font-bold text-foreground">{displayName}</h2>
@@ -458,13 +523,21 @@ export default function Profile() {
   const currencyInfo = homeCurrency ? getCurrencyInfo(homeCurrency) : undefined;
 
   return (
-    <AppLayout headerContent={headerContent} showBottomNav={true} focusedFlow={true}>
+    <AppLayout showBottomNav={true} fullWidth mainClassName="px-0 sm:px-4">
       {/* Hidden file input for cover photo */}
       <input
         ref={coverInputRef}
         type="file"
         accept="image/*"
         onChange={handleCoverPhotoChange}
+        className="hidden"
+      />
+      {/* Hidden file input for avatar photo */}
+      <input
+        ref={avatarInputRef}
+        type="file"
+        accept="image/*"
+        onChange={handleAvatarFileSelect}
         className="hidden"
       />
 
@@ -497,19 +570,26 @@ export default function Profile() {
         )}
 
         {/* Avatar - Centered, overlapping cover */}
-        <div className="container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto px-3 sm:px-4">
+        <div className="max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto px-4">
           <div className="flex flex-col items-center -mt-12">
-            <Avatar className="h-24 w-24 border-4 border-background shadow-lg">
-              <AvatarImage src={avatarUrl} alt={displayName} />
-              <AvatarFallback>{displayName.charAt(0)}</AvatarFallback>
-            </Avatar>
+            <button
+              type="button"
+              onClick={() => setAvatarModalOpen(true)}
+              disabled={!isOwnProfile}
+              className="rounded-full focus:outline-none focus:ring-2 focus:ring-primary/60 disabled:opacity-80 disabled:cursor-default"
+            >
+              <Avatar className="h-24 w-24 border-4 border-background shadow-lg">
+                <AvatarImage src={avatarUrl} alt={displayName} />
+                <AvatarFallback>{displayName.charAt(0)}</AvatarFallback>
+              </Avatar>
+            </button>
           </div>
         </div>
       </div>
 
       {/* Main Content */}
       <div className="pt-3 pb-6">
-        <div className="container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto px-3 sm:px-4 space-y-4">
+        <div className="max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto px-4 space-y-4">
           {/* Profile Header - Identity */}
           <div className="flex flex-col items-center text-center space-y-1">
             <div className="flex items-center justify-center gap-1 sm:gap-2">
@@ -771,6 +851,79 @@ export default function Profile() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Avatar options modal: view or change */}
+      <Dialog open={avatarModalOpen} onOpenChange={setAvatarModalOpen}>
+        <DialogContent className="max-w-sm w-[90vw] border-border/50 p-4 flex flex-col gap-3">
+          <DialogHeader className="items-center">
+            <DialogTitle className="text-base">Profile Photo</DialogTitle>
+          </DialogHeader>
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full rounded-xl"
+            onClick={() => {
+              setAvatarModalOpen(false);
+              setAvatarViewOpen(true);
+            }}
+          >
+            View Photo
+          </Button>
+          {isOwnProfile && (
+            <Button
+              type="button"
+              className="w-full rounded-xl"
+              onClick={() => {
+                if (!uploadingAvatar) {
+                  avatarInputRef.current?.click();
+                }
+                setAvatarModalOpen(false);
+              }}
+              disabled={uploadingAvatar}
+            >
+              {uploadingAvatar ? "Uploading..." : "Change Photo"}
+            </Button>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Full-screen avatar viewer */}
+      <Dialog open={avatarViewOpen} onOpenChange={setAvatarViewOpen}>
+        <DialogContent className="max-w-4xl w-[100vw] h-[100vh] sm:w-[90vw] border-border/50 p-0 overflow-hidden flex flex-col [&>button]:hidden">
+          <DialogHeader className="p-4 pb-2 border-b border-border/50 flex-none relative">
+            <DialogTitle className="text-center w-full">Profile Photo</DialogTitle>
+            <button
+              type="button"
+              onClick={() => setAvatarViewOpen(false)}
+              className="h-8 w-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors absolute right-4 top-1"
+              aria-label="Close profile photo"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </DialogHeader>
+          <div className="flex-1 bg-black flex items-center justify-center">
+            {avatarUrl ? (
+              <img
+                src={avatarUrl}
+                alt={displayName}
+                className="max-w-full max-h-[85vh] object-contain"
+              />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center">
+                <p className="text-muted-foreground">No profile photo</p>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Avatar cropper modal */}
+      <ImageCropModal
+        open={avatarCropOpen}
+        onOpenChange={setAvatarCropOpen}
+        imageSrc={avatarImageToCrop}
+        onCropComplete={handleAvatarCropComplete}
+      />
     </AppLayout>
   );
 }

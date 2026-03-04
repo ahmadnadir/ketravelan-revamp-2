@@ -144,7 +144,7 @@ export async function createTripConversation(tripId: string) {
   return await fetchTripConversation(tripId);
 }
 
-export async function fetchConversationMessages(conversationId: string, limit = 100) {
+export async function fetchConversationMessages(conversationId: string, limit = 50) {
   const { data, error } = await supabase
     .from('messages')
     .select(`

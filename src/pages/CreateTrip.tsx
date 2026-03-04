@@ -467,166 +467,69 @@ export default function CreateTrip() {
 
   const { essentials, optionalCount } = getCompletionStats();
 
-  // Header content with step indicator
-  const headerContent = (
-    <div className="bg-background border-b border-border/50 pt-[env(safe-area-inset-top)]">
-      <div className="container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto px-3 sm:px-4">
-        {/* Top navigation row */}
-        <div className="flex items-center justify-between h-20 sm:h-18">
-          <h1 className="text-xl sm:text-2xl font-bold text-foreground">
-            {editTripId ? 'Edit Trip' : 'Create a Trip'}
-          </h1>
-          {lastSaved && (
-            <span className="text-xs text-muted-foreground">
-              Draft saved
-            </span>
-          )}
-        </div>
-
-        {/* Progress bar and steps - outside main height */}
-        <div className="px-0 pb-4">
-          <div className="relative h-1 bg-secondary rounded-full overflow-hidden mb-5">
-            <div 
-              className="absolute inset-y-0 left-0 bg-primary rounded-full transition-all duration-500 ease-out"
-              style={{ width: `${((currentStep - 1) / (steps.length - 1)) * 100}%` }}
-            />
-          </div>
-
-        {/* Progress steps */}
-        <div className="flex items-center justify-between">
-          {steps.map((step, index) => (
-            <div key={step.id} className="flex flex-col items-center gap-1.5">
-              <button
-                onClick={() => step.id < currentStep && setCurrentStep(step.id)}
-                disabled={step.id > currentStep}
-                className={cn(
-                  "h-7 w-7 sm:h-8 sm:w-8 rounded-full flex items-center justify-center text-xs sm:text-sm font-medium transition-all duration-300",
-                  currentStep >= step.id
-                    ? "bg-primary text-primary-foreground scale-100"
-                    : "bg-secondary text-muted-foreground scale-90",
-                  step.id < currentStep && "cursor-pointer hover:bg-primary/80",
-                  currentStep === step.id && "ring-2 ring-primary/30 ring-offset-2 ring-offset-background"
-                )}
-              >
-                {currentStep > step.id ? (
-                  <Check className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                ) : (
-                  step.id
-                )}
-              </button>
-              <span className={cn(
-                "text-[10px] sm:text-xs font-medium transition-colors duration-300",
-                currentStep >= step.id ? "text-primary" : "text-muted-foreground"
-              )}>
-                {step.title}
-              </span>
-            </div>
-          ))}
-        </div>
-        </div>
-      </div>
-    </div>
-  );
-
-  // Footer content with CTA buttons - positioned above bottom nav with proper clearance
-  const footerContent = (
-    <div className="bg-background/95 backdrop-blur-sm border-t border-border/50">
-      <div className="container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto px-4 py-3">
-        <div className="grid grid-cols-2 gap-3">
-          {publishedTripId ? (
-            // Post-publish buttons
-            <>
-              <Button
-                size="lg"
-                variant="outline"
-                onClick={() => navigate(`/trip/${publishedTripId}`)}
-                className="w-full rounded-xl text-sm sm:text-base gap-2"
-              >
-                View Trip
-              </Button>
-                <Button
-                  size="lg" 
-                  onClick={() => setShowShareModal(true)}
-                  className="w-full rounded-xl text-sm sm:text-base gap-2"
-                >
-                  <Share2 className="h-4 w-4" />
-                  Share
-                </Button>
-              </>
-            ) : (
-              // Pre-publish buttons
-              <>
-                <Button
-                  variant="outline"
-                  size="lg"
-                  onClick={currentStep === 1 ? () => setShowExitModal(true) : prevStep}
-                  className="w-full rounded-xl text-sm sm:text-base gap-2"
-                >
-                <ChevronLeft className="h-4 w-4" />
-                  Back
-                </Button>
-
-                {currentStep < 4 ? (
-                  <Button
-                    size="lg"
-                    onClick={nextStep}
-                    disabled={(currentStep === 1 && !draft.visibility) || (currentStep === 2 && !canProceedStep2())}
-                    className="w-full rounded-xl text-sm sm:text-base gap-2"
-                  >
-                    Continue
-                    <ChevronRight className="h-4 w-4" />
-                  </Button>
-                ) : (
-                <Button
-                  size="lg"
-                  onClick={handlePublish}
-                  disabled={isPublishing}
-                  className="w-full rounded-xl text-sm sm:text-base gap-2"
-                >
-                  {isPublishing ? (
-                    <>
-                      <span className="animate-spin h-4 w-4 border-2 border-white/40 border-t-white rounded-full" />
-                      {editTripId && tripStatus === 'draft' ? 'Publishing…' : editTripId ? 'Updating…' : 'Publishing…'}
-                    </>
-                  ) : (
-                    <>
-                      {editTripId && tripStatus === 'draft' ? (
-                        <>
-                          <Send className="h-4 w-4" />
-                          Publish Trip
-                        </>
-                      ) : editTripId ? (
-                        <>
-                          <Sparkles className="h-4 w-4" />
-                          Update Trip
-                        </>
-                      ) : (
-                        <>
-                          <Send className="h-4 w-4" />
-                          Publish
-                        </>
-                      )}
-                    </>
-                  )}
-                </Button>
-                )}
-              </>
-            )}
-          </div>
-      </div>
-    </div>
-  );
-
   return (
     <AppLayout
-      headerContent={headerContent}
-      footerContent={footerContent}
-      showBottomNav={false}
-      focusedFlow={true}
-      className="px-4 sm:px-6"
+      hideHeader={false}
+      showBottomNav={true}
+      mainClassName="px-4 sm:px-6 pb-28"
     >
       <div ref={topRef} />
       <div className="container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto py-4 sm:py-6">
+        {/* Page title + step progress under global header */}
+        <div className="border-b border-border/50 pb-4 mb-4">
+          <div className="flex items-center justify-between h-16 sm:h-18">
+            <h1 className="text-xl sm:text-2xl font-bold text-foreground">
+              {editTripId ? "Edit Trip" : "Create a Trip"}
+            </h1>
+            {lastSaved && (
+              <span className="text-xs text-muted-foreground">
+                Draft saved
+              </span>
+            )}
+          </div>
+
+          <div className="mt-2">
+            <div className="relative h-1 bg-secondary rounded-full overflow-hidden mb-4">
+              <div
+                className="absolute inset-y-0 left-0 bg-primary rounded-full transition-all duration-500 ease-out"
+                style={{ width: `${((currentStep - 1) / (steps.length - 1)) * 100}%` }}
+              />
+            </div>
+
+            <div className="flex items-center justify-between">
+              {steps.map((step, index) => (
+                <div key={step.id} className="flex flex-col items-center gap-1.5">
+                  <button
+                    onClick={() => step.id < currentStep && setCurrentStep(step.id)}
+                    disabled={step.id > currentStep}
+                    className={cn(
+                      "h-7 w-7 sm:h-8 sm:w-8 rounded-full flex items-center justify-center text-xs sm:text-sm font-medium transition-all duration-300",
+                      currentStep >= step.id
+                        ? "bg-primary text-primary-foreground scale-100"
+                        : "bg-secondary text-muted-foreground scale-90",
+                      step.id < currentStep && "cursor-pointer hover:bg-primary/80",
+                      currentStep === step.id && "ring-2 ring-primary/30 ring-offset-2 ring-offset-background"
+                    )}
+                  >
+                    {currentStep > step.id ? (
+                      <Check className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                    ) : (
+                      step.id
+                    )}
+                  </button>
+                  <span
+                    className={cn(
+                      "text-[10px] sm:text-xs font-medium transition-colors duration-300",
+                      currentStep >= step.id ? "text-primary" : "text-muted-foreground"
+                    )}
+                  >
+                    {step.title}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
         {/* Step 1: Visibility */}
         {currentStep === 1 && (
           <div className="space-y-4">
@@ -1246,6 +1149,98 @@ export default function CreateTrip() {
         )}
       </div>
 
+      {/* Sticky bottom action bar for Create Trip - sits above bottom nav */}
+      <div className="fixed inset-x-0 bottom-16 sm:bottom-20 z-30 bg-background/95 backdrop-blur-sm border-t border-border/50">
+        <div className="container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto px-4 pt-3 pb-3">
+          <div className="grid grid-cols-2 gap-3">
+            {publishedTripId ? (
+              <>
+                <Button
+                  size="lg"
+                  variant="outline"
+                  onClick={() => navigate(`/trip/${publishedTripId}`)}
+                  className="w-full rounded-xl text-sm sm:text-base gap-2"
+                >
+                  View Trip
+                </Button>
+                <Button
+                  size="lg"
+                  onClick={() => setShowShareModal(true)}
+                  className="w-full rounded-xl text-sm sm:text-base gap-2"
+                >
+                  <Share2 className="h-4 w-4" />
+                  Share
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button
+                  variant="outline"
+                  size="lg"
+                  onClick={currentStep === 1 ? () => setShowExitModal(true) : prevStep}
+                  className="w-full rounded-xl text-sm sm:text-base gap-2"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  Back
+                </Button>
+
+                {currentStep < 4 ? (
+                  <Button
+                    size="lg"
+                    onClick={nextStep}
+                    disabled={
+                      (currentStep === 1 && !draft.visibility) ||
+                      (currentStep === 2 && !canProceedStep2())
+                    }
+                    className="w-full rounded-xl text-sm sm:text-base gap-2"
+                  >
+                    Continue
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                ) : (
+                  <Button
+                    size="lg"
+                    onClick={handlePublish}
+                    disabled={isPublishing}
+                    className="w-full rounded-xl text-sm sm:text-base gap-2"
+                  >
+                    {isPublishing ? (
+                      <>
+                        <span className="animate-spin h-4 w-4 border-2 border-white/40 border-t-white rounded-full" />
+                        {editTripId && tripStatus === "draft"
+                          ? "Publishing…"
+                          : editTripId
+                          ? "Updating…"
+                          : "Publishing…"}
+                      </>
+                    ) : (
+                      <>
+                        {editTripId && tripStatus === "draft" ? (
+                          <>
+                            <Send className="h-4 w-4" />
+                            Publish Trip
+                          </>
+                        ) : editTripId ? (
+                          <>
+                            <Sparkles className="h-4 w-4" />
+                            Update Trip
+                          </>
+                        ) : (
+                          <>
+                            <Send className="h-4 w-4" />
+                            Publish
+                          </>
+                        )}
+                      </>
+                    )}
+                  </Button>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+
       {/* Share Modal */}
       <Dialog open={showShareModal} onOpenChange={setShowShareModal}>
         <DialogContent className="max-w-md w-[calc(100%-2rem)] sm:w-full rounded-2xl p-0 overflow-hidden [&>button]:hidden">
@@ -1333,6 +1328,15 @@ export default function CreateTrip() {
               onClick={async () => {
                 // Save as Draft: persist to backend if not already
                 try {
+                  if (!draft.title.trim()) {
+                    toast({
+                      title: 'Trip title required',
+                      description: 'Please enter a trip title before saving as a draft.',
+                      variant: 'destructive',
+                    });
+                    return;
+                  }
+
                   if (!draftId) {
                     // Create new draft
                     await createTrip(convertDraftToTripData(draft, 'draft'));
