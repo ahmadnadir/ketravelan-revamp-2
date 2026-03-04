@@ -162,6 +162,21 @@ export async function syncPushNotifications(userId: string, enabled: boolean) {
     return;
   }
 
+  // Native (iOS / Android) flow
+
+  // If we already have a stored native token for this device, make sure it is
+  // associated with the current user in the database before attempting a
+  // fresh registration. This helps recover from cases where the RPC failed
+  // previously or the user changed accounts but the OS token stayed the same.
+  try {
+    const existingToken = localStorage.getItem(TOKEN_STORAGE_KEY);
+    if (existingToken) {
+      await upsertToken(existingToken);
+    }
+  } catch (err) {
+    console.warn("Failed to upsert existing push token", err);
+  }
+
   if (registrationInFlight) return;
   registrationInFlight = true;
 
