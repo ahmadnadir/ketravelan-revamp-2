@@ -2,7 +2,7 @@ import { useParams, Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { ChatPage } from "@/components/chat/ChatPage";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { deleteDirectConversation, fetchConversationById } from "@/lib/conversations";
 import { supabase } from "@/lib/supabase";
 import { UserQuickActionsModal } from "@/components/chat/UserQuickActionsModal";
@@ -23,6 +23,7 @@ export default function DirectChat() {
   const [userModalOpen, setUserModalOpen] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   // Fetch conversation and other user info
   useEffect(() => {
@@ -67,6 +68,7 @@ export default function DirectChat() {
     messagesContent,
     footerContent,
     messagesEndRef,
+    scrollToBottomButton,
   } = ChatPage({
     conversationId: conversationId || '',
     headerTitle: String(otherUser?.full_name || otherUser?.username || 'Chat'),
@@ -80,6 +82,7 @@ export default function DirectChat() {
     isLoadingHeader: chatIsLoading,
     currentUserId: user?.id,
     showSenderInfo: false,
+    scrollContainerRef,
   });
 
   const handleDeleteChat = async () => {
@@ -104,10 +107,14 @@ export default function DirectChat() {
       footerContent={footerContent}
       showBottomNav={false}
       focusedFlow={true}
+      scrollContainerRef={scrollContainerRef}
     >
-      <div className="container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto px-3 sm:px-4 py-4 sm:py-6 space-y-4">
-        {messagesContent}
-        <div ref={messagesEndRef} />
+      <div className="relative">
+        <div className="container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto px-3 sm:px-4 pt-4 sm:pt-6 pb-2 space-y-4">
+          {messagesContent}
+          <div ref={messagesEndRef} />
+        </div>
+        {scrollToBottomButton}
       </div>
       <UserQuickActionsModal
         open={userModalOpen}

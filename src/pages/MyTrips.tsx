@@ -156,7 +156,7 @@ export default function MyTrips() {
 
   if (isLoading) {
     return (
-      <AppLayout>
+      <AppLayout wideLayout>
         <div className="py-6 space-y-6">
           <Skeleton className="h-8 w-32" />
           <Skeleton className="h-10 w-full rounded-lg" />
@@ -167,22 +167,22 @@ export default function MyTrips() {
   }
 
   return (
-    <AppLayout>
+    <AppLayout wideLayout>
       <div className="py-6 space-y-6">
         <h1 className="text-2xl font-bold text-foreground">My Trips</h1>
 
         <SegmentedControl
           options={[
-            { label: "Upcoming", value: "upcoming", count: upcomingTrips.length },
-            { label: "Previous", value: "previous", count: previousTrips.length },
-            { label: "Draft", value: "draft", count: draftTrips.length },
+            { label: "Upcoming", value: "upcoming" },
+            { label: "Previous", value: "previous" },
+            { label: "Draft", value: "draft" },
           ]}
           value={tab}
           onChange={handleTabChange}
         />
 
         {loading ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4">
             {Array.from({ length: 6 }).map((_, i) => (
               <TripCardLoading key={i} />
             ))}
@@ -193,7 +193,7 @@ export default function MyTrips() {
             <p className="text-muted-foreground">{getEmptyMessage()}</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4">
             {displayTrips.map((trip) => {
               const isOwner = trip.creator?.id && user?.id && trip.creator.id === user.id;
               return (

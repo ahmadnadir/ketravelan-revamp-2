@@ -1,6 +1,8 @@
-import { ReactNode, useState } from "react";
+import { ReactNode, useRef, useState, RefObject } from "react";
+import { Link } from "react-router-dom";
 import { Header } from "./Header";
 import { BottomNav } from "./BottomNav";
+import { DesktopSidebar } from "./DesktopSidebar";
 import { MenuDrawer } from "./MenuDrawer";
 import { NotificationsSheet } from "@/components/notifications/NotificationsSheet";
 import { useAuth } from "@/contexts/AuthContext";
@@ -11,12 +13,15 @@ interface AppLayoutProps {
   hideHeader?: boolean;
   hideBottomNav?: boolean;
   headerContent?: ReactNode;
+  subHeaderContent?: ReactNode;
   footerContent?: ReactNode;
   showBottomNav?: boolean;
   focusedFlow?: boolean;
   className?: string;
   mainClassName?: string;
   fullWidth?: boolean;
+  wideLayout?: boolean;
+  scrollContainerRef?: RefObject<HTMLDivElement | null>;
 }
 
 export function AppLayout({
@@ -24,12 +29,15 @@ export function AppLayout({
   hideHeader = false,
   hideBottomNav = false,
   headerContent,
+  subHeaderContent,
   footerContent,
   showBottomNav: showBottomNavProp,
   focusedFlow = false,
   className,
   mainClassName,
   fullWidth = false,
+  wideLayout = false,
+  scrollContainerRef,
 }: AppLayoutProps) {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -44,32 +52,57 @@ export function AppLayout({
   // Focused flow layout for single scroll authority
   if (focusedFlow) {
     return (
-      <div className="fixed inset-0 flex flex-col h-dvh overflow-hidden bg-background">
-        {/* Header zone - truly anchored */}
-        {headerContent && (
-          <div className="flex-none z-10">
-            {headerContent}
+      <div className="app-shell bg-background">
+        <DesktopSidebar />
+
+        {/* Logo bar – top-left corner above the sidebar, visible on desktop only */}
+        {isAuthenticated && (
+          <div className="hidden lg:flex fixed top-0 left-0 w-60 h-[var(--header-total-height)] flex-col bg-background border-r border-b border-black/[0.07] z-50" style={{ boxShadow: '0 0.5px 0 rgba(0,0,0,0.08)' }}>
+            <div className="h-[var(--safe-top)]" />
+            <div className="flex h-[var(--header-height)] items-center px-4 lg:px-5">
+              <Link to="/explore" className="flex items-center flex-shrink-0 -ml-0.5">
+                <img src="/ketravelan_logo.png" alt="Ketravelan" className="h-8 w-auto" />
+              </Link>
+            </div>
           </div>
         )}
 
-        {/* Scrollable content - ONLY this element scrolls */}
+        {/* Header is outside scroll container to keep it visually locked */}
+        {headerContent && (
+          <div className={`app-shell-top ${isAuthenticated ? "lg:pl-60" : ""}`}>
+            {headerContent}
+            {subHeaderContent && (
+              <div className="flex-none">{subHeaderContent}</div>
+            )}
+          </div>
+        )}
+
+        {/* Only this area scrolls */}
         <div
-          className={`flex-1 overflow-y-auto overflow-x-hidden overscroll-contain ${showBottomNav ? 'pb-[calc(10rem+env(safe-area-inset-bottom))]' : 'pb-[calc(2rem+env(safe-area-inset-bottom))]'} ${className || ""}`}
+          ref={scrollContainerRef as RefObject<HTMLDivElement>}
+          className={`app-shell-content overflow-y-auto overflow-x-hidden overscroll-contain ${isAuthenticated ? "lg:pl-60" : ""} ${className || ""}`}
+          style={{
+            paddingBottom: footerContent
+              ? "0.5rem"
+              : showBottomNav
+              ? "1.5rem"
+              : "calc(env(safe-area-inset-bottom, 0px) + 1.5rem)",
+          }}
         >
           {children}
         </div>
 
         {/* Footer zone - truly anchored */}
         {footerContent && (
-          <div className="flex-none z-20 safe-bottom">
+          <div className={`flex-none z-20 safe-bottom keyboard-aware-footer ${isAuthenticated ? "lg:pl-60" : ""}`}>
             {footerContent}
           </div>
         )}
 
         {/* Bottom nav - truly anchored */}
         {showBottomNav && (
-          <div className="flex-none z-10">
-            <BottomNav />
+          <div className="app-shell-bottom lg:hidden">
+            <BottomNav inline />
           </div>
         )}
       </div>
@@ -78,30 +111,46 @@ export function AppLayout({
 
   // Standard layout
   return (
-    <div className="app-shell min-h-screen bg-background">
+    <div className="app-shell bg-background">
       {!hideHeader && (
-        <Header
-          onNotificationsClick={() => setNotificationsOpen(true)}
-          onMenuClick={() => setMenuOpen(true)}
-        />
+        <div className="app-shell-top">
+          <Header
+            onNotificationsClick={() => setNotificationsOpen(true)}
+            onMenuClick={() => setMenuOpen(true)}
+          />
+          {subHeaderContent && (
+            <div className="flex-none">{subHeaderContent}</div>
+          )}
+        </div>
       )}
 
+      <DesktopSidebar />
+
       <main
-        className={`${
-          fullWidth
-            ? "w-full"
-            : "container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto px-5 sm:px-6"
-        } ${
-          showBottomNav
-            ? "pb-24"
-            : "pb-4"
-        } ${mainClassName || ""}`}
+        className={`app-shell-content overflow-y-auto overflow-x-hidden overscroll-contain ${isAuthenticated ? "lg:pl-60" : ""}`}
+        style={{
+          paddingBottom: showBottomNav
+            ? "1.5rem"
+            : "calc(env(safe-area-inset-bottom, 0px) + 1.5rem)",
+        }}
       >
-        {children}
+        <div
+          className={`${
+            fullWidth
+              ? "w-full"
+              : wideLayout
+              ? "w-full px-5 sm:px-6 lg:px-8"
+              : "container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl xl:max-w-5xl mx-auto px-5 sm:px-6"
+          } ${mainClassName || ""}`}
+        >
+          {children}
+        </div>
       </main>
 
       {showBottomNav && (
-        <BottomNav />
+        <div className="app-shell-bottom lg:hidden">
+          <BottomNav inline />
+        </div>
       )}
 
 

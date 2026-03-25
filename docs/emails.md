@@ -86,37 +86,37 @@ This document lists all email-related Supabase edge functions in this repo, incl
   - Participants who owe money.
   - The payer (summary that they are owed).
 - Subject:
-  - "New expense added — you owe <currency> <amount>".
-  - "Expense added — you are owed <currency> <amount>".
+  - "New expense added  you owe <currency> <amount>".
+  - "Expense added  you are owed <currency> <amount>".
 - Trigger: When an expense is created.
 - Preference checks: Respects each recipient `email_notifications`.
 
 ### send-expense-updated
 - Purpose: Notify all involved users that an expense changed.
 - Recipients: Payer and participants.
-- Subject: "Expense updated — <description>".
+- Subject: "Expense updated  <description>".
 - Trigger: When an expense is updated.
 - Preference checks: Respects each recipient `email_notifications`.
 
 ### send-expense-deleted
 - Purpose: Notify all involved users that an expense was deleted.
 - Recipients: Payer and participants.
-- Subject: "Expense deleted — <description>".
+- Subject: "Expense deleted  <description>".
 - Trigger: When an expense is deleted.
 - Preference checks: Respects each recipient `email_notifications`.
 
 ### send-expense-payment-marked
 - Purpose: Notify payer and participant when a payment is marked as paid.
 - Recipients:
-  - Payer: "Payment marked as paid — <currency> <amount>".
-  - Participant: "Payment recorded — <description>".
+  - Payer: "Payment marked as paid  <currency> <amount>".
+  - Participant: "Payment recorded  <description>".
 - Trigger: When participant marks their payment as paid.
 - Preference checks: Respects each recipient `email_notifications`.
 
 ### send-expense-overdue-reminder
 - Purpose: Remind participants with unpaid balances.
 - Recipients: Unpaid participants (optionally filtered by member).
-- Subject: "Payment reminder — action needed" or "Payment reminder — <days> days overdue".
+- Subject: "Payment reminder  action needed" or "Payment reminder  <days> days overdue".
 - Trigger: Reminder flow for overdue expenses.
 - Preference checks: Respects each recipient `email_notifications`.
 

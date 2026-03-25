@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { MapPin, Search, X, CalendarDays } from "lucide-react";
 import { format } from "date-fns";
 import type { DateRange } from "react-day-picker";
+import { searchLocations, type LocationResult } from "@/lib/locationApi";
 
 import {
   Drawer,
@@ -28,23 +29,6 @@ import { cn } from "@/lib/utils";
 import { BudgetRangeSelector, isDefaultBudgetRange } from "./BudgetTierSelector";
 import { TravelStylePills } from "./TravelStylePills";
 import type { TripCategoryId } from "@/data/categories";
-
-// Mock destinations for autocomplete
-const mockDestinations = [
-  { name: "Kyoto, Japan", region: "Kansai Region" },
-  { name: "Vietnam", region: "Southeast Asia" },
-  { name: "Dolomites, Italy", region: "Northern Italy" },
-  { name: "Thailand", region: "Southeast Asia" },
-  { name: "Bali, Indonesia", region: "Indonesia" },
-  { name: "Langkawi, Malaysia", region: "Kedah" },
-  { name: "Cameron Highlands, Malaysia", region: "Pahang" },
-  { name: "Kuala Lumpur, Malaysia", region: "Federal Territory" },
-  { name: "Singapore", region: "Southeast Asia" },
-  { name: "Seoul, South Korea", region: "South Korea" },
-  { name: "Tokyo, Japan", region: "Kanto Region" },
-  { name: "Phuket, Thailand", region: "Southern Thailand" },
-  { name: "Penang, Malaysia", region: "Penang" },
-];
 
 export interface FilterState {
   destination: string;
@@ -78,13 +62,35 @@ export function TripFilterDrawer({
   const [localFilters, setLocalFilters] = useState<FilterState>(filters);
   const [destinationQuery, setDestinationQuery] = useState("");
   const [showDestinationResults, setShowDestinationResults] = useState(false);
+  const [destResults, setDestResults] = useState<LocationResult[]>([]);
+  const [destLoading, setDestLoading] = useState(false);
+  const destSearchTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
   const destinationRef = useRef<HTMLDivElement>(null);
+
+  // Debounced location API search
+  useEffect(() => {
+    if (destSearchTimeoutRef.current) clearTimeout(destSearchTimeoutRef.current);
+    if (destinationQuery.length < 2) { setDestResults([]); setDestLoading(false); return; }
+    setDestLoading(true);
+    destSearchTimeoutRef.current = setTimeout(async () => {
+      try {
+        const results = await searchLocations(destinationQuery);
+        setDestResults(results);
+      } catch {
+        setDestResults([]);
+      } finally {
+        setDestLoading(false);
+      }
+    }, 300);
+    return () => { if (destSearchTimeoutRef.current) clearTimeout(destSearchTimeoutRef.current); };
+  }, [destinationQuery]);
 
   // Sync local state when drawer opens
   useEffect(() => {
     if (open) {
       setLocalFilters(filters);
       setDestinationQuery("");
+      setDestResults([]);
       setShowDestinationResults(false);
     }
   }, [open, filters]);
@@ -100,17 +106,10 @@ export function TripFilterDrawer({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const filteredDestinations = destinationQuery
-    ? mockDestinations.filter(
-        (d) =>
-          d.name.toLowerCase().includes(destinationQuery.toLowerCase()) ||
-          d.region.toLowerCase().includes(destinationQuery.toLowerCase())
-      )
-    : mockDestinations;
-
   const handleSelectDestination = (name: string) => {
     setLocalFilters((prev) => ({ ...prev, destination: name }));
     setDestinationQuery("");
+    setDestResults([]);
     setShowDestinationResults(false);
   };
 
@@ -142,7 +141,7 @@ export function TripFilterDrawer({
   };
 
   const content = (
-    <div className="flex-1 overflow-y-auto px-4">
+    <div className="flex-1 overflow-y-auto px-4" data-disable-keyboard-autoscroll="true">
       <div className="space-y-6 pb-6">
         {/* Section 1: Destination */}
         <div className="bg-card rounded-xl border border-border p-4 space-y-3 animate-fade-in" style={{ animationDelay: "0ms", animationFillMode: "backwards" }}>
@@ -180,33 +179,44 @@ export function TripFilterDrawer({
 
               {showDestinationResults && (
                 <div className="absolute z-50 w-full mt-1 bg-card border border-border rounded-xl shadow-lg overflow-hidden max-h-[200px] overflow-y-auto">
-                  {filteredDestinations.length > 0 ? (
-                    filteredDestinations.map((dest) => (
-                      <button
-                        key={dest.name}
-                        type="button"
-                        onClick={() => handleSelectDestination(dest.name)}
-                        className="w-full px-4 py-3 flex items-start gap-3 hover:bg-accent transition-colors text-left"
-                      >
-                        <MapPin className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-                        <div>
-                          <p className="text-sm font-medium text-foreground">{dest.name}</p>
-                          <p className="text-xs text-muted-foreground">{dest.region}</p>
-                        </div>
-                      </button>
-                    ))
-                  ) : (
+                  {destLoading ? (
+                    <div className="flex items-center justify-center gap-2 px-4 py-4 text-muted-foreground">
+                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                      <span className="text-sm">Searching…</span>
+                    </div>
+                  ) : destResults.length > 0 ? (
+                    destResults.map((result, i) => {
+                      const primary = [result.name, result.country].filter(Boolean).join(", ");
+                      const secondary = result.region || result.country || "";
+                      return (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => handleSelectDestination(primary)}
+                          className="w-full px-4 py-3 flex items-start gap-3 hover:bg-accent transition-colors text-left"
+                        >
+                          <MapPin className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                          <div>
+                            <p className="text-sm font-medium text-foreground">{primary}</p>
+                            {secondary && <p className="text-xs text-muted-foreground">{secondary}</p>}
+                          </div>
+                        </button>
+                      );
+                    })
+                  ) : destinationQuery.length >= 2 ? (
                     <div className="px-4 py-4 text-center">
                       <p className="text-sm text-muted-foreground">No destinations found</p>
-                      {destinationQuery && (
-                        <button
-                          type="button"
-                          onClick={() => handleSelectDestination(destinationQuery)}
-                          className="mt-2 text-sm text-primary font-medium"
-                        >
-                          Use "{destinationQuery}" anyway
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        onClick={() => handleSelectDestination(destinationQuery)}
+                        className="mt-2 text-sm text-primary font-medium"
+                      >
+                        Use "{destinationQuery}" anyway
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="px-4 py-4 text-center">
+                      <p className="text-sm text-muted-foreground">Start typing to search</p>
                     </div>
                   )}
                 </div>

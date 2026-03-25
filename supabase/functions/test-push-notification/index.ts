@@ -6,6 +6,10 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const FIREBASE_SERVICE_ACCOUNT_JSON = Deno.env.get("FIREBASE_SERVICE_ACCOUNT_JSON") ?? "";
+const APPLE_TEAM_ID = Deno.env.get("APPLE_TEAM_ID") ?? "";
+const APPLE_KEY_ID = Deno.env.get("APPLE_KEY_ID") ?? "";
+const APPLE_PRIVATE_KEY = Deno.env.get("APPLE_PRIVATE_KEY") ?? "";
+const APPLE_BUNDLE_ID = Deno.env.get("APPLE_BUNDLE_ID") ?? "";
 
 const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
@@ -36,6 +40,14 @@ interface TestPushRequest {
   dryRun?: boolean;
 }
 
+function isLikelyApnsToken(token: string) {
+  return /^[A-Fa-f0-9]{64}$/.test(token);
+}
+
+function hasApnsConfig() {
+  return Boolean(APPLE_TEAM_ID && APPLE_KEY_ID && APPLE_PRIVATE_KEY && APPLE_BUNDLE_ID);
+}
+
 serve(async (req: Request) => {
   const corsHeaders = buildCorsHeaders(req);
   if (req.method === "OPTIONS") {
@@ -56,6 +68,7 @@ serve(async (req: Request) => {
       timestamp: new Date().toISOString(),
       checks: {
         firebase_configured: !!FIREBASE_SERVICE_ACCOUNT_JSON,
+        apns_configured: hasApnsConfig(),
       },
     };
 
@@ -98,18 +111,33 @@ serve(async (req: Request) => {
     if (tokensErr) {
       diagnostics.tokens_check = `❌ Error: ${tokensErr.message}`;
     } else {
+      const iosTokens = (tokens || []).filter((t) => String(t.platform || "").toLowerCase() === "ios");
+      const androidTokens = (tokens || []).filter((t) => String(t.platform || "").toLowerCase() === "android");
+      const webTokens = (tokens || []).filter((t) => String(t.platform || "").toLowerCase() === "web");
+      const iosApnsStyleTokens = iosTokens.filter((t) => isLikelyApnsToken(String(t.token || "")));
+
       diagnostics.tokens_check = `✅ Found ${tokens?.length || 0} push token(s)`;
+      diagnostics.token_routing = {
+        ios: iosTokens.length,
+        ios_apns_style: iosApnsStyleTokens.length,
+        android: androidTokens.length,
+        web: webTokens.length,
+      };
       diagnostics.tokens = tokens?.map((t) => ({
         platform: t.platform,
         token: t.token?.substring(0, 20) + "...",
         created_at: t.created_at,
       }));
+
+      if (iosApnsStyleTokens.length > 0 && !hasApnsConfig()) {
+        diagnostics.apns_warning = "❌ iOS APNs-style tokens detected but APNs env vars are missing";
+      }
     }
 
     // Test send via send-system-push
     if (!body.dryRun && tokens && tokens.length > 0) {
       try {
-        await admin.functions.invoke("send-system-push", {
+        const { data, error } = await admin.functions.invoke("send-system-push", {
           body: {
             userIds: [body.userId],
             type: "test_notification",
@@ -120,7 +148,11 @@ serve(async (req: Request) => {
           },
           headers: { Authorization: `Bearer ${SERVICE_ROLE_KEY}` },
         });
-        diagnostics.send_attempt = "✅ send-system-push invoked successfully";
+
+        diagnostics.send_attempt = error
+          ? `❌ send-system-push invoke error: ${error.message}`
+          : "✅ send-system-push invoked";
+        diagnostics.send_result = data ?? null;
       } catch (err) {
         diagnostics.send_attempt = `❌ send-system-push failed: ${err instanceof Error ? err.message : String(err)}`;
       }
@@ -133,10 +165,11 @@ serve(async (req: Request) => {
       diagnostics,
       instructions: [
         "1. Check Firebase Configuration: FIREBASE_SERVICE_ACCOUNT_JSON env var must be set",
-        "2. Verify User Settings: push_notifications should be true in profiles table",
-        "3. Register Push Tokens: Mobile app must call upsert_push_token with device token",
-        "4. Check Device: Ensure app has notification permissions granted",
-        "5. Check Logs: Review Supabase function logs for errors",
+        "2. For iOS APNs-style tokens, set APPLE_TEAM_ID, APPLE_KEY_ID, APPLE_PRIVATE_KEY, APPLE_BUNDLE_ID",
+        "3. Verify User Settings: push_notifications should be true in profiles table",
+        "4. Register Push Tokens: Mobile app must call upsert_push_token with device token",
+        "5. Check Device: Ensure app has notification permissions granted",
+        "6. Check Logs: Review Supabase function logs for errors",
       ]
     }), {
       status: 200,

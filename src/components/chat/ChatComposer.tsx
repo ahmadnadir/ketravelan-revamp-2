@@ -4,7 +4,6 @@ import { Send, Paperclip, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AttachmentSheet } from "./AttachmentSheet";
-import { useKeyboardHeight } from "@/hooks/useKeyboardHeight";
 import { getMentionSuggestions } from "@/lib/chatMentions";
 
 import type { ChatAttachment } from "@/lib/conversations";
@@ -37,7 +36,6 @@ export function ChatComposer({ onSend, placeholder = "Type a message...", onTypi
   const [showMentionDropdown, setShowMentionDropdown] = useState(false);
   const [cursorPosition, setCursorPosition] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
-  const keyboardHeight = useKeyboardHeight();
 
   const handleSend = async () => {
     if (!message.trim() && pendingAttachments.length === 0) return;
@@ -77,6 +75,8 @@ export function ChatComposer({ onSend, placeholder = "Type a message...", onTypi
     });
     setMessage("");
     setPendingAttachments([]);
+    // Keep keyboard open by re-focusing input after send
+    setTimeout(() => inputRef.current?.focus(), 0);
   };
 
   const imageInputId = "chat-image-input";
@@ -112,11 +112,6 @@ export function ChatComposer({ onSend, placeholder = "Type a message...", onTypi
     }
     if (items.length > 0) setPendingAttachments(prev => [...prev, ...items]);
   };
-
-  // When keyboard is open, position above keyboard; otherwise use default nav-aware position
-  const bottomStyle = keyboardHeight > 0 
-    ? { bottom: `${keyboardHeight}px` } 
-    : undefined;
 
   // Typing detection with mention support
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -276,6 +271,7 @@ export function ChatComposer({ onSend, placeholder = "Type a message...", onTypi
               <Button
                 size="icon"
                 className="shrink-0 rounded-full h-8 w-8 hover:opacity-80"
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={handleSend}
                 disabled={!message.trim() && pendingAttachments.length === 0}
               >

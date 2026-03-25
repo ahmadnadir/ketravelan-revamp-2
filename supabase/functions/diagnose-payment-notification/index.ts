@@ -6,6 +6,10 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const FIREBASE_SERVICE_ACCOUNT_JSON = Deno.env.get("FIREBASE_SERVICE_ACCOUNT_JSON") ?? "";
+const APPLE_TEAM_ID = Deno.env.get("APPLE_TEAM_ID") ?? "";
+const APPLE_KEY_ID = Deno.env.get("APPLE_KEY_ID") ?? "";
+const APPLE_PRIVATE_KEY = Deno.env.get("APPLE_PRIVATE_KEY") ?? "";
+const APPLE_BUNDLE_ID = Deno.env.get("APPLE_BUNDLE_ID") ?? "";
 
 const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
@@ -22,6 +26,14 @@ function buildCorsHeaders(): Record<string, string> {
 interface DiagnosticRequest {
   userId: string;
   testSend?: boolean;
+}
+
+function isLikelyApnsToken(token: string) {
+  return /^[A-Fa-f0-9]{64}$/.test(token);
+}
+
+function hasApnsConfig() {
+  return Boolean(APPLE_TEAM_ID && APPLE_KEY_ID && APPLE_PRIVATE_KEY && APPLE_BUNDLE_ID);
 }
 
 serve(async (req: Request) => {
@@ -50,6 +62,7 @@ serve(async (req: Request) => {
       ...diagnostics.checks,
       firebase_env_set: !!FIREBASE_SERVICE_ACCOUNT_JSON,
       firebase_env_length: FIREBASE_SERVICE_ACCOUNT_JSON.length,
+      apns_env_set: hasApnsConfig(),
     };
 
     if (FIREBASE_SERVICE_ACCOUNT_JSON) {
@@ -108,15 +121,26 @@ serve(async (req: Request) => {
         tokens_error: tokensErr.message,
       };
     } else {
+      const iosTokens = (tokens || []).filter((t) => String(t.platform || "").toLowerCase() === "ios");
+      const iosApnsStyleTokens = iosTokens.filter((t) => isLikelyApnsToken(String(t.token || "")));
       diagnostics.checks = {
         ...diagnostics.checks,
         tokens_count: tokens?.length || 0,
+        ios_tokens_count: iosTokens.length,
+        ios_apns_style_tokens_count: iosApnsStyleTokens.length,
         tokens: tokens?.map((t) => ({
           platform: t.platform,
           token_preview: t.token?.substring(0, 32) + "...",
           created_at: t.created_at,
         })),
       };
+
+      if (iosApnsStyleTokens.length > 0 && !hasApnsConfig()) {
+        diagnostics.checks = {
+          ...diagnostics.checks,
+          apns_warning: "iOS APNs-style tokens detected, but APNs env vars are missing",
+        };
+      }
     }
 
     // Check 4: Recent Notifications
@@ -171,6 +195,9 @@ serve(async (req: Request) => {
     // Summary
     const issues: string[] = [];
     if (!FIREBASE_SERVICE_ACCOUNT_JSON) issues.push("❌ Firebase not configured - set FIREBASE_SERVICE_ACCOUNT_JSON env var");
+    if ((diagnostics.checks as Record<string, unknown>).ios_apns_style_tokens_count && !hasApnsConfig()) {
+      issues.push("❌ APNs not configured - set APPLE_TEAM_ID, APPLE_KEY_ID, APPLE_PRIVATE_KEY, APPLE_BUNDLE_ID");
+    }
     if (profile && profile.push_notifications === false) issues.push("❌ User has push notifications disabled");
     if (!tokens || tokens.length === 0) issues.push("❌ No push tokens registered - install app on device");
     

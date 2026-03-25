@@ -214,8 +214,8 @@ serve(async (req: Request) => {
     const profileMap = new Map((profiles || []).map((p: any) => [p.id, p]));
 
     const tripUrl = `${SITE_ORIGIN}/trip/${trip?.slug || trip?.id}?tab=expenses`;
-    const subject = `Expense updated — ${expense.description}`;
-    const messageHtml = `Heads up — <strong>${escapeHtml(expense.description)}</strong> in <strong>${escapeHtml(trip?.title || "your trip")}</strong> was updated. Check the latest details inside.`;
+    const subject = `Expense updated  ${expense.description}`;
+    const messageHtml = `Heads up  <strong>${escapeHtml(expense.description)}</strong> in <strong>${escapeHtml(trip?.title || "your trip")}</strong> was updated. Check the latest details inside.`;
 
     for (const userId of recipientIds) {
       const profile = profileMap.get(userId);

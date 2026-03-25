@@ -184,7 +184,7 @@ export function CreateStoryModal({ open, onOpenChange }: CreateStoryModalProps) 
     <>
       <Dialog open={open} onOpenChange={handleDialogOpenChange}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader className="pt-[env(safe-area-inset-top)]">
+        <DialogHeader className="pt-safe">
           <DialogTitle>Share Your Story</DialogTitle>
           <DialogDescription>
             Inspire fellow travelers with your experiences, tips, and lessons learned.
@@ -358,7 +358,7 @@ export function CreateStoryModal({ open, onOpenChange }: CreateStoryModalProps) 
         </DialogContent>
       </Dialog>
       <Drawer open={showExitModal} onOpenChange={setShowExitModal}>
-        <DrawerContent className="pt-[env(safe-area-inset-top)]">
+        <DrawerContent className="pt-safe">
           <DrawerHeader className="text-center">
             <DrawerTitle>Leave story creation?</DrawerTitle>
             <DrawerDescription>

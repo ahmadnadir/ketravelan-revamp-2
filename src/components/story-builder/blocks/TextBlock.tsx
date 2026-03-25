@@ -26,7 +26,7 @@ export function TextBlock({ block, onUpdate }: TextBlockProps) {
     {
       value: "what-happened",
       label: "What happened?",
-      placeholder: "Tell the story in your own words — what happened?",
+      placeholder: "Tell the story in your own words  what happened?",
     },
     {
       value: "lesson",

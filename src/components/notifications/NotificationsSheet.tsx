@@ -19,6 +19,7 @@ import {
 } from "@/hooks/useNotifications";
 import { useNavigate } from "react-router-dom";
 import type { Notification } from "@/lib/notifications";
+import { syncBadgeWithUnreadCount } from "@/lib/notifications";
 import { isNativePlatform } from "@/lib/capacitor";
 
 // Persistent logging helper for debugging navigation issues
@@ -113,6 +114,15 @@ interface NotificationsSheetProps {
 export function NotificationsSheet({ open, onOpenChange }: NotificationsSheetProps) {
   const [filterType, setFilterType] = useState<Notification['type'] | undefined>(undefined);
   const navigate = useNavigate();
+
+  // Sync the iOS app icon badge count each time the sheet is opened.
+  // The user is actively viewing their notifications, so this is the
+  // ideal moment to align the badge with the real unread count.
+  useEffect(() => {
+    if (open) {
+      syncBadgeWithUnreadCount().catch(() => {});
+    }
+  }, [open]);
 
   // Fetch notifications with React Query
   const { data: notifications = [], isLoading } = useNotifications({ type: filterType });

@@ -231,7 +231,7 @@ serve(async (req: Request) => {
     const tripUrl = `${SITE_ORIGIN}/trip/${tripIdentifier}`;
 
     const subject = `Fresh energy on your trip: ${trip.title}`;
-    const messageHtml = `You just got a new traveler — <strong>${escapeHtml(participantName)}</strong> — on <strong>${escapeHtml(trip.title)}</strong> (${escapeHtml(trip.destination || "")}).`;
+    const messageHtml = `You just got a new traveler  <strong>${escapeHtml(participantName)}</strong>  on <strong>${escapeHtml(trip.title)}</strong> (${escapeHtml(trip.destination || "")}).`;
 
     const html = buildHtmlEmail({
       brand: "Ketravelan",

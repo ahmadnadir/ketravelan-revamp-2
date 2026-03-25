@@ -187,8 +187,10 @@ export default function TripDetails() {
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
 
   // Fetch trip details with React Query
-  const isLoading = useSimulatedLoading(700);
-  const { data: dbTrip, isLoading: dbTripLoading, error } = useTripDetails(id);
+  const isSimulatedLoading = useSimulatedLoading(700);
+  const { data: dbTrip, isLoading: dbTripLoading, isFetching: dbTripFetching, error } = useTripDetails(id);
+  // Show skeleton while either the minimum polish delay OR the real request is still in flight
+  const isLoading = isSimulatedLoading || dbTripLoading;
   // Fetch join request status
   const { data: joinRequest } = useJoinRequestStatus(
     dbTrip?.id,
@@ -359,15 +361,18 @@ export default function TripDetails() {
   }, [tripData, homeCurrency]);
 
 
-  // Handle errors
-  if (error) {
-    console.error('Error loading trip:', error);
-    toast({
-      title: "Error",
-      description: "Failed to load trip details",
-      variant: "destructive",
-    });
-  }
+  // Handle errors — in useEffect to avoid toast being called on every render
+  useEffect(() => {
+    if (error) {
+      console.error('Error loading trip:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load trip details",
+        variant: "destructive",
+      });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [error]);
 
   // Determine join request status
   const joinRequestStatus = useMemo(() => {
@@ -438,7 +443,7 @@ export default function TripDetails() {
   const valueProposition = tripData ? generateValueProposition(tripData) : '';
   const urgencyText = tripData ? getUrgencyText(joined, tripData.totalSlots) : '';
   const descriptionBullets = tripData ? parseDescriptionToBullets(tripData.description) : [];
-  const slotsStatusText = isTripFull ? 'Fulled' : urgencyText;
+  const slotsStatusText = isTripFull ? 'Full' : urgencyText;
   const itineraryNotes = useMemo(() => {
     if (!tripData?.simpleNotes) return [];
     return tripData.simpleNotes
@@ -676,6 +681,12 @@ export default function TripDetails() {
           ),
           variant: "destructive",
         });
+      } else if (error.code === '42501' && error.message?.includes('join_requests')) {
+        toast({
+          title: "Join Request Temporarily Unavailable",
+          description: "Database permissions for join requests are not fully applied yet. Please run the latest hotfix SQL and try again.",
+          variant: "destructive",
+        });
       } else {
         toast({
           title: "Failed to send request",
@@ -748,7 +759,10 @@ export default function TripDetails() {
   if (isLoading) {
     return <TripDetailsSkeleton />;
   }
-  if (!tripData) {
+  // Only show "not found" when we are fully done loading AND there is genuinely no data.
+  // This prevents the blank screen flash on slow networks where dbTripLoading
+  // finishes after the simulated delay.
+  if (!tripData && !dbTripLoading && !dbTripFetching) {
     return (
       <AppLayout hideHeader>
         <div className="flex flex-col items-center justify-center h-[60vh]">
@@ -760,6 +774,11 @@ export default function TripDetails() {
         </div>
       </AppLayout>
     );
+  }
+  // While a background refetch is running (stale data + new fetch in flight),
+  // keep rendering the existing trip data — just fall through to the main return.
+  if (!tripData) {
+    return <TripDetailsSkeleton />;
   }
 
   
@@ -1386,7 +1405,7 @@ export default function TripDetails() {
                       {/* Budget Clarification */}
                       <div className="mt-2 p-2 bg-secondary/50 rounded-lg">
                         <p className="text-xs text-muted-foreground leading-relaxed">
-                          <span className="font-medium text-foreground">Estimated shared expenses.</span> This is the amount you should be prepared to spend during the trip. You don't pay this to the organizer — expenses are tracked and split transparently in the group.
+                          <span className="font-medium text-foreground">Estimated shared expenses.</span> This is the amount you should be prepared to spend during the trip. You don't pay this to the organizer  expenses are tracked and split transparently in the group.
                         </p>
                       </div>
                     </div>
@@ -1573,7 +1592,7 @@ export default function TripDetails() {
 
       {/* Organizer actions: Edit + Trip Chat */}
       {isDbTrip && isOrganizer && (
-        <div className="fixed bottom-above-nav left-0 right-0 z-40 bg-background/95 backdrop-blur-sm border-t border-border/50">
+        <div className="fixed bottom-above-nav lg:bottom-0 left-0 lg:left-60 right-0 z-40 bg-background border-t border-border/50">
           <div className="container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto px-4 py-3">
             <div className="grid grid-cols-2 gap-3">
               <Button
@@ -1601,7 +1620,7 @@ export default function TripDetails() {
 
       {/* Sticky CTA Bar */}
       {isDbTrip && !isOrganizer && (
-        <div className="fixed bottom-above-nav left-0 right-0 z-40 bg-background/95 backdrop-blur-sm border-t border-border/50">
+        <div className="fixed bottom-above-nav lg:bottom-0 left-0 lg:left-60 right-0 z-40 bg-background border-t border-border/50">
           <div className="container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto px-4 py-3">
             <div className="grid grid-cols-2 gap-3">
               {joinRequestStatus === 'member' ? (

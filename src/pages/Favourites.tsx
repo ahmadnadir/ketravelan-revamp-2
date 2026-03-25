@@ -50,7 +50,7 @@ export default function Favourites() {
 
   if (!user?.id) {
     return (
-      <AppLayout>
+      <AppLayout wideLayout>
         <div className="py-6 space-y-6">
           <div className="flex items-center gap-2 text-muted-foreground">
             <Heart className="h-5 w-5" />
@@ -63,7 +63,7 @@ export default function Favourites() {
 
   if (loading) {
     return (
-      <AppLayout>
+      <AppLayout wideLayout>
         <div className="py-6 space-y-6">
           <div className="space-y-1">
             <Skeleton className="h-8 w-32" />
@@ -76,9 +76,13 @@ export default function Favourites() {
   }
 
   return (
-    <AppLayout>
+    <AppLayout wideLayout>
       <div className="py-6 space-y-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+        <div className="space-y-1">
+          <h1 className="text-2xl font-bold text-foreground">Favourites</h1>
+          <p className="text-sm text-muted-foreground">{savedTrips.length} saved trip{savedTrips.length !== 1 ? 's' : ''}</p>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4">
           {savedTrips.length === 0 ? (
             <div className="col-span-full text-muted-foreground">No saved trips yet</div>
           ) : (

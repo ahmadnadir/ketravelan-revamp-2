@@ -255,7 +255,7 @@ serve(async (req: Request) => {
 
     await sendToUser(
       payerId,
-      `Payment marked as paid — ${expense.currency} ${amountOwed}`,
+      `Payment marked as paid  ${expense.currency} ${amountOwed}`,
       `<strong>${escapeHtml(participantName)}</strong> just marked their payment for <strong>${escapeHtml(expense.description)}</strong> as paid. Amount: <strong>${escapeHtml(expense.currency)} ${escapeHtml(amountOwed)}</strong>.`,
       "Payment marked as paid"
     );
@@ -279,7 +279,7 @@ serve(async (req: Request) => {
 
     await sendToUser(
       body.participantId,
-      `Payment recorded — ${expense.description}`,
+      `Payment recorded  ${expense.description}`,
       `You marked your payment for <strong>${escapeHtml(expense.description)}</strong> as paid. We have notified <strong>${escapeHtml(payerName)}</strong>.`,
       "Payment recorded"
     );

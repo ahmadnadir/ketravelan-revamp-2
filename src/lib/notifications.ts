@@ -47,7 +47,7 @@ export interface NotificationFilters {
 }
 
 /**
- * Fetch notifications for the current user
+ * Fetch notifications for the current user (excludes chat message notifications)
  */
 export async function fetchNotifications(filters?: NotificationFilters) {
   const { data: { user } } = await supabase.auth.getUser();
@@ -60,6 +60,7 @@ export async function fetchNotifications(filters?: NotificationFilters) {
     .from('notifications')
     .select('*')
     .eq('user_id', user.id)
+    .not('type', 'in', '(new_message,message)')
     .order('created_at', { ascending: false });
 
   if (filters?.type) {
@@ -83,7 +84,7 @@ export async function fetchNotifications(filters?: NotificationFilters) {
 }
 
 /**
- * Get unread notification count for the current user
+ * Get unread notification count for the current user (excludes chat message notifications)
  */
 export async function fetchUnreadCount(): Promise<number> {
   const { data: { user } } = await supabase.auth.getUser();
@@ -94,10 +95,33 @@ export async function fetchUnreadCount(): Promise<number> {
     .from('notifications')
     .select('*', { count: 'exact', head: true })
     .eq('user_id', user.id)
-    .eq('read', false);
+    .eq('read', false)
+    .not('type', 'in', '(new_message,message)');
 
   if (error) {
     console.error('Error fetching unread count:', error);
+    return 0;
+  }
+
+  return count || 0;
+}
+
+/**
+ * Get unread chat message notification count for the current user
+ */
+export async function fetchUnreadChatNotificationCount(): Promise<number> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return 0;
+
+  const { count, error } = await supabase
+    .from('notifications')
+    .select('*', { count: 'exact', head: true })
+    .eq('user_id', user.id)
+    .eq('read', false)
+    .in('type', ['new_message', 'message']);
+
+  if (error) {
+    console.error('Error fetching unread chat count:', error);
     return 0;
   }
 
@@ -192,6 +216,47 @@ export function subscribeToNotifications(
   return () => {
     supabase.removeChannel(channel);
   };
+}
+
+// ---------------------------------------------------------------------------
+// Badge helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetch the current unread notification count from Supabase and sync it to
+ * the app icon badge via the Capacitor badge plugin.
+ *
+ * The Supabase notifications table is the single source of truth. Use this
+ * function after:
+ *  - App foreground / resume
+ *  - A push notification is received in the foreground
+ *  - The notification list is opened
+ *  - A notification is marked as read or deleted
+ */
+export async function syncBadgeWithUnreadCount(): Promise<number> {
+  try {
+    const count = await fetchUnreadCount();
+    // Dynamic import keeps badge.ts out of the critical path on web/Android.
+    const { setBadgeCount } = await import("@/lib/badge");
+    await setBadgeCount(count);
+    return count;
+  } catch (err) {
+    console.warn("[badge] syncBadgeWithUnreadCount failed", err);
+    return 0;
+  }
+}
+
+/**
+ * Reset the app icon badge to zero.
+ * Call this on logout or after the user marks all notifications as read.
+ */
+export async function resetBadgeCount(): Promise<void> {
+  try {
+    const { clearBadgeCount } = await import("@/lib/badge");
+    await clearBadgeCount();
+  } catch (err) {
+    console.warn("[badge] resetBadgeCount failed", err);
+  }
 }
 
 /**

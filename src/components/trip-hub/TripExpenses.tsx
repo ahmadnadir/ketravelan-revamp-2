@@ -2754,8 +2754,8 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
 
       {/* Fixed Bottom Action Container - Only on Breakdown and Expenses tabs */}
       {(subTab === "breakdown" || subTab === "expenses") && (
-        <div className="fixed bottom-above-nav left-0 right-0 z-40 bg-background/95 backdrop-blur-sm border-t border-border/50">
-          <div className="container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto px-4 py-3">
+        <div className="fixed bottom-above-nav lg:bottom-0 left-0 lg:left-60 right-0 z-40 bg-background/95 backdrop-blur-sm border-t border-border/50">
+          <div className="container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto px-4 py-3 lg:py-4">
             <Button 
               className="w-full h-12 rounded-xl text-sm font-medium shadow-lg"
               onClick={() => setAddExpenseOpen(true)}

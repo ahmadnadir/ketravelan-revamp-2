@@ -9,7 +9,7 @@ const faqs = [
   {
     question: "How do DIY trips work?",
     answer:
-      "DIY trips are created by travelers, not agencies. Users can create a trip, make it public, allow others to join, chat together, plan activities, and manage shared expenses — all in one place.",
+      "DIY trips are created by travelers, not agencies. Users can create a trip, make it public, allow others to join, chat together, plan activities, and manage shared expenses  all in one place.",
   },
   {
     question: "Can I join if I'm traveling solo?",
@@ -29,7 +29,7 @@ const faqs = [
   {
     question: "How does settlement work at the end of the trip?",
     answer:
-      "All expenses are offset and consolidated into a single net amount. Each person settles once instead of paying line by line — simple, fair, and transparent.",
+      "All expenses are offset and consolidated into a single net amount. Each person settles once instead of paying line by line  simple, fair, and transparent.",
   },
   {
     question: "Does Ketravelan hold my money?",

@@ -19,8 +19,8 @@ export function StoriesFeed() {
 
   return (
     <div className="flex flex-col">
-      {/* Filter section - sticky with search and chips */}
-      <div className="sticky top-0 z-30 bg-background/95 backdrop-blur-sm border-b border-border/50 px-0 sm:px-4 py-4 sm:py-3 space-y-4 sm:space-y-3">
+      {/* Filter section */}
+      <div className="px-0 sm:px-4 pt-3 pb-2 space-y-2 border-b border-border/40">
         {/* Search input */}
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -74,25 +74,23 @@ export function StoriesFeed() {
         )}
       </div>
 
-      {/* Desktop floating CTA - positioned within content container */}
+      {/* Desktop floating CTA - pinned to bottom-right, clear of sidebar */}
       {isAuthenticated && (
-        <div className="hidden sm:block fixed bottom-above-nav-lg left-0 right-0 pointer-events-none z-40">
-          <div className="max-w-5xl mx-auto px-4 flex justify-end">
+        <div className="hidden sm:block fixed bottom-8 right-8 z-40">
             <Button
               onClick={handleCreateStory}
-              className="rounded-full shadow-lg gap-2 pointer-events-auto"
+              className="rounded-full shadow-lg gap-2"
               size="lg"
             >
               <PenSquare className="h-5 w-5" />
               Share Your Story
             </Button>
-          </div>
         </div>
       )}
 
       {/* Mobile sticky full-width CTA */}
       {isAuthenticated && (
-        <div className="sm:hidden fixed left-0 right-0 p-4 bg-background/95 backdrop-blur-sm border-t border-border/50 bottom-above-nav z-[60]">
+        <div className="sm:hidden fixed left-0 right-0 p-4 bg-background border-t border-border/50 bottom-above-nav z-[60]">
           <Button
             onClick={handleCreateStory}
             className="w-full gap-2"

@@ -214,7 +214,7 @@ serve(async (req: Request) => {
     const profileMap = new Map((profiles || []).map((p: any) => [p.id, p]));
 
     const tripUrl = `${SITE_ORIGIN}/trip/${trip?.slug || trip?.id}?tab=expenses`;
-    const subject = `Expense deleted — ${expense.description}`;
+    const subject = `Expense deleted  ${expense.description}`;
     const messageHtml = `The expense <strong>${escapeHtml(expense.description)}</strong> in <strong>${escapeHtml(trip?.title || "your trip")}</strong> was deleted. Your totals will update automatically.`;
 
     for (const userId of recipientIds) {

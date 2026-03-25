@@ -147,7 +147,7 @@ const UserProfilePage = () => {
   };
 
   const headerContent = (
-    <header className="glass border-b border-border/50 pt-[env(safe-area-inset-top)]">
+    <header className="glass border-b border-border/50 safe-top safe-x">
       <div className="container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto px-3 sm:px-4">
         <div className="flex items-center gap-3 h-14">
           <Button
@@ -443,12 +443,12 @@ const UserProfilePage = () => {
       {/* Full-screen Avatar Viewer Dialog */}
       <Dialog open={showAvatarImage} onOpenChange={setShowAvatarImage}>
         <DialogContent className="max-w-4xl w-[100vw] h-[100vh] sm:w-[90vw] border-border/50 p-0 overflow-hidden flex flex-col [&>button]:hidden">
-          <DialogHeader className="p-4 pb-2 border-b border-border/50 flex-none relative">
+          <DialogHeader className="px-4 pt-[calc(env(safe-area-inset-top)+0.75rem)] pb-2 border-b border-border/50 flex-none relative">
             <DialogTitle className="text-center w-full">Profile Photo</DialogTitle>
             <button
               type="button"
               onClick={() => setShowAvatarImage(false)}
-              className="h-8 w-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors absolute right-4 top-1"
+              className="h-8 w-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors absolute right-4 bottom-2"
               aria-label="Close profile photo"
             >
               <X className="h-5 w-5" />

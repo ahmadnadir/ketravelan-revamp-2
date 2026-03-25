@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
-import { Plus, Search, MoreVertical, FileText } from "lucide-react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { Plus, Search, MoreVertical, FileText, Pin, PinOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
@@ -31,6 +31,14 @@ interface TripNotesProps {
 export function TripNotes({ tripId }: TripNotesProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [notes, setNotes] = useState<TripNoteDB[]>([]);
+  const [pinnedIds, setPinnedIds] = useState<Set<string>>(() => {
+    try {
+      const stored = localStorage.getItem(`trip-notes-pinned-${tripId}`);
+      return new Set(stored ? JSON.parse(stored) : []);
+    } catch {
+      return new Set();
+    }
+  });
   const [selectedNote, setSelectedNote] = useState<TripNoteDB | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -68,7 +76,31 @@ export function TripNotes({ tripId }: TripNotesProps) {
         blockContent.includes(searchQuery.toLowerCase())
       );
     }
-  );
+  ).sort((a, b) => {
+    const aPinned = pinnedIds.has(a.id) ? 0 : 1;
+    const bPinned = pinnedIds.has(b.id) ? 0 : 1;
+    return aPinned - bPinned;
+  });
+
+  const pinJustHappened = useRef(false);
+
+  const handleTogglePin = (note: TripNoteDB, e: Event) => {
+    e.stopPropagation();
+    pinJustHappened.current = true;
+    setTimeout(() => { pinJustHappened.current = false; }, 300);
+    setPinnedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(note.id)) {
+        next.delete(note.id);
+      } else {
+        next.add(note.id);
+      }
+      try {
+        localStorage.setItem(`trip-notes-pinned-${tripId}`, JSON.stringify([...next]));
+      } catch { /* ignore */ }
+      return next;
+    });
+  };
 
   const handleNewNote = async () => {
     try {
@@ -82,6 +114,7 @@ export function TripNotes({ tripId }: TripNotesProps) {
   };
 
   const handleOpenNote = (note: TripNoteDB) => {
+    if (pinJustHappened.current) return;
     setSelectedNote(note);
     setEditorOpen(true);
   };
@@ -191,19 +224,57 @@ export function TripNotes({ tripId }: TripNotesProps) {
         )}
 
         {/* Notes List */}
-        {!isLoading && filteredNotes.length > 0 && (
-          <div className="space-y-2 sm:space-y-3">
-            {filteredNotes.map((note) => (
-              <NoteCard
-                key={note.id}
-                note={note}
-                onClick={() => handleOpenNote(note)}
-                onDelete={(e) => handleDeleteFromCard(note, e)}
-                formatDate={formatRelativeDate}
-              />
-            ))}
-          </div>
-        )}
+        {!isLoading && filteredNotes.length > 0 && (() => {
+          const pinned = filteredNotes.filter((n) => pinnedIds.has(n.id));
+          const unpinned = filteredNotes.filter((n) => !pinnedIds.has(n.id));
+          return (
+            <div className="space-y-4 sm:space-y-5">
+              {pinned.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-1.5 mb-2 px-0.5">
+                    <Pin className="h-3.5 w-3.5 text-muted-foreground" />
+                    <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Pinned</span>
+                  </div>
+                  <div className="space-y-2 sm:space-y-3">
+                    {pinned.map((note) => (
+                      <NoteCard
+                        key={note.id}
+                        note={note}
+                        isPinned={true}
+                        onClick={() => handleOpenNote(note)}
+                        onDelete={(e) => handleDeleteFromCard(note, e)}
+                        onTogglePin={(e) => handleTogglePin(note, e)}
+                        formatDate={formatRelativeDate}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+              {unpinned.length > 0 && (
+                <div>
+                  {pinned.length > 0 && (
+                    <div className="flex items-center gap-1.5 mb-2 px-0.5">
+                      <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">All Notes</span>
+                    </div>
+                  )}
+                  <div className="space-y-2 sm:space-y-3">
+                    {unpinned.map((note) => (
+                      <NoteCard
+                        key={note.id}
+                        note={note}
+                        isPinned={false}
+                        onClick={() => handleOpenNote(note)}
+                        onDelete={(e) => handleDeleteFromCard(note, e)}
+                        onTogglePin={(e) => handleTogglePin(note, e)}
+                        formatDate={formatRelativeDate}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Search No Results */}
         {!isLoading && notes.length > 0 && filteredNotes.length === 0 && (
@@ -254,12 +325,14 @@ export function TripNotes({ tripId }: TripNotesProps) {
 
 interface NoteCardProps {
   note: TripNoteDB;
+  isPinned: boolean;
   onClick: () => void;
   onDelete: (e: Event) => void;
+  onTogglePin: (e: Event) => void;
   formatDate: (iso: string) => string;
 }
 
-function NoteCard({ note, onClick, onDelete, formatDate }: NoteCardProps) {
+function NoteCard({ note, isPinned, onClick, onDelete, onTogglePin, formatDate }: NoteCardProps) {
   // Get content preview from blocks
   const contentPreview = note.blocks
     .map((b) => b.content)
@@ -269,14 +342,20 @@ function NoteCard({ note, onClick, onDelete, formatDate }: NoteCardProps) {
 
   return (
     <Card
-      className="p-3 sm:p-4 border-border/50 hover:border-primary/30 transition-all cursor-pointer active:scale-[0.99] hover:shadow-sm"
+      className={cn(
+        "p-3 sm:p-4 border-border/50 hover:border-primary/30 transition-all cursor-pointer active:scale-[0.99] hover:shadow-sm",
+        isPinned && "border-primary/20 bg-primary/5"
+      )}
       onClick={onClick}
     >
       <div className="flex items-start justify-between gap-2 sm:gap-3">
         <div className="flex-1 min-w-0">
-          <h4 className="font-semibold text-foreground truncate text-sm sm:text-base">
-            {note.title || "Untitled"}
-          </h4>
+          <div className="flex items-center gap-1.5">
+            {isPinned && <Pin className="h-3 w-3 text-primary shrink-0" />}
+            <h4 className="font-semibold text-foreground truncate text-sm sm:text-base">
+              {note.title || "Untitled"}
+            </h4>
+          </div>
           {contentPreview && (
             <p className="text-xs sm:text-sm text-muted-foreground line-clamp-2 mt-0.5 sm:mt-1">
               {contentPreview}
@@ -293,6 +372,13 @@ function NoteCard({ note, onClick, onDelete, formatDate }: NoteCardProps) {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="bg-popover">
+            <DropdownMenuItem onSelect={(e) => onTogglePin(e)}>
+              {isPinned ? (
+                <><PinOff className="h-4 w-4 mr-2" />Unpin</>
+              ) : (
+                <><Pin className="h-4 w-4 mr-2" />Pin to top</>
+              )}
+            </DropdownMenuItem>
             <DropdownMenuItem onSelect={(e) => onDelete(e)} className="text-destructive">
               Delete
             </DropdownMenuItem>

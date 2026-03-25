@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/contexts/AuthContext";
 import { useEffect } from "react";
-import lookup from "country-code-lookup";
+import { getCurrentCoords, getCountryFromCoords } from "@/lib/geolocation";
 
 interface DiscussionsFeedProps {
   onAskQuestion?: () => void;
@@ -20,59 +20,21 @@ export function DiscussionsFeed({ onAskQuestion }: DiscussionsFeedProps) {
 
   // Auto-detect user location on mount
   useEffect(() => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        async (position) => {
-          const { latitude, longitude } = position.coords;
-          try {
-            // Use reverse geocoding to get country name
-            const response = await fetch(
-              `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`
-            );
-            const data = await response.json();
-            const countryName = data.address?.country || data.country || "";
-            
-            if (countryName) {
-              // Map country names to common travel destination formats
-              const countryMap: Record<string, string> = {
-                "Malaysia": "Malaysia",
-                "Indonesia": "Indonesia",
-                "United States": "United States",
-                "Singapore": "Singapore",
-                "Thailand": "Thailand",
-                "Philippines": "Philippines",
-                "Vietnam": "Vietnam",
-              };
-              
-              const mappedCountry = countryMap[countryName] || countryName;
-              setLocationFilter(mappedCountry);
-            }
-          } catch (error) {
-            console.error("Error fetching country from coordinates:", error);
-          }
-        },
-        (error) => {
-          console.error("Geolocation error:", error);
-        }
-      );
-    }
+    (async () => {
+      try {
+        const coords = await getCurrentCoords();
+        const country = await getCountryFromCoords(coords);
+        if (country) setLocationFilter(country);
+      } catch (error) {
+        console.error("Location detection error:", error);
+      }
+    })();
   }, [setLocationFilter]);
-
-  const getCountryFlag = (countryName: string) => {
-    const entry = lookup.byCountry(countryName);
-    const code = entry?.iso2?.toUpperCase() || "";
-    if (code.length !== 2) return "";
-    const base = 0x1f1e6;
-    const c1 = code.charCodeAt(0) - 65;
-    const c2 = code.charCodeAt(1) - 65;
-    if (c1 < 0 || c1 > 25 || c2 < 0 || c2 > 25) return "";
-    return String.fromCodePoint(base + c1, base + c2);
-  };
 
   return (
     <div className="flex flex-col">
       {/* Filter bar */}
-      <div className="sticky top-0 z-30 bg-background/95 backdrop-blur-sm border-b border-border/50 px-0 sm:px-4 py-4 sm:py-3 space-y-3">
+      <div className="px-0 sm:px-4 pt-3 pb-2 space-y-2 border-b border-border/40">
         {/* Mobile: Stack vertically | Desktop: Side by side */}
         <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-2">
           <LocationFilter />
@@ -93,7 +55,7 @@ export function DiscussionsFeed({ onAskQuestion }: DiscussionsFeedProps) {
         {/* Location helper text */}
         {filters.location !== "global" && (
           <p className="text-xs text-muted-foreground">
-            Showing discussions in {getCountryFlag(filters.location) ? `${getCountryFlag(filters.location)} ` : ""}{filters.location}
+            Showing discussions in {filters.location}
           </p>
         )}
       </div>
@@ -135,25 +97,23 @@ export function DiscussionsFeed({ onAskQuestion }: DiscussionsFeedProps) {
         )}
       </div>
 
-      {/* Desktop floating button - positioned within content container */}
+      {/* Desktop floating button - pinned to bottom-right, clear of sidebar */}
       {isAuthenticated && onAskQuestion && (
-        <div className="hidden sm:block fixed bottom-above-nav-lg left-0 right-0 pointer-events-none z-40">
-          <div className="max-w-5xl mx-auto px-4 flex justify-end">
+        <div className="hidden sm:block fixed bottom-8 right-8 z-40">
             <Button
               onClick={onAskQuestion}
-              className="rounded-full shadow-lg gap-2 pointer-events-auto"
+              className="rounded-full shadow-lg gap-2"
               size="lg"
             >
               <MessageSquarePlus className="h-5 w-5" />
               Ask the Community
             </Button>
-          </div>
         </div>
       )}
 
       {/* Mobile sticky full-width button */}
       {isAuthenticated && onAskQuestion && (
-        <div className="sm:hidden fixed left-0 right-0 p-4 bg-background/95 backdrop-blur-sm border-t border-border/50 bottom-above-nav z-[60]">
+        <div className="sm:hidden fixed left-0 right-0 p-4 bg-background border-t border-border/50 bottom-above-nav z-[60]">
           <Button
             onClick={onAskQuestion}
             className="w-full gap-2"

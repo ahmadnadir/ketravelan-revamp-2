@@ -263,7 +263,7 @@ serve(async (req: Request) => {
         `Confirm: ${variables.ctaUrl}`,
         "",
         "If you didn’t sign up, you can safely ignore this email.",
-        "— The Ketravelan Crew",
+        " The Ketravelan Crew",
       ].filter(Boolean).join("\n");
       await sendResendRawEmail({ to: body.email, subject, html, text });
     }

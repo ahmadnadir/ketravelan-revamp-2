@@ -32,7 +32,7 @@ export default function HelpArticleDetail() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
+      <div className="min-h-dvh bg-background flex items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
       </div>
     );
@@ -45,7 +45,7 @@ export default function HelpArticleDetail() {
           title="Article Not Found | Ketravelan" 
           description="This help article could not be found."
         />
-        <div className="min-h-screen bg-background">
+        <div className="min-h-dvh bg-background">
           <div className="max-w-3xl mx-auto px-4 py-8">
             <div className="text-center space-y-4">
               <h1 className="text-2xl font-bold">Article Not Found</h1>
@@ -75,11 +75,11 @@ export default function HelpArticleDetail() {
         description={article.excerpt || `Learn about ${article.title.toLowerCase()} on Ketravelan.`}
       />
 
-      <div className="min-h-screen bg-white">
-        {/* Header */}
-        <div className="sticky top-0 z-10 bg-white/95 backdrop-blur-sm border-b border-border/50">
-          <div className="max-w-3xl mx-auto px-4 py-4">
-            <div className="flex items-center gap-3">
+      <div className="app-shell bg-white">
+        <div className="app-shell-top">
+          <header className="h-full bg-white/95 backdrop-blur-sm border-b border-border/50 safe-x">
+            <div className="h-[var(--safe-top)]" />
+            <div className="max-w-3xl mx-auto px-4 h-[var(--header-height)] flex items-center gap-3">
               <Button
                 variant="ghost"
                 size="icon"
@@ -99,11 +99,11 @@ export default function HelpArticleDetail() {
                 <h1 className="text-base font-semibold truncate">{article.title}</h1>
               </div>
             </div>
-          </div>
+          </header>
         </div>
 
-        {/* Content */}
-        <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 sm:py-10">
+        <div className="app-shell-content" style={{ paddingTop: "var(--header-total-height)", paddingBottom: "1rem" }}>
+          <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 sm:py-10">
           <article className="space-y-8 sm:space-y-10">
             {/* Meta */}
             <div className="flex items-center gap-4 text-xs text-muted-foreground">
@@ -150,6 +150,7 @@ export default function HelpArticleDetail() {
               </div>
             </div>
           </article>
+          </div>
         </div>
       </div>
     </>

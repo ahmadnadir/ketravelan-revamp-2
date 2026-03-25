@@ -20,7 +20,7 @@ Google sign-in is fully implemented in your app with authenticated profile fetch
    - Name: "Ketravelan Web Client"
    - Authorized redirect URIs: Add this exact URL:
      ```
-     https://hyqkuywysqynmtjpjoam.supabase.co/auth/v1/callback
+     https://sspvqhleqlycsiniywkg.supabase.co/auth/v1/callback
      ```
    - Click **Create**
 
@@ -29,7 +29,7 @@ Google sign-in is fully implemented in your app with authenticated profile fetch
 ## Step 2: Configure Supabase
 
 1. Go to your [Supabase Dashboard](https://supabase.com/dashboard)
-2. Select your project: `hyqkuywysqynmtjpjoam`
+2. Select your project: `sspvqhleqlycsiniywkg`
 3. Navigate to **Authentication** → **Providers**
 4. Find **Google** in the list and click to expand
 5. Enable the Google provider toggle
@@ -77,7 +77,7 @@ Google sign-in is fully implemented in your app with authenticated profile fetch
 
 ### "Redirect URI mismatch" error
 - Make sure the redirect URI in Google Cloud Console exactly matches:
-  `https://hyqkuywysqynmtjpjoam.supabase.co/auth/v1/callback`
+  `https://sspvqhleqlycsiniywkg.supabase.co/auth/v1/callback`
 
 ### "Access blocked: This app's request is invalid"
 - Complete the OAuth consent screen configuration

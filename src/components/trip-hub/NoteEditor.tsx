@@ -385,8 +385,13 @@ export function NoteEditor({
 
   return (
     <>
-      <Drawer open={open} onOpenChange={(isOpen) => !isOpen && handleClose()}>
-        <DrawerContent className="h-[95vh] max-h-[95vh]">
+      <Drawer
+        open={open}
+        onOpenChange={(isOpen) => !isOpen && handleClose()}
+        shouldScaleBackground={false}
+        repositionInputs={false}
+      >
+        <DrawerContent className="h-[95vh] max-h-[95vh]" data-disable-keyboard-autoscroll="true">
           <DrawerHeader className="border-b border-border/50 px-3 sm:px-4">
             <div className="flex items-center justify-between">
               <Button

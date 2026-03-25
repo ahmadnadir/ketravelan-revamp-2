@@ -158,7 +158,7 @@ function convertDraftToTripData(draft: TripDraft, status: 'draft' | 'published' 
       draft.dateType === 'exact'
         ? draft.endDate || null
         : null,
-    max_participants: draft.groupSizeType === 'set' ? draft.groupSize : undefined,
+    max_participants: draft.groupSizeType === 'set' ? draft.groupSize : 5,
     visibility: draft.visibility,
     tags,
     travel_styles,

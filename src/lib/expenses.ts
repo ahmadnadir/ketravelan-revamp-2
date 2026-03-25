@@ -629,6 +629,61 @@ export async function fetchUserTripExpenses(tripId: string) {
   return data || [];
 }
 
+/**
+ * Fetch a lightweight overview of all expenses for the given trips,
+ * plus the current user's participant/payment rows so the caller can
+ * compute accurate per-currency balances without relying on the
+ * `get_who_owes_who` RPC (which sums amounts across currencies).
+ */
+export async function fetchTripsExpenseOverview(tripIds: string[]) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not authenticated');
+
+  // 1. All non-deleted expenses for these trips (no creator filter)
+  const { data: expenses, error: expErr } = await supabase
+    .from('trip_expenses')
+    .select('id, trip_id, currency, amount')
+    .in('trip_id', tripIds)
+    .eq('is_deleted', false);
+  if (expErr) throw expErr;
+
+  const expenseIds = (expenses || []).map((e: any) => e.id);
+
+  if (expenseIds.length === 0) {
+    return { expenses: [] as any[], owed: [] as any[], credited: [] as any[] };
+  }
+
+  // 2. Rows where the current user is a participant (money they owe)
+  const { data: owed, error: owedErr } = await supabase
+    .from('expense_participants')
+    .select('expense_id, amount_owed, is_paid')
+    .eq('user_id', user.id)
+    .in('expense_id', expenseIds);
+  if (owedErr) throw owedErr;
+
+  // 3. Expenses where the current user is a payer (money others owe them)
+  const { data: userPayments, error: payErr } = await supabase
+    .from('expense_payments')
+    .select('expense_id')
+    .eq('user_id', user.id)
+    .in('expense_id', expenseIds);
+  if (payErr) throw payErr;
+
+  const paidExpenseIds = (userPayments || []).map((p: any) => p.expense_id);
+  let credited: any[] = [];
+  if (paidExpenseIds.length > 0) {
+    const { data: creditData } = await supabase
+      .from('expense_participants')
+      .select('expense_id, amount_owed, is_paid')
+      .neq('user_id', user.id)
+      .in('expense_id', paidExpenseIds)
+      .eq('is_paid', false);
+    credited = creditData || [];
+  }
+
+  return { expenses: expenses || [], owed: owed || [], credited };
+}
+
 // Fetch expenses for multiple trips grouped by trip
 export async function fetchExpensesByTrips(tripIds: string[]) {
   const { data: { user } } = await supabase.auth.getUser();

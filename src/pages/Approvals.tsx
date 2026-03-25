@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useMemo, useEffect, useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { SegmentedControl } from "@/components/shared/SegmentedControl";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -116,10 +117,12 @@ const segmentOptions = [
 
 export default function Approvals() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { toast } = useToast();
   const [activeSegment, setActiveSegment] = useState("pending");
   const [approvals, setApprovals] = useState<ApprovalItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [processingId, setProcessingId] = useState<string | null>(null);
 
   const getAvatarUrl = (name?: string, imageUrl?: string) => {
     const trimmed = String(imageUrl || "").trim();
@@ -254,119 +257,161 @@ export default function Approvals() {
     return approvals.filter((item) => item.status === "pending").length;
   }, [approvals]);
 
-  const handleApprove = async (id: string) => {
-    try {
-      await approveJoinRequest(id);
-
-      setApprovals((prev) =>
-        prev.map((item) =>
-          item.id === id ? { ...item, status: "approved" as ApprovalStatus } : item
-        )
-      );
-
-      toast({
-        title: "Request approved",
-        description: "The user has been added to the trip.",
-      });
-    } catch (error) {
-      console.error('Failed to approve request:', error);
-      toast({
-        title: "Failed to approve",
-        description: "Something went wrong. Please try again.",
-        variant: "destructive",
-      });
-    }
+  const handleApprove = async (id: string, context?: { tripId: string; userId: string }) => {
+    await approveJoinRequest(id, context);
+    setApprovals((prev) =>
+      prev.map((item) =>
+        item.id === id ? { ...item, status: "approved" as ApprovalStatus } : item
+      )
+    );
+    // Invalidate all trip-related caches so current_participants refreshes everywhere
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['trips'] }),
+      queryClient.invalidateQueries({ queryKey: ['trip'] }),
+      queryClient.invalidateQueries({ queryKey: ['userTrips'] }),
+      queryClient.invalidateQueries({ queryKey: ['myTrips'] }),
+    ]);
+    toast({
+      title: "Request approved",
+      description: "The user has been added to the trip.",
+    });
   };
 
   const handleReject = async (id: string) => {
-    try {
-      await rejectJoinRequest(id);
-
-      setApprovals((prev) =>
-        prev.map((item) =>
-          item.id === id ? { ...item, status: "rejected" as ApprovalStatus } : item
-        )
-      );
-
-      toast({
-        title: "Request declined",
-        description: "The join request has been declined.",
-      });
-    } catch (error) {
-      console.error('Failed to reject request:', error);
-      toast({
-        title: "Failed to decline",
-        description: "Something went wrong. Please try again.",
-        variant: "destructive",
-      });
-    }
+    await rejectJoinRequest(id);
+    setApprovals((prev) =>
+      prev.map((item) =>
+        item.id === id ? { ...item, status: "rejected" as ApprovalStatus } : item
+      )
+    );
+    toast({
+      title: "Request declined",
+      description: "The join request has been declined.",
+    });
   };
 
   // Unified handlers to match new UI API while preserving existing integrations
   const handleApproveItem = async (item: ApprovalItem) => {
-    switch (item.type) {
-      case "join_request":
-        await handleApprove(item.id);
-        break;
-      case "expense_approval": {
-        // Placeholder: mark as approved locally; integrate API when available
-        setApprovals((prev) =>
-          prev.map((i) => (i.id === item.id ? { ...i, status: "approved" as ApprovalStatus } : i))
-        );
-        toast({ title: "Expense acknowledged", description: "Marked as acknowledged." });
-        break;
-      }
-      case "receipt_verification": {
-        await approveReceipt(item.id);
-        if (item.expenseId) {
-          await markParticipantsAsPaid([item.expenseId], item.submittedBy.id);
+    if (processingId) return;
+    setProcessingId(item.id);
+    try {
+      switch (item.type) {
+        case "join_request":
+          await handleApprove(item.id, { tripId: item.tripId, userId: item.requester.id });
+          break;
+        case "expense_approval": {
+          // Placeholder: mark as approved locally; integrate API when available
+          setApprovals((prev) =>
+            prev.map((i) => (i.id === item.id ? { ...i, status: "approved" as ApprovalStatus } : i))
+          );
+          toast({ title: "Expense acknowledged", description: "Marked as acknowledged." });
+          break;
         }
-        setApprovals((prev) =>
-          prev.map((i) => (i.id === item.id ? { ...i, status: "approved" as ApprovalStatus } : i))
-        );
-        toast({ title: "Receipt confirmed", description: "Payment has been confirmed." });
-        break;
+        case "receipt_verification": {
+          await approveReceipt(item.id);
+          if (item.expenseId) {
+            await markParticipantsAsPaid([item.expenseId], item.submittedBy.id);
+          }
+          setApprovals((prev) =>
+            prev.map((i) => (i.id === item.id ? { ...i, status: "approved" as ApprovalStatus } : i))
+          );
+          toast({ title: "Receipt confirmed", description: "Payment has been confirmed." });
+          break;
+        }
+        case "trip_invite": {
+          const invite = await acceptTripInvite(item.id);
+          setApprovals((prev) =>
+            prev.map((i) => (i.id === item.id ? { ...i, status: "approved" as ApprovalStatus } : i))
+          );
+          toast({ title: "Invite accepted", description: "You have joined the trip." });
+          // Optimistically prepend the joined trip's conversation to the chat list
+          if (invite?.trip_id) {
+            (async () => {
+              try {
+                const { supabase } = await import("@/lib/supabase");
+                const { data: conv } = await supabase
+                  .from('conversations')
+                  .select('id, name, conversation_type, trip_id, created_at, trip:trips(id, title, cover_image)')
+                  .eq('trip_id', invite.trip_id)
+                  .maybeSingle();
+                const { data: { user: me } } = await supabase.auth.getUser();
+                if (conv && me) {
+                  const now = new Date().toISOString();
+                  const fakeParticipant = {
+                    id: `optimistic-${conv.id}`,
+                    user_id: me.id,
+                    last_read_at: now,
+                    is_admin: false,
+                    created_at: now,
+                    conversation: conv,
+                    lastMessage: null,
+                    unreadCount: 0,
+                  };
+                  queryClient.setQueryData(
+                    ['conversations', me.id],
+                    (old: any[]) => {
+                      if (!Array.isArray(old)) return [fakeParticipant];
+                      const filtered = old.filter((p: any) => p.conversation?.trip_id !== invite.trip_id);
+                      return [fakeParticipant, ...filtered];
+                    }
+                  );
+                }
+              } catch (e) {
+                console.warn('[Approvals] optimistic chat insert failed:', e);
+              } finally {
+                queryClient.invalidateQueries({ queryKey: ['conversations'] });
+              }
+            })();
+          }
+          break;
+        }
       }
-      case "trip_invite": {
-        await acceptTripInvite(item.id);
-        setApprovals((prev) =>
-          prev.map((i) => (i.id === item.id ? { ...i, status: "approved" as ApprovalStatus } : i))
-        );
-        toast({ title: "Invite accepted", description: "You have joined the trip." });
-        break;
-      }
+    } catch (error) {
+      console.error('Failed to approve item:', error);
+      toast({ title: "Action failed", description: "Something went wrong. Please try again.", variant: "destructive" });
+    } finally {
+      setProcessingId(null);
     }
   };
 
   const handleRejectItem = async (item: ApprovalItem) => {
-    switch (item.type) {
-      case "join_request":
-        await handleReject(item.id);
-        break;
-      case "expense_approval": {
-        // Placeholder: mark as rejected locally; integrate API when available
-        setApprovals((prev) =>
-          prev.map((i) => (i.id === item.id ? { ...i, status: "rejected" as ApprovalStatus } : i))
-        );
-        toast({ title: "Expense disputed", description: "Marked as disputed." });
-        break;
+    if (processingId) return;
+    setProcessingId(item.id);
+    try {
+      switch (item.type) {
+        case "join_request":
+          await handleReject(item.id);
+          break;
+        case "expense_approval": {
+          // Placeholder: mark as rejected locally; integrate API when available
+          setApprovals((prev) =>
+            prev.map((i) => (i.id === item.id ? { ...i, status: "rejected" as ApprovalStatus } : i))
+          );
+          toast({ title: "Expense disputed", description: "Marked as disputed." });
+          break;
+        }
+        case "receipt_verification": {
+          await rejectReceipt(item.id, "Rejected in approvals");
+          setApprovals((prev) =>
+            prev.map((i) => (i.id === item.id ? { ...i, status: "rejected" as ApprovalStatus } : i))
+          );
+          toast({ title: "Receipt rejected", description: "Receipt has been rejected." });
+          break;
+        }
+        case "trip_invite": {
+          await rejectTripInvite(item.id);
+          setApprovals((prev) =>
+            prev.map((i) => (i.id === item.id ? { ...i, status: "rejected" as ApprovalStatus } : i))
+          );
+          toast({ title: "Invite declined", description: "The invite has been declined." });
+          break;
+        }
       }
-      case "receipt_verification": {
-        await rejectReceipt(item.id, "Rejected in approvals");
-        setApprovals((prev) =>
-          prev.map((i) => (i.id === item.id ? { ...i, status: "rejected" as ApprovalStatus } : i))
-        );
-        toast({ title: "Receipt rejected", description: "Receipt has been rejected." });
-        break;
-      }
-      case "trip_invite": {
-        await rejectTripInvite(item.id);
-        setApprovals((prev) =>
-          prev.map((i) => (i.id === item.id ? { ...i, status: "rejected" as ApprovalStatus } : i))
-        );
-        toast({ title: "Invite declined", description: "The invite has been declined." });
-        break;
-      }
+    } catch (error) {
+      console.error('Failed to reject item:', error);
+      toast({ title: "Action failed", description: "Something went wrong. Please try again.", variant: "destructive" });
+    } finally {
+      setProcessingId(null);
     }
   };
 
@@ -486,6 +531,7 @@ export default function Approvals() {
             variant="outline"
             size="sm"
             className="flex-1"
+            disabled={processingId === item.id}
             onClick={() => handleRejectItem(item)}
           >
             <X className="h-4 w-4 mr-1" />
@@ -494,6 +540,7 @@ export default function Approvals() {
           <Button
             size="sm"
             className="flex-1"
+            disabled={processingId === item.id}
             onClick={() => handleApproveItem(item)}
           >
             <Check className="h-4 w-4 mr-1" />
@@ -552,6 +599,7 @@ export default function Approvals() {
             variant="outline"
             size="sm"
             className="flex-1"
+            disabled={processingId === item.id}
             onClick={() => handleRejectItem(item)}
           >
             <X className="h-4 w-4 mr-1" />
@@ -560,6 +608,7 @@ export default function Approvals() {
           <Button
             size="sm"
             className="flex-1"
+            disabled={processingId === item.id}
             onClick={() => handleApproveItem(item)}
           >
             <Check className="h-4 w-4 mr-1" />
@@ -613,6 +662,7 @@ export default function Approvals() {
             variant="outline"
             size="sm"
             className="flex-1"
+            disabled={processingId === item.id}
             onClick={() => handleRejectItem(item)}
           >
             <X className="h-4 w-4 mr-1" />
@@ -621,6 +671,7 @@ export default function Approvals() {
           <Button
             size="sm"
             className="flex-1"
+            disabled={processingId === item.id}
             onClick={() => handleApproveItem(item)}
           >
             <Check className="h-4 w-4 mr-1" />
@@ -690,6 +741,7 @@ export default function Approvals() {
               variant="outline"
               size="sm"
               className="flex-1"
+              disabled={processingId === item.id}
               onClick={() => handleRejectItem(item)}
             >
               <X className="h-4 w-4 mr-1" />
@@ -698,6 +750,7 @@ export default function Approvals() {
             <Button
               size="sm"
               className="flex-1"
+              disabled={processingId === item.id}
               onClick={() => handleApproveItem(item)}
             >
               <Check className="h-4 w-4 mr-1" />
@@ -723,7 +776,7 @@ export default function Approvals() {
   };
 
   return (
-    <AppLayout>
+    <AppLayout wideLayout>
       <div className="py-6 space-y-6">
         {/* Header */}
         <div className="space-y-1">
@@ -754,10 +807,10 @@ export default function Approvals() {
           <>
             {/* Approval Items */}
             {filteredApprovals.length > 0 ? (
-          <div className="space-y-4">
-            {filteredApprovals.map(renderApprovalItem)}
-          </div>
-        ) : (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {filteredApprovals.map(renderApprovalItem)}
+              </div>
+            ) : (
           <div className="text-center py-16">
             <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-muted mb-4">
               {activeSegment === "pending" ? (

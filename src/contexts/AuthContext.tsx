@@ -199,6 +199,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!url) {
         throw new Error("Missing OAuth URL for native sign-in");
       }
+
+      // Attach a browserFinished listener BEFORE opening the browser so we
+      // never miss the callback.  When the in-app browser closes (either
+      // because iOS intercepted the custom-scheme redirect or the user
+      // dismissed it manually), poll for a session.  The deep-link handler in
+      // App.tsx handles the happy path; this is the fallback for the case
+      // where appUrlOpen fires before the listener is mounted.
+      const listenerHandle = await Browser.addListener("browserFinished", async () => {
+        listenerHandle.remove();
+        try {
+          // Give the deep-link handler a short window to run first.
+          await new Promise((res) => setTimeout(res, 300));
+          const { data: sessionData } = await supabase.auth.getSession();
+          if (!sessionData.session) {
+            // Session not yet set — the PKCE exchange may not have completed.
+            // Re-trigger onAuthStateChange by refreshing; Supabase will pick up
+            // any tokens stored from the deep link.
+            await supabase.auth.refreshSession();
+          }
+        } catch {
+          // Ignore – the deep-link handler is the primary path.
+        }
+      });
+
+      // Defensive: close any stale SFSafariViewController before opening a new one.
+      // When iOS auto-dismisses the browser via OAuth URL redirect, it does not call
+      // safariViewControllerDidFinish, leaving the Browser plugin's internal reference
+      // non-nil. A close() here resets that so the upcoming open() always succeeds.
+      try {
+        await Browser.close();
+      } catch {
+        // "No active window to close!" is expected when no browser is open — ignore.
+      }
+
       await Browser.open({ url, presentationStyle: "fullscreen" });
     }
   };
@@ -277,9 +311,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [profile?.home_currency]);
 
   useEffect(() => {
-    if (!user?.id || !profile) return;
-    syncPushNotifications(user.id, profile.push_notifications !== false);
-  }, [user?.id, profile?.push_notifications, profile]);
+    if (!user?.id) return;
+    syncPushNotifications(user.id, profile?.push_notifications !== false);
+  }, [user?.id, profile?.push_notifications]);
 
   return (
     <AuthContext.Provider

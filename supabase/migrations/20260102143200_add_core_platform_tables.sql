@@ -75,6 +75,8 @@ CREATE TABLE IF NOT EXISTS destinations (
 
 ALTER TABLE destinations ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Destinations are viewable by everyone" ON destinations;
+
 CREATE POLICY "Destinations are viewable by everyone"
   ON destinations FOR SELECT
   TO authenticated, anon
@@ -94,6 +96,10 @@ CREATE TABLE IF NOT EXISTS bookings (
 );
 
 ALTER TABLE bookings ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can view their own bookings" ON bookings;
+DROP POLICY IF EXISTS "Users can create bookings" ON bookings;
+DROP POLICY IF EXISTS "Users can update their own bookings" ON bookings;
 
 CREATE POLICY "Users can view their own bookings"
   ON bookings FOR SELECT
@@ -131,6 +137,9 @@ CREATE TABLE IF NOT EXISTS payments (
 
 ALTER TABLE payments ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can view their own payments" ON payments;
+DROP POLICY IF EXISTS "Users can create payments" ON payments;
+
 CREATE POLICY "Users can view their own payments"
   ON payments FOR SELECT
   TO authenticated
@@ -156,6 +165,11 @@ CREATE TABLE IF NOT EXISTS reviews (
 );
 
 ALTER TABLE reviews ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Reviews are viewable by everyone" ON reviews;
+DROP POLICY IF EXISTS "Users can create reviews for trips they joined" ON reviews;
+DROP POLICY IF EXISTS "Users can update their own reviews" ON reviews;
+DROP POLICY IF EXISTS "Users can delete their own reviews" ON reviews;
 
 CREATE POLICY "Reviews are viewable by everyone"
   ON reviews FOR SELECT
@@ -196,6 +210,8 @@ CREATE TABLE IF NOT EXISTS system_settings (
 
 ALTER TABLE system_settings ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "System settings are viewable by everyone" ON system_settings;
+
 CREATE POLICY "System settings are viewable by everyone"
   ON system_settings FOR SELECT
   TO authenticated, anon
@@ -214,6 +230,8 @@ CREATE TABLE IF NOT EXISTS policies (
 
 ALTER TABLE policies ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Policies are viewable by everyone" ON policies;
+
 CREATE POLICY "Policies are viewable by everyone"
   ON policies FOR SELECT
   TO authenticated, anon
@@ -229,6 +247,8 @@ CREATE TABLE IF NOT EXISTS trip_categories (
 );
 
 ALTER TABLE trip_categories ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Trip categories are viewable by everyone" ON trip_categories;
 
 CREATE POLICY "Trip categories are viewable by everyone"
   ON trip_categories FOR SELECT
@@ -247,6 +267,11 @@ CREATE TABLE IF NOT EXISTS trip_photos (
 );
 
 ALTER TABLE trip_photos ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Trip photos are viewable by everyone" ON trip_photos;
+DROP POLICY IF EXISTS "Trip members can upload photos" ON trip_photos;
+DROP POLICY IF EXISTS "Users can update their own photos" ON trip_photos;
+DROP POLICY IF EXISTS "Users can delete their own photos" ON trip_photos;
 
 CREATE POLICY "Trip photos are viewable by everyone"
   ON trip_photos FOR SELECT
@@ -292,6 +317,10 @@ CREATE TABLE IF NOT EXISTS trip_feedback (
 );
 
 ALTER TABLE trip_feedback ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can view feedback for their trips" ON trip_feedback;
+DROP POLICY IF EXISTS "Trip members can submit feedback" ON trip_feedback;
+DROP POLICY IF EXISTS "Users can update their own feedback" ON trip_feedback;
 
 CREATE POLICY "Users can view feedback for their trips"
   ON trip_feedback FOR SELECT

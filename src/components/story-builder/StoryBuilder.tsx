@@ -363,7 +363,7 @@ export function StoryBuilder({
   const isValid = draft.blocks.length > 0 && content.trim();
 
   return (
-    <div className="flex flex-col min-h-screen bg-background">
+    <div className="flex flex-col min-h-dvh bg-background">
       {/* Header */}
       <div className="sticky top-0 z-30 border-b border-border/50 bg-background/95 backdrop-blur-sm">
         <div className="px-4 py-3 flex items-center justify-between">
@@ -607,7 +607,7 @@ export function StoryBuilder({
       </div>
 
       {/* Bottom Action Buttons */}
-      <div className="fixed bottom-above-nav left-0 right-0 z-40 p-4 bg-background/95 backdrop-blur-sm border-t border-border/50">
+      <div className="fixed bottom-above-nav left-0 right-0 z-40 p-4 bg-background border-t border-border/50">
         <div className="flex gap-3">
           <Button
             variant="outline"

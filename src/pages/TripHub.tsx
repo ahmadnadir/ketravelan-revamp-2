@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 // Declare window.supabase type
 declare global {
   interface Window {
@@ -100,7 +100,7 @@ export default function TripHub() {
     loadData();
   }, [tripId]);
 
-  // Read tab from URL query param on mount
+  // Read tab and from-param from URL query params on mount
   useEffect(() => {
     const tabParam = searchParams.get("tab");
     if (tabParam === "expenses" || tabParam === "notes" || tabParam === "chat") {
@@ -108,9 +108,12 @@ export default function TripHub() {
     }
   }, [searchParams]);
 
+  const backTo = searchParams.get("from") === "expenses" ? "/expenses" : "/chat";
+
   const displayTrip = trip;
   const displayMembers = members;
   const { user } = useAuth();
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   // Always call ChatPage at top level to maintain hook order
   const chatPageContent = ChatPage({
@@ -122,16 +125,18 @@ export default function TripHub() {
     currentUserId: user?.id,
     tripId: displayTrip?.id,
     tripMembers: displayMembers,
+    scrollContainerRef,
   });
 
   // Only use footer when on chat tab
   const chatFooter = activeTab === "chat" && conversation ? chatPageContent.footerContent : null;
 
   const headerContent = (
-    <header className="glass border-b border-border/50 pt-[env(safe-area-inset-top)]">
+    <header className="h-full glass border-b border-border/50 safe-x">
+      <div className="h-[var(--safe-top)]" />
       <div className="container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto px-3 sm:px-4">
-        <div className="flex items-center gap-2 sm:gap-3 h-20 sm:h-18">
-          <Link to="/chat">
+        <div className="flex items-center gap-2 sm:gap-3 h-[var(--header-height)]">
+          <Link to={backTo}>
             <Button variant="ghost" size="icon" className="h-8 w-8 sm:h-9 sm:w-9">
               <ChevronLeft className="h-4 w-4 sm:h-5 sm:w-5" />
             </Button>
@@ -181,9 +186,8 @@ export default function TripHub() {
             )}
           </button>
         </div>
-
-        {/* Tabs - Chat, Expenses, Notes */}
-        <div className="pb-2 sm:pb-3">
+        {/* Tab switcher  sticky with header */}
+        <div className="pb-2.5 pt-1">
           <SegmentedControl
             options={[
               { label: "Chat", value: "chat" },
@@ -206,6 +210,7 @@ export default function TripHub() {
         showBottomNav={activeTab !== "chat"}
         focusedFlow={true}
         className="px-0 sm:px-0"
+        scrollContainerRef={scrollContainerRef}
       >
         <div className="container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto">
           {isLoading ? (
@@ -273,9 +278,12 @@ export default function TripHub() {
             <>
               {activeTab === "chat" && (
                 conversation ? (
-                  <div className="w-full py-4 sm:py-6 space-y-4">
-                    {chatPageContent.messagesContent}
-                    <div ref={chatPageContent.messagesEndRef} />
+                  <div className="relative w-full">
+                    <div className="pt-4 sm:pt-6 pb-2 space-y-4">
+                      {chatPageContent.messagesContent}
+                      <div ref={chatPageContent.messagesEndRef} />
+                    </div>
+                    {chatPageContent.scrollToBottomButton}
                   </div>
                 ) : (
                   <div className="flex items-center justify-center py-12">

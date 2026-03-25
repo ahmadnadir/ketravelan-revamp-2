@@ -63,11 +63,11 @@ export default function HelpCenter() {
         description="Find answers to common questions about using Ketravelan. Learn how to create trips, manage expenses, and more."
       />
       
-      <div className="min-h-screen bg-background">
-        {/* Header */}
-        <div className="sticky top-0 z-10 bg-background border-b border-border/50">
-          <div className="max-w-4xl mx-auto px-4 py-4">
-            <div className="flex items-center gap-3 mb-4">
+      <div className="app-shell bg-background">
+        <div className="app-shell-top">
+          <header className="h-full bg-background border-b border-border/50 safe-x">
+            <div className="h-[var(--safe-top)]" />
+            <div className="max-w-4xl mx-auto px-4 h-[var(--header-height)] flex items-center gap-3">
               <Button
                 variant="ghost"
                 size="icon"
@@ -78,10 +78,14 @@ export default function HelpCenter() {
               </Button>
               <div>
                 <h1 className="text-xl font-semibold">Help Center</h1>
-                <p className="text-sm text-muted-foreground">Find answers and support</p>
+                <p className="text-xs text-muted-foreground">Find answers and support</p>
               </div>
             </div>
+          </header>
+        </div>
 
+        <div className="app-shell-content" style={{ paddingTop: "var(--header-total-height)", paddingBottom: "1rem" }}>
+          <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
             {/* Search Bar */}
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -93,11 +97,7 @@ export default function HelpCenter() {
                 className="pl-10 rounded-full"
               />
             </div>
-          </div>
-        </div>
 
-        {/* Content */}
-        <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
           {/* Categories */}
           {!searchQuery && (
             <div className="space-y-3">
@@ -176,6 +176,7 @@ export default function HelpCenter() {
               </Card>
             </div>
           ))}
+          </div>
         </div>
       </div>
     </>

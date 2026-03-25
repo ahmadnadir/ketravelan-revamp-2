@@ -101,7 +101,7 @@ function buildHtmlEmail(opts: {
 }) {
   const brand = escapeHtml(opts.brand);
   const title = escapeHtml(opts.title);
-  const preheader = `Update on your join request — ${brand}`;
+  const preheader = `Update on your join request  ${brand}`;
   const ctaUrlEsc = opts.ctaUrl ? escapeHtml(opts.ctaUrl) : undefined;
   const ctaLabel = opts.ctaLabel ? escapeHtml(opts.ctaLabel) : 'View Trip';
 
@@ -206,7 +206,7 @@ serve(async (req: Request) => {
     const title = body.status === 'approved' ? 'Your join request was approved' : 'Your join request was declined';
     const message = body.status === 'approved'
       ? `Great news! You've been approved to join <strong>${escapeHtml(trip?.title || 'the trip')}</strong> (${escapeHtml(trip?.destination || '')}).<br/><br/>View details: <a href="${escapeHtml(tripUrl)}">${escapeHtml(tripUrl)}</a>`
-      : `We're sorry—your request to join <strong>${escapeHtml(trip?.title || 'the trip')}</strong> (${escapeHtml(trip?.destination || '')}) was not approved this time.`;
+      : `We're sorryyour request to join <strong>${escapeHtml(trip?.title || 'the trip')}</strong> (${escapeHtml(trip?.destination || '')}) was not approved this time.`;
 
     const html = buildHtmlEmail({
       brand: "Ketravelan",

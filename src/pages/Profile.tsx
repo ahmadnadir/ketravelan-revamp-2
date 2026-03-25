@@ -37,11 +37,11 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useUserTrips } from "@/hooks/useTrips";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase";
-import { uploadImageFromDataUrl } from "@/lib/imageStorage";
 import { getCurrencyInfo, type CurrencyCode } from "@/lib/currencyUtils";
 import { cn } from "@/lib/utils";
 import { createDirectConversation } from "@/lib/conversations";
 import { ImageCropModal } from "@/components/profile/ImageCropModal";
+import { uploadImageFromDataUrl } from "@/lib/imageStorage";
 
 
 // Helper to map stored travel style id/label to display label + emoji for consistent rendering
@@ -291,15 +291,10 @@ export default function Profile() {
     if (!user) return;
     try {
       setUploadingAvatar(true);
-      const publicUrl = await uploadImageFromDataUrl(croppedImage, {
-        bucket: (import.meta as unknown as { env?: { VITE_PROFILE_AVATARS_BUCKET?: string } }).env?.VITE_PROFILE_AVATARS_BUCKET || "profile-avatars",
-        folder: `profiles/${user.id}`,
-        filename: `avatar-${Date.now()}`,
-      });
 
       const { error } = await supabase
         .from("profiles")
-        .update({ avatar_url: publicUrl, updated_at: new Date().toISOString() })
+        .update({ avatar_url: croppedImage, updated_at: new Date().toISOString() })
         .eq("id", user.id);
 
       if (error) throw error;
@@ -890,12 +885,12 @@ export default function Profile() {
       {/* Full-screen avatar viewer */}
       <Dialog open={avatarViewOpen} onOpenChange={setAvatarViewOpen}>
         <DialogContent className="max-w-4xl w-[100vw] h-[100vh] sm:w-[90vw] border-border/50 p-0 overflow-hidden flex flex-col [&>button]:hidden">
-          <DialogHeader className="p-4 pb-2 border-b border-border/50 flex-none relative">
+          <DialogHeader className="px-4 pt-[calc(env(safe-area-inset-top)+0.75rem)] pb-2 border-b border-border/50 flex-none relative">
             <DialogTitle className="text-center w-full">Profile Photo</DialogTitle>
             <button
               type="button"
               onClick={() => setAvatarViewOpen(false)}
-              className="h-8 w-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors absolute right-4 top-1"
+              className="h-8 w-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors absolute right-4 bottom-2"
               aria-label="Close profile photo"
             >
               <X className="h-5 w-5" />

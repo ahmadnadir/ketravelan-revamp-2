@@ -236,8 +236,8 @@ serve(async (req: Request) => {
 
       const amountOwed = Number(participant.amount_owed || 0).toFixed(2);
       const subject = daysOverdue > 0
-        ? `Payment reminder — ${daysOverdue} days overdue`
-        : "Payment reminder — action needed";
+        ? `Payment reminder  ${daysOverdue} days overdue`
+        : "Payment reminder  action needed";
       const messageHtml = `Your share for <strong>${escapeHtml(expense.description)}</strong> is still pending. Amount: <strong>${escapeHtml(expense.currency)} ${escapeHtml(amountOwed)}</strong>.` +
         (daysOverdue > 0 ? ` It has been <strong>${daysOverdue} days</strong> since the expense was added.` : "");
 

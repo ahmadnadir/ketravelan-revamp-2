@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 export default function VerificationPending() {
   const navigate = useNavigate();
   return (
-    <div className="min-h-screen w-full flex flex-col items-center justify-center px-2 bg-gradient-to-br from-[#f5f3ff] via-[#f0f4ff] to-[#e0e7ff] font-sans">
+    <div className="min-h-dvh w-full flex flex-col items-center justify-center px-2 bg-gradient-to-br from-[#f5f3ff] via-[#f0f4ff] to-[#e0e7ff] font-sans">
       <div
         className="w-full max-w-md bg-white/90 rounded-3xl border border-gray-100 p-5 sm:p-10 pt-8 pb-8 text-center shadow-2xl backdrop-blur-md"
         style={{ boxShadow: '0 8px 32px 0 rgba(80, 60, 180, 0.10)' }}

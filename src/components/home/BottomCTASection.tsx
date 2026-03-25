@@ -8,7 +8,7 @@ export function BottomCTASection() {
         Start Planning Together. Settle Fairly.
       </h2>
       <p className="text-sm sm:text-base text-primary-foreground/80 max-w-md mx-auto">
-        Create or join a DIY trip, manage shared expenses, and keep money conversations simple — from day one to the final settlement.
+        Create or join a DIY trip, manage shared expenses, and keep money conversations simple  from day one to the final settlement.
       </p>
 
       <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 justify-center pt-2">

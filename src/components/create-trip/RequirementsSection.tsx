@@ -53,7 +53,7 @@ export function RequirementsSection({
           What to Expect
         </h3>
         <p className="text-xs text-muted-foreground mb-4">
-          These help people join confidently — no pressure, just clarity.
+          These help people join confidently  no pressure, just clarity.
         </p>
       </div>
 

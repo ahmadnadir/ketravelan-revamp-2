@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { setVisitedFlag } from "@/pages/MainPage";
 import useEmblaCarousel from "embla-carousel-react";
 import { Users, Receipt, MapPin, MessageCircle, Plane, Globe, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -45,17 +46,17 @@ export default function WelcomeOnboarding() {
   };
 
   const handleGetStarted = () => {
-    localStorage.setItem("ketravelan_visited", "true");
+    setVisitedFlag();
     navigate("/explore");
   };
 
   const handleLogin = () => {
-    localStorage.setItem("ketravelan_visited", "true");
+    setVisitedFlag();
     navigate("/auth?mode=login");
   };
 
   const handleSignUp = () => {
-    localStorage.setItem("ketravelan_visited", "true");
+    setVisitedFlag();
     navigate("/auth?mode=signup");
   };
 

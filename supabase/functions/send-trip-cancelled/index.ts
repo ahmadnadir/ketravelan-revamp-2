@@ -197,7 +197,7 @@ serve(async (req: Request) => {
     const exploreUrl = `${SITE_ORIGIN}/explore`;
 
     const reasonText = body.reason ? `<br/><br/>Reason: ${escapeHtml(body.reason)}` : "";
-    const messageHtml = `Your trip <strong>${escapeHtml(trip.title)}</strong> (${escapeHtml(trip.destination || "")}) has been cancelled.${reasonText}<br/><br/>No stress — there are more trips waiting for you.`;
+    const messageHtml = `Your trip <strong>${escapeHtml(trip.title)}</strong> (${escapeHtml(trip.destination || "")}) has been cancelled.${reasonText}<br/><br/>No stress  there are more trips waiting for you.`;
 
     const html = buildHtmlEmail({
       brand: "Ketravelan",

@@ -23,6 +23,7 @@ import {
   FileText,
   X,
   Send,
+  UserPlus,
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
@@ -59,6 +60,7 @@ import { createTrip, updateTrip, fetchTripDetails, deleteDraftTrip } from "@/lib
 import { uploadImageFromDataUrl, isUrl } from "@/lib/imageStorage";
 import { supabase } from "@/lib/supabase";
 import { scheduleTripReminder } from "@/lib/tripReminders";
+import { useQueryClient } from "@tanstack/react-query";
 
 const steps = [
   { id: 1, title: "Visibility" },
@@ -70,6 +72,7 @@ const steps = [
 export default function CreateTrip() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const queryClient = useQueryClient();
   const [isPublishing, setIsPublishing] = useState(false);
   const topRef = useRef<HTMLDivElement>(null);
   const editTripId = searchParams.get('edit');
@@ -386,59 +389,97 @@ export default function CreateTrip() {
       /* -----------------------------
       * 5. Post-success
       * ----------------------------- */
-      setPublishedTripId(publishedTrip.id);
+
+      // Snapshot draft BEFORE clearing so share modal and navigation can use it
       draftSnapshotRef.current = { ...draft };
 
-      clearDraft();
-
-      // Only clear draftId when updating
-      if (isUpdating) {
-        localStorage.removeItem('ketravelan-draft-trip-id');
-      }
-
-      // Send trip created email ONLY if this is the first time publishing (draft -> published)
-      // Don't send if updating an already published trip
+      // Fire post-publish side-effects in the background — never block navigation
       if (!wasAlreadyPublished) {
-        try {
-          await supabase.functions.invoke('send-trip-created-email', {
-            body: { tripId: publishedTrip.id },
-          });
-          console.log('[handlePublish] Trip created email sent successfully');
-
+        (async () => {
+          try {
+            await supabase.functions.invoke('send-trip-created-email', {
+              body: { tripId: publishedTrip.id },
+            });
+            console.log('[handlePublish] Trip created email sent successfully');
+          } catch (e) {
+            console.warn('[handlePublish] Failed to send trip created email', e);
+          }
           try {
             await supabase.functions.invoke('send-trip-recommendation', {
               body: { tripId: publishedTrip.id },
             });
-            console.log('[handlePublish] Trip recommendation sent successfully');
-          } catch (recommendationErr) {
-            console.warn('[handlePublish] Failed to send trip recommendation', recommendationErr);
+          } catch (e) {
+            console.warn('[handlePublish] Failed to send trip recommendation', e);
           }
-          
-          // Schedule trip reminder emails (7, 3, 1 days before start)
           try {
             await scheduleTripReminder(publishedTrip.id);
-            console.log('[handlePublish] Trip reminders scheduled');
-          } catch (reminderErr) {
-            console.warn('[handlePublish] Failed to schedule trip reminders', reminderErr);
-            // Don't fail the entire publish if reminder fails
+          } catch (e) {
+            console.warn('[handlePublish] Failed to schedule trip reminders', e);
           }
-        } catch (e) {
-          console.warn('[handlePublish] Failed to send trip created email', e);
-        }
-      } else {
-        console.log('[handlePublish] Skipped email - trip was already published');
+        })();
       }
 
-      toast({
-        title: isUpdating ? 'Trip updated!' : 'Trip published!',
-        description: isUpdating
-          ? 'Your trip has been successfully updated.'
-          : 'Your trip is now live and ready for people to join.',
-      });
-
-      setTimeout(() => {
+      // For an update, navigate immediately — no blank intermediate state.
+      // For a fresh publish, show the success modal with share/invite actions.
+      if (isUpdating) {
+        clearDraft();
+        if (isUpdating) localStorage.removeItem('ketravelan-draft-trip-id');
+        toast({
+          title: 'Trip updated!',
+          description: 'Your trip has been successfully updated.',
+        });
         navigate(`/trip/${publishedTrip.id}`);
-      }, 800);
+      } else {
+        // Set these BEFORE clearDraft so the success modal can reference them
+        setPublishedTripId(publishedTrip.id);
+        setShowShareModal(true);
+        clearDraft();
+
+        // Optimistically insert the new trip group at the top of the chat list so
+        // it appears immediately without waiting for the next poll cycle.
+        // We fetch the conversation that was created by the DB trigger.
+        (async () => {
+          try {
+            const { data: conv } = await supabase
+              .from('conversations')
+              .select('id, name, conversation_type, trip_id, created_at, trip:trips(id, title, cover_image)')
+              .eq('trip_id', publishedTrip.id)
+              .maybeSingle();
+
+            if (conv) {
+              const { data: { user: currentUser } } = await supabase.auth.getUser();
+              const now = new Date().toISOString();
+              const fakeParticipant = {
+                id: `optimistic-${conv.id}`,
+                user_id: currentUser?.id,
+                last_read_at: now,
+                is_admin: true,
+                created_at: now,
+                conversation: conv,
+                lastMessage: null,
+                unreadCount: 0,
+              };
+
+              queryClient.setQueryData(
+                ['conversations', currentUser?.id],
+                (old: any[]) => {
+                  if (!Array.isArray(old)) return [fakeParticipant];
+                  // Remove any existing stale entry for this trip, then prepend
+                  const filtered = old.filter(
+                    (p: any) => p.conversation?.trip_id !== publishedTrip.id
+                  );
+                  return [fakeParticipant, ...filtered];
+                }
+              );
+            }
+          } catch (e) {
+            console.warn('[CreateTrip] optimistic chat insert failed:', e);
+          } finally {
+            // Always trigger a real refetch so cache stays accurate
+            queryClient.invalidateQueries({ queryKey: ['conversations'] });
+          }
+        })();
+      }
     } catch (error) {
       console.error('[handlePublish] failed', error);
 
@@ -870,7 +911,7 @@ export default function CreateTrip() {
                 Add Details
               </h2>
               <p className="text-sm text-muted-foreground mt-1">
-                All optional — you can refine later in the group chat
+                All optional  you can refine later in the group chat
               </p>
             </div>
 
@@ -1150,8 +1191,8 @@ export default function CreateTrip() {
       </div>
 
       {/* Sticky bottom action bar for Create Trip - sits above bottom nav */}
-      <div className="fixed inset-x-0 bottom-16 sm:bottom-20 z-30 bg-background/95 backdrop-blur-sm border-t border-border/50">
-        <div className="container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto px-4 pt-3 pb-3">
+      <div className="fixed left-0 right-0 lg:left-60 bottom-above-nav lg:bottom-0 z-30 bg-background border-t border-border/50">
+        <div className="container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto px-4 pt-3 pb-3 lg:pb-4">
           <div className="grid grid-cols-2 gap-3">
             {publishedTripId ? (
               <>
@@ -1244,38 +1285,55 @@ export default function CreateTrip() {
       {/* Share Modal */}
       <Dialog open={showShareModal} onOpenChange={setShowShareModal}>
         <DialogContent className="max-w-md w-[calc(100%-2rem)] sm:w-full rounded-2xl p-0 overflow-hidden [&>button]:hidden">
-          <DialogHeader className="p-4 pb-3 border-b border-border/50">
-            <div className="flex items-center justify-between">
-              <DialogTitle className="text-center flex-1">
-                <span className="text-2xl">🎉</span>
-                <br />
-                Your trip is live!
-              </DialogTitle>
-              <button 
-                onClick={() => setShowShareModal(false)}
-                className="h-8 w-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-          </DialogHeader>
-          <div className="p-4 space-y-4">
-            <p className="text-center text-sm text-muted-foreground">
-              Share it with friends or let others discover it
+          {/* No border-b header — full-bleed celebration layout */}
+          <div className="p-6 text-center space-y-2 border-b border-border/50 relative">
+            <button
+              onClick={() => {
+                setShowShareModal(false);
+                navigate(`/trip/${publishedTripId}`);
+              }}
+              className="absolute top-4 right-4 h-8 w-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
+            >
+              <X className="h-4 w-4" />
+            </button>
+            <div className="text-4xl mb-1">🎉</div>
+            <DialogHeader>
+              <DialogTitle className="text-xl font-bold">Trip Published!</DialogTitle>
+            </DialogHeader>
+            <p className="text-sm text-muted-foreground">
+              {draftSnapshotRef.current?.title
+                ? `"${draftSnapshotRef.current.title}" is now live`
+                : 'Your trip is now live'} and ready for people to join.
             </p>
-            
+          </div>
+          <div className="p-4 space-y-3">
+            {/* Primary CTA */}
+            <Button
+              size="lg"
+              className="w-full rounded-xl gap-2"
+              onClick={() => {
+                setShowShareModal(false);
+                navigate(`/trip/${publishedTripId}`);
+              }}
+            >
+              <CheckCircle2 className="h-4 w-4" />
+              View Trip Details
+            </Button>
+
+            {/* Share link row */}
             <div className="flex items-center gap-2 p-3 bg-secondary rounded-xl">
               <input
                 type="text"
                 readOnly
-                value={`https://ketravelan.app/trip/${publishedTripId}`}
-                className="flex-1 bg-transparent text-sm text-foreground outline-none"
+                value={`${window.location.origin}/trip/${publishedTripId}`}
+                className="flex-1 bg-transparent text-sm text-foreground outline-none truncate"
               />
               <Button
                 size="sm"
                 variant="ghost"
+                className="shrink-0"
                 onClick={() => {
-                  navigator.clipboard.writeText(`https://ketravelan.app/trip/${publishedTripId}`);
+                  navigator.clipboard.writeText(`${window.location.origin}/trip/${publishedTripId}`);
                   toast({ title: "Link copied!" });
                 }}
               >
@@ -1283,31 +1341,38 @@ export default function CreateTrip() {
               </Button>
             </div>
 
+            {/* Secondary actions */}
             <div className="flex gap-2">
               <Button
                 variant="outline"
-                className="flex-1 rounded-xl"
-                onClick={() => {
-                  setShowShareModal(false);
-                  navigate(`/trip/${publishedTripId}`);
-                }}
-              >
-                View Trip
-              </Button>
-              <Button
+                size="lg"
                 className="flex-1 rounded-xl gap-2"
                 onClick={() => {
-                  // Share API or fallback - use snapshot since draft is cleared
                   if (navigator.share && draftSnapshotRef.current) {
                     navigator.share({
                       title: draftSnapshotRef.current.title,
-                      url: `https://ketravelan.app/trip/${publishedTripId}`,
+                      url: `${window.location.origin}/trip/${publishedTripId}`,
                     });
+                  } else {
+                    navigator.clipboard.writeText(`${window.location.origin}/trip/${publishedTripId}`);
+                    toast({ title: "Link copied!" });
                   }
                 }}
               >
                 <Share2 className="h-4 w-4" />
                 Share
+              </Button>
+              <Button
+                variant="outline"
+                size="lg"
+                className="flex-1 rounded-xl gap-2"
+                onClick={() => {
+                  setShowShareModal(false);
+                  navigate(`/trip/${publishedTripId}`);
+                }}
+              >
+                <UserPlus className="h-4 w-4" />
+                Invite
               </Button>
             </div>
           </div>
@@ -1316,7 +1381,7 @@ export default function CreateTrip() {
 
       {/* Exit Confirmation Drawer */}
       <Drawer open={showExitModal} onOpenChange={setShowExitModal}>
-        <DrawerContent className="pt-[env(safe-area-inset-top)]">
+        <DrawerContent className="pt-safe">
           <DrawerHeader className="text-center">
             <DrawerTitle>Leave trip creation?</DrawerTitle>
             <DrawerDescription>

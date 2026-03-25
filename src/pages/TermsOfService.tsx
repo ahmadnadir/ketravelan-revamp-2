@@ -3,9 +3,11 @@ import { useNavigate } from "react-router-dom";
 import { ChevronLeft, Loader2 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { fetchPolicy, type Policy } from "@/lib/policies";
+import { useAuth } from "@/contexts/AuthContext";
 
 export default function TermsOfService() {
   const navigate = useNavigate();
+  const { isAuthenticated } = useAuth();
   const [policy, setPolicy] = useState<Policy | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -37,7 +39,7 @@ export default function TermsOfService() {
       {/* Page Header with Back Button */}
       <div className="flex items-center gap-3 mb-6">
         <button
-          onClick={() => navigate("/settings")}
+          onClick={() => navigate(isAuthenticated ? "/settings" : "/")}
           className="p-2 -ml-2 text-muted-foreground hover:text-foreground transition-colors rounded-lg hover:bg-muted/50"
           aria-label="Go back"
         >

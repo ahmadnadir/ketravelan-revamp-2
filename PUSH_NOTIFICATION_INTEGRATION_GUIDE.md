@@ -312,7 +312,7 @@ Events with **3-minute batching** (to avoid notification spam):
 - Mentions (#10)
 
 Events with **daily batching**:
-- Trip recommendations (#13) — grouped as daily digest
+- Trip recommendations (#13)  grouped as daily digest
 
 Other events send **immediately**.
 

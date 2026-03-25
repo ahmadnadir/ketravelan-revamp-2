@@ -83,6 +83,16 @@
     --sidebar-accent-foreground: 220 20% 20%;
     --sidebar-border: 220 14% 90%;
     --sidebar-ring: 220 20% 15%;
+
+    /* Global shell sizing + safe area tokens */
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-left: env(safe-area-inset-left, 0px);
+    --safe-right: env(safe-area-inset-right, 0px);
+    --header-height: 3.5rem;
+    --tabbar-height: 3.25rem;
+    --header-total-height: calc(var(--safe-top) + var(--header-height));
+    --keyboard-height: 0px;
   }
 
   .dark {
@@ -136,6 +146,13 @@
 }
 
 @layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+    background-color: #ffffff;
+  }
+
   * {
     @apply border-border;
   }
@@ -143,6 +160,59 @@
   body {
     @apply bg-background text-foreground antialiased;
     font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
+  }
+
+  .app-shell {
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .app-shell-top {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    flex: none;
+  }
+
+  .app-shell-content {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
+
+  .app-shell-bottom {
+    position: sticky;
+    bottom: 0;
+    z-index: 50;
+    flex: none;
+  }
+
+  /* Lock the document against any native scroll/pan so VisualViewport.offsetTop
+   * stays at 0 regardless of WebKit version. This prevents iOS 26.x WKWebView
+   * regressions where the keyboard caused vv.offsetTop > 0, visually shifting
+   * position:fixed elements (including the old fixed app-shell). */
+  body.native-ios-no-safe-area {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    overflow: hidden;
+  }
+
+  body.native-ios-no-safe-area #root {
+    overflow: hidden;
+    height: 100%; /* fills the fixed body */
+  }
+
+  /* Prevent iOS keyboard focus auto-zoom in native app webview */
+  body.native-ios-no-safe-area input,
+  body.native-ios-no-safe-area textarea,
+  body.native-ios-no-safe-area select {
+    font-size: 16px !important;
   }
 
   @media (max-width: 640px) {
@@ -155,6 +225,10 @@
   /* Keyboard open state - adjust layout when virtual keyboard is visible */
   body.keyboard-open {
     --keyboard-offset: 0px;
+  }
+
+  body.native-ios-no-safe-area.keyboard-open {
+    --keyboard-offset: var(--keyboard-height);
   }
 
   /* iOS-like typography */
@@ -174,8 +248,8 @@
 @layer utilities {
   /* Global safe-area-aware layout wrapper */
   .safe-area-layout {
-    padding-top: env(safe-area-inset-top, 0px);
-    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-top: 0;
+    padding-bottom: 0;
     min-height: 100vh;
     background-color: #ffffff;
   }
@@ -193,13 +267,11 @@
   .safe-area-layout::before {
     top: 0;
     height: env(safe-area-inset-top, 0px);
-    background-color: #ffffff; /* matches header background */
   }
 
   .safe-area-layout::after {
     bottom: 0;
     height: env(safe-area-inset-bottom, 0px);
-    background-color: #ffffff; /* matches bottom nav container background */
   }
 
   /* Safe area padding for mobile - all sides */
@@ -217,6 +289,20 @@
 
   .safe-right {
     padding-right: env(safe-area-inset-right, 0px);
+  }
+
+  .safe-x {
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+  }
+
+  .auth-safe-top {
+    height: env(safe-area-inset-top, 0px);
+  }
+
+  body.native-ios-no-safe-area .auth-safe-top {
+    height: max(env(safe-area-inset-top, 0px), 44px);
+    background: #ffffff;
   }
 
   .pb-safe {
@@ -247,8 +333,8 @@
 }
 
 .native-splash img {
-  width: 100%;
-  height: 100%;
+  width: 50%;
+  height: 50%;
   object-fit: cover;
 }
   /* Hide scrollbar but keep functionality */
@@ -260,25 +346,80 @@
     display: none;
   }
 
-  /* iOS native shell: lock viewport, scroll only main content so header and bottom nav stay fixed */
+  /* iOS native shell: flex column whose height is driven by JS (--vv-height =
+   * window.visualViewport.height). This replaces the old position:fixed+bottom
+   * approach which caused the header to shift on iOS 26.x WKWebView builds where
+   * VisualViewport.offsetTop was non-zero after keyboard interactions.
+   *
+   * Layout contract:
+   *   body  → position:fixed; inset:0   (document locked, offsetTop stays 0)
+   *   #root → height:100%              (fills locked body)
+   *   .app-shell → height:var(--vv-height)  (JS updates this = vv.height)
+   *                flex column; NOT position:fixed
+   *   .app-shell-top   → flex:none (plain child, not sticky/fixed)
+   *   .app-shell-content → flex:1; overflow-y:auto  (only scrollable zone)
+   *   .app-shell-bottom  → flex:none
+   */
   body.native-ios-no-safe-area .app-shell {
-    position: fixed;
-    inset: 0;
-    height: 100dvh;
-    display: flex;
-    flex-direction: column;
+    /* Height is set by JS via --vv-height (= window.visualViewport.height).
+     * vv.height decreases as the keyboard rises, shrinking this flex column
+     * so header/content/nav reflow without any position:fixed tricks. */
+    height: var(--vv-height, 100%);
+    /* NOT position:fixed  avoids iOS 26.x fixed-element pan regression.
+     * Deliberately no transform/will-change: transform here so that
+     * position:fixed children (bottom-above-nav bars) keep the viewport
+     * as their containing block and the existing keyboard-height CSS rules
+     * continue to work. */
     overflow: hidden;
+    will-change: height;
   }
 
-  body.native-ios-no-safe-area .app-shell main {
+  /* Header: plain flex child. NOT sticky (sticky inside overflow:hidden
+   * is a no-op and had inconsistent WKWebKit behaviour across versions).
+   * JS may apply translateY(vv.offsetTop) if any viewport panning slips
+   * through the body lock  this GPU layer makes that correction cheap. */
+  body.native-ios-no-safe-area .app-shell-top {
+    position: relative; /* clear the base sticky */
+    flex: none;
+    z-index: 50;
+    will-change: transform;
+    -webkit-transform: translateZ(0);
+    transform: translateZ(0);
+  }
+
+  body.native-ios-no-safe-area .app-shell-bottom {
+    position: relative; /* clear the base sticky */
+    flex: none;
+    z-index: 50;
+  }
+
+  body.native-ios-no-safe-area .app-shell-content {
     flex: 1;
+    min-height: 0;
     overflow-y: auto;
+    overflow-x: hidden;
     -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    scroll-padding-bottom: 1.5rem;
+  }
+
+  /* keyboard-aware-footer: no longer needs a transform – the shell shrinks.
+   * Kept as a no-op marker class so existing JSX doesn't need changes. */
+
+  /* Fixed action bars that live OUTSIDE the app-shell flex column
+   * (position:fixed, class bottom-above-nav) must be adjusted separately
+   * because they are anchored to the viewport, not the shell.
+   * Formula: keyboard height + nav bar height + safe-area bottom */
+  body.native-ios-no-safe-area.keyboard-open .bottom-above-nav {
+    bottom: calc(var(--keyboard-height, 0px) + var(--tabbar-height) + env(safe-area-inset-bottom, 0px)) !important;
+  }
+  body.native-ios-no-safe-area.keyboard-open .bottom-above-nav-lg {
+    bottom: calc(var(--keyboard-height, 0px) + var(--tabbar-height) + 1rem + env(safe-area-inset-bottom, 0px)) !important;
   }
 
   /* Glass effect for overlays */
   .glass {
-    @apply bg-card/80 backdrop-blur-md;
+    @apply bg-card/85 backdrop-blur-xl;
   }
 
   /* === SCROLL CONTAINMENT UTILITIES === */
@@ -321,10 +462,6 @@
     padding-top: 3.5rem !important;
   }
 
-  .native-ios-no-safe-area .pb-\[env\(safe-area-inset-bottom\)\] {
-    padding-bottom: 0 !important;
-  }
-
   .native-ios-no-safe-area .pb-\[calc\(7rem\+env\(safe-area-inset-bottom\)\)\] {
     padding-bottom: 7rem !important;
   }
@@ -335,6 +472,14 @@
 
   .native-ios-no-safe-area .bottom-\[calc\(env\(safe-area-inset-bottom\)\+64px\)\] {
     bottom: 64px !important;
+  }
+
+  body.native-ios-no-safe-area .safe-area-layout::after {
+    height: 0 !important;
+  }
+
+  body.native-ios-no-safe-area .safe-area-layout::before {
+    height: 0 !important;
   }
 
   /* iOS-safe dynamic viewport height */
@@ -373,13 +518,16 @@
     }
   }
 
-  /* Fixed element positioned above bottom nav with safe-area support */
+  /* Fixed element positioned above bottom nav with safe-area support.
+   * Includes a transition so both open and close animate smoothly. */
   .bottom-above-nav {
-    bottom: calc(4rem + env(safe-area-inset-bottom, 0px));
+    bottom: calc(var(--tabbar-height) + env(safe-area-inset-bottom, 0px));
+    transition: bottom 250ms cubic-bezier(0.4, 0, 0.2, 1);
   }
   /* Raised version for desktop floating CTAs */
   .bottom-above-nav-lg {
-    bottom: calc(5rem + env(safe-area-inset-bottom, 0px));
+    bottom: calc(var(--tabbar-height) + 1rem + env(safe-area-inset-bottom, 0px));
+    transition: bottom 250ms cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   /* Safe area padding for notched devices */

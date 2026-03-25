@@ -7,7 +7,7 @@ import { App as CapacitorApp } from "@capacitor/app";
 import { Browser } from "@capacitor/browser";
 import { Preferences } from "@capacitor/preferences";
 import { supabase } from "@/lib/supabase";
-import { isNativePlatform } from "@/lib/capacitor";
+import { configureIOSStatusBarForLightHeader, isNativePlatform } from "@/lib/capacitor";
 import { ScrollToTop } from "./components/layout/ScrollToTop";
 import { SafeAreaLayout } from "./components/layout/SafeAreaLayout";
 import { AuthProvider } from "./contexts/AuthContext";
@@ -44,17 +44,32 @@ import Feedback from "./pages/Feedback";
 import Settings from "./pages/Settings";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
 import TermsOfService from "./pages/TermsOfService";
+import Contact from "./pages/Contact";
+import About from "./pages/About";
 import HelpCenter from "./pages/HelpCenter";
 import HelpArticleDetail from "./pages/HelpArticleDetail";
 
 import { PageTransition } from "./components/layout/PageTransition";
+import { OfflineBanner } from "./components/layout/OfflineBanner";
+import { NetworkStatusProvider } from "./contexts/NetworkStatusContext";
 import React, { Suspense, useEffect, useRef, useState } from "react";
 
 const VerificationPending = React.lazy(() => import("./pages/VerificationPending"));
 const Onboarding = React.lazy(() => import("./pages/Onboarding"));
 const WelcomeOnboarding = React.lazy(() => import("./pages/WelcomeOnboarding"));
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 1000 * 30,            // Show cached data instantly; background-refresh after 30s
+      gcTime: 1000 * 60 * 10,          // Keep unused cache for 10 minutes
+      refetchOnWindowFocus: false,      // Don't refetch just from switching tabs
+      refetchOnReconnect: true,         // Auto-refetch when network is restored
+      networkMode: "online",            // Pause query (don't fire) when offline; resume on reconnect
+      retry: false,                     // No retries — offline queries resume automatically on reconnect
+    },
+  },
+});
 
 function RecoveryBootstrap() {
   const navigate = useNavigate();
@@ -75,29 +90,6 @@ function TripChatRedirect() {
   const search = location.search || "";
   if (!id) return <Navigate to="/" replace />;
   return <Navigate to={`/trip/${id}/hub${search}`} replace />;
-}
-
-function NativeSplashOverlay() {
-  const [visible, setVisible] = useState(false);
-
-  useEffect(() => {
-    if (!isNativePlatform()) {
-      return;
-    }
-    setVisible(true);
-    const timer = window.setTimeout(() => setVisible(false), 1400);
-    return () => window.clearTimeout(timer);
-  }, []);
-
-  if (!visible) {
-    return null;
-  }
-
-  return (
-    <div className="native-splash" aria-hidden="true">
-      <img src="/homescreen.png" alt="Ketravelan" />
-    </div>
-  );
 }
 
 function AuthDeepLinkHandler() {
@@ -232,18 +224,51 @@ function AuthDeepLinkHandler() {
   return null;
 }
 
+function IOSStatusBarInitializer() {
+  const location = useLocation();
+
+  useEffect(() => {
+    configureIOSStatusBarForLightHeader();
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (!isNativePlatform()) {
+      return;
+    }
+
+    let removeListener: (() => void) | undefined;
+    CapacitorApp.addListener("appStateChange", ({ isActive }) => {
+      if (isActive) {
+        configureIOSStatusBarForLightHeader();
+      }
+    }).then((listener) => {
+      removeListener = () => listener.remove();
+    });
+
+    return () => {
+      if (removeListener) {
+        removeListener();
+      }
+    };
+  }, []);
+
+  return null;
+}
+
 const App = () => (
   <AuthProvider>
     <ExpenseProvider>
       <QueryClientProvider client={queryClient}>
+      <NetworkStatusProvider>
       <TooltipProvider>
         <Toaster />
         <Sonner />
         <BrowserRouter>
           <SafeAreaLayout>
+            <OfflineBanner />
+            <IOSStatusBarInitializer />
             <ScrollToTop />
-            <NativeSplashOverlay />
-            <AuthDeepLinkHandler />
+          <AuthDeepLinkHandler />
             <RecoveryBootstrap />
             <PageTransition>
           <Suspense fallback={null}>
@@ -288,6 +313,8 @@ const App = () => (
               <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
               <Route path="/privacy-policy" element={<PrivacyPolicy />} />
               <Route path="/terms-of-service" element={<TermsOfService />} />
+              <Route path="/contact" element={<Contact />} />
+              <Route path="/about" element={<About />} />
               <Route path="/help-center" element={<HelpCenter />} />
               <Route path="/help-center/:slug" element={<HelpArticleDetail />} />
               <Route path="/install" element={<Install />} />
@@ -299,6 +326,7 @@ const App = () => (
           </SafeAreaLayout>
         </BrowserRouter>
       </TooltipProvider>
+      </NetworkStatusProvider>
       </QueryClientProvider>
     </ExpenseProvider>
   </AuthProvider>

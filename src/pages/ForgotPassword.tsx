@@ -51,10 +51,11 @@ export default function ForgotPassword() {
   };
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
-      {/* Header */}
-      <header className="sticky top-0 z-50 glass border-b border-border/50 pt-[env(safe-area-inset-top)]">
-        <div className="container max-w-lg mx-auto flex h-16 items-center px-4">
+    <div className="app-shell bg-background">
+      <div className="app-shell-top">
+        <header className="h-full glass border-b border-border/50 safe-x">
+          <div className="h-[var(--safe-top)]" />
+          <div className="container max-w-lg mx-auto flex h-[var(--header-height)] items-center px-4">
           <Button
             variant="ghost"
             size="icon"
@@ -64,57 +65,59 @@ export default function ForgotPassword() {
             <ArrowLeft className="h-5 w-5" />
           </Button>
           <h1 className="text-lg font-semibold">Forgot Password</h1>
-        </div>
-      </header>
+          </div>
+        </header>
+      </div>
 
-      {/* Content */}
-      <div className="flex-1 container max-w-lg mx-auto px-4 py-8">
-        <div className="mb-8 text-center">
-          <h2 className="text-2xl font-bold mb-2">Reset your password</h2>
-          <p className="text-muted-foreground">
-            Enter your email and we'll send you a reset link.
-          </p>
-        </div>
-
-        <form onSubmit={handleSendReset} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="email">Email</Label>
-            <div className="relative">
-              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
-              <Input
-                id="email"
-                type="email"
-                placeholder="Enter your email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="pl-10"
-                required
-                disabled={isSubmitting}
-                autoComplete="email"
-              />
-            </div>
+      <div className="app-shell-content" style={{ paddingTop: "var(--header-total-height)", paddingBottom: "1rem" }}>
+        <div className="container max-w-lg mx-auto px-4 py-8">
+          <div className="mb-8 text-center">
+            <h2 className="text-2xl font-bold mb-2">Reset your password</h2>
+            <p className="text-muted-foreground">
+              Enter your email and we'll send you a reset link.
+            </p>
           </div>
 
-          <Button
-            type="submit"
-            className="w-full h-12 text-base font-medium rounded-xl"
-            disabled={isSubmitting}
-          >
-            {isSubmitting ? "Sending..." : "Send Reset Link"}
-          </Button>
-        </form>
+          <form onSubmit={handleSendReset} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="email">Email</Label>
+              <div className="relative">
+                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
+                <Input
+                  id="email"
+                  type="email"
+                  placeholder="Enter your email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="pl-10"
+                  required
+                  disabled={isSubmitting}
+                  autoComplete="email"
+                />
+              </div>
+            </div>
 
-        <div className="mt-6 text-center">
-          <p className="text-muted-foreground">
-            Remembered your password?
-            <button
-              type="button"
-              onClick={() => navigate("/auth?mode=login")}
-              className="ml-1 text-foreground font-medium hover:underline"
+            <Button
+              type="submit"
+              className="w-full h-12 text-base font-medium rounded-xl"
+              disabled={isSubmitting}
             >
-              Log In
-            </button>
-          </p>
+              {isSubmitting ? "Sending..." : "Send Reset Link"}
+            </Button>
+          </form>
+
+          <div className="mt-6 text-center">
+            <p className="text-muted-foreground">
+              Remembered your password?
+              <button
+                type="button"
+                onClick={() => navigate("/auth?mode=login")}
+                className="ml-1 text-foreground font-medium hover:underline"
+              >
+                Log In
+              </button>
+            </p>
+          </div>
         </div>
       </div>
     </div>

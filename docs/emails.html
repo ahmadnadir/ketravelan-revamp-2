@@ -132,8 +132,8 @@ declined”.</li>
 </ul></li>
 <li>Subject:
 <ul>
-<li>“New expense added — you owe <currency> <amount>”.</li>
-<li>“Expense added — you are owed <currency> <amount>”.</li>
+<li>“New expense added  you owe <currency> <amount>”.</li>
+<li>“Expense added  you are owed <currency> <amount>”.</li>
 </ul></li>
 <li>Trigger: When an expense is created.</li>
 <li>Preference checks: Respects each recipient
@@ -143,7 +143,7 @@ declined”.</li>
 <ul>
 <li>Purpose: Notify all involved users that an expense changed.</li>
 <li>Recipients: Payer and participants.</li>
-<li>Subject: “Expense updated — <description>”.</li>
+<li>Subject: “Expense updated  <description>”.</li>
 <li>Trigger: When an expense is updated.</li>
 <li>Preference checks: Respects each recipient
 <code>email_notifications</code>.</li>
@@ -152,7 +152,7 @@ declined”.</li>
 <ul>
 <li>Purpose: Notify all involved users that an expense was deleted.</li>
 <li>Recipients: Payer and participants.</li>
-<li>Subject: “Expense deleted — <description>”.</li>
+<li>Subject: “Expense deleted  <description>”.</li>
 <li>Trigger: When an expense is deleted.</li>
 <li>Preference checks: Respects each recipient
 <code>email_notifications</code>.</li>
@@ -163,8 +163,8 @@ declined”.</li>
 paid.</li>
 <li>Recipients:
 <ul>
-<li>Payer: “Payment marked as paid — <currency> <amount>”.</li>
-<li>Participant: “Payment recorded — <description>”.</li>
+<li>Payer: “Payment marked as paid  <currency> <amount>”.</li>
+<li>Participant: “Payment recorded  <description>”.</li>
 </ul></li>
 <li>Trigger: When participant marks their payment as paid.</li>
 <li>Preference checks: Respects each recipient
@@ -176,7 +176,7 @@ id="send-expense-overdue-reminder">send-expense-overdue-reminder</h3>
 <li>Purpose: Remind participants with unpaid balances.</li>
 <li>Recipients: Unpaid participants (optionally filtered by
 member).</li>
-<li>Subject: “Payment reminder — action needed” or “Payment reminder —
+<li>Subject: “Payment reminder  action needed” or “Payment reminder 
 <days> days overdue”.</li>
 <li>Trigger: Reminder flow for overdue expenses.</li>
 <li>Preference checks: Respects each recipient

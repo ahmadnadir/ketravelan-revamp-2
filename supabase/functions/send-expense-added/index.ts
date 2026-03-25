@@ -262,8 +262,8 @@ serve(async (req: Request) => {
     for (const participant of participants || []) {
       if (participant.user_id === payerId) continue;
       const amountOwed = Number(participant.amount_owed || 0).toFixed(2);
-      const subject = `New expense added — you owe ${expense.currency} ${amountOwed}`;
-      const messageHtml = `Heads up — <strong>${escapeHtml(payerName)}</strong> added <strong>${escapeHtml(expense.description)}</strong> in <strong>${escapeHtml(trip.title)}</strong>. Your share is <strong>${escapeHtml(expense.currency)} ${escapeHtml(amountOwed)}</strong>.`;
+      const subject = `New expense added  you owe ${expense.currency} ${amountOwed}`;
+      const messageHtml = `Heads up  <strong>${escapeHtml(payerName)}</strong> added <strong>${escapeHtml(expense.description)}</strong> in <strong>${escapeHtml(trip.title)}</strong>. Your share is <strong>${escapeHtml(expense.currency)} ${escapeHtml(amountOwed)}</strong>.`;
       await sendToUser(participant.user_id, subject, messageHtml, "You have a new expense" );
 
       await sendSystemPush({
@@ -283,8 +283,8 @@ serve(async (req: Request) => {
     }
 
     if (payerId) {
-      const subject = `Expense added — you are owed ${expense.currency} ${totalOwed.toFixed(2)}`;
-      const messageHtml = `Nice one — your expense <strong>${escapeHtml(expense.description)}</strong> is live in <strong>${escapeHtml(trip.title)}</strong>. You are owed <strong>${escapeHtml(expense.currency)} ${escapeHtml(totalOwed.toFixed(2))}</strong> by the group.`;
+      const subject = `Expense added  you are owed ${expense.currency} ${totalOwed.toFixed(2)}`;
+      const messageHtml = `Nice one  your expense <strong>${escapeHtml(expense.description)}</strong> is live in <strong>${escapeHtml(trip.title)}</strong>. You are owed <strong>${escapeHtml(expense.currency)} ${escapeHtml(totalOwed.toFixed(2))}</strong> by the group.`;
       await sendToUser(payerId, subject, messageHtml, "Expense added" );
     }
 

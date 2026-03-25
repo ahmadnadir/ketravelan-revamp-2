@@ -1,22 +1,28 @@
-import { SegmentedControl } from "@/components/shared/SegmentedControl";
+import { cn } from "@/lib/utils";
 import { useCommunity } from "@/contexts/CommunityContext";
 
 export function CommunityHeader() {
   const { mode, setMode } = useCommunity();
 
-  const options = [
-    { label: "Stories", value: "stories" },
-    { label: "Discussions", value: "discussions" },
-  ];
-
   return (
-    <div className="sticky top-0 z-40 bg-background/95 backdrop-blur-sm border-b border-border/50 px-4 py-2 mb-2">
-      <SegmentedControl
-        options={options}
-        value={mode}
-        onChange={(value) => setMode(value as "stories" | "discussions")}
-        className="w-full sm:w-auto sm:max-w-xs sm:mx-auto"
-      />
+    <div className="bg-background border-b border-border/50 flex justify-center px-4 h-[var(--header-height)] items-center">
+      <div className="flex p-0.5 bg-secondary rounded-xl">
+        {(["stories", "discussions"] as const).map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            onClick={() => setMode(tab)}
+            className={cn(
+              "px-5 py-1 text-sm font-medium rounded-lg transition-all capitalize",
+              mode === tab
+                ? "bg-card text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            {tab === "stories" ? "Stories" : "Discussions"}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

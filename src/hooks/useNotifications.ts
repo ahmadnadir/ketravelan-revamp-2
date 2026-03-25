@@ -9,6 +9,8 @@ import {
   deleteNotification,
   deleteAllNotifications,
   subscribeToNotifications,
+  syncBadgeWithUnreadCount,
+  resetBadgeCount,
   type Notification,
   type NotificationFilters,
 } from '@/lib/notifications';
@@ -60,8 +62,9 @@ export function useMarkNotificationAsRead() {
   return useMutation({
     mutationFn: markNotificationAsRead,
     onSuccess: () => {
-      // Invalidate queries to refetch
       queryClient.invalidateQueries({ queryKey: ['notifications'] });
+      // Decrement badge by re-syncing with the backend unread count.
+      syncBadgeWithUnreadCount().catch(() => {});
     },
     onError: (error) => {
       console.error('Error marking notification as read:', error);
@@ -79,9 +82,10 @@ export function useMarkAllNotificationsAsRead() {
   return useMutation({
     mutationFn: markAllNotificationsAsRead,
     onSuccess: () => {
-      // Invalidate queries to refetch
       queryClient.invalidateQueries({ queryKey: ['notifications'] });
       toast.success('All notifications marked as read');
+      // All read → badge must be zero.
+      resetBadgeCount().catch(() => {});
     },
     onError: (error) => {
       console.error('Error marking all notifications as read:', error);
@@ -99,8 +103,9 @@ export function useDeleteNotification() {
   return useMutation({
     mutationFn: deleteNotification,
     onSuccess: () => {
-      // Invalidate queries to refetch
       queryClient.invalidateQueries({ queryKey: ['notifications'] });
+      // A deleted notification may have been unread — re-sync badge.
+      syncBadgeWithUnreadCount().catch(() => {});
     },
     onError: (error) => {
       console.error('Error deleting notification:', error);
@@ -120,6 +125,8 @@ export function useDeleteAllNotifications() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['notifications'] });
       toast.success('All notifications cleared');
+      // Nothing left to notify about.
+      resetBadgeCount().catch(() => {});
     },
     onError: (error) => {
       console.error('Error deleting all notifications:', error);
@@ -230,9 +237,14 @@ export function useRealtimeNotifications(onNotification?: (notification: Notific
       } else {
         const isChatNotification = notification.type === "new_message" || notification.type === "message";
 
-        if (isChatNotification && isChatPageActive()) {
-          queryClient.invalidateQueries({ queryKey: ['notifications'] });
-          return;
+        if (isChatNotification) {
+          // Update chat badge count only  never goes into the notification panel
+          queryClient.invalidateQueries({ queryKey: ['notifications', 'unread-chat-count'] });
+          if (isChatPageActive()) {
+            // User is already viewing the chat, skip toast too
+            return;
+          }
+          // Fall through to show toast for out-of-app chat messages
         }
 
         const metadata = notification.metadata || {};
@@ -337,6 +349,8 @@ export function useRealtimeNotifications(onNotification?: (notification: Notific
 
       // Invalidate queries to refetch
       queryClient.invalidateQueries({ queryKey: ['notifications'] });
+      // A new notification arrived — sync badge count with the backend.
+      syncBadgeWithUnreadCount().catch(() => {});
     });
 
     return unsubscribe;

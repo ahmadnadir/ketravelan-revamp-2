@@ -1,13 +1,24 @@
+import { useNavigate } from "react-router-dom";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, X } from "lucide-react";
 import feedbackIllustration from "@/assets/feedback-illustration.png";
 export default function Feedback() {
+  const navigate = useNavigate();
   const googleFormUrl = "https://forms.google.com/your-form-id"; // Replace with actual Google Form URL
 
   return (
     <AppLayout hideHeader hideBottomNav>
-      <div className="py-8 px-4 space-y-8 text-center min-h-screen flex flex-col justify-center pt-[calc(env(safe-area-inset-top)+2rem)] pb-[calc(env(safe-area-inset-bottom)+2rem)]">
+      <div className="relative py-8 px-4 space-y-8 text-center min-h-dvh flex flex-col justify-center pt-[calc(env(safe-area-inset-top)+2rem)] pb-[calc(env(safe-area-inset-bottom)+2rem)]">
+        {/* Close button */}
+        <button
+          type="button"
+          onClick={() => navigate(-1)}
+          className="absolute top-[calc(env(safe-area-inset-top)+0.75rem)] right-4 flex items-center justify-center w-9 h-9 rounded-full bg-black/[0.06] text-foreground/70 hover:bg-black/10 active:bg-black/15 transition-colors"
+          aria-label="Close"
+        >
+          <X className="w-5 h-5" strokeWidth={2} />
+        </button>
         {/* Header Section */}
         <div className="space-y-4">
           <h1 className="text-2xl sm:text-3xl font-bold text-foreground">
@@ -15,7 +26,7 @@ export default function Feedback() {
           </h1>
           <div className="text-base text-muted-foreground max-w-md mx-auto space-y-2">
             <p>
-              Your feedback helps us improve the experience for everyone — from planning trips to splitting expenses smoothly.
+              Your feedback helps us improve the experience for everyone  from planning trips to splitting expenses smoothly.
             </p>
             <p>
               Every suggestion matters, and we truly read them all.

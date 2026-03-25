@@ -459,7 +459,7 @@ export default function EditProfile() {
 
   return (
     <AppLayout>
-      <header className="sticky top-0 z-50 glass border-b border-border/50 -mx-4 sm:-mx-6 px-4 sm:px-6 pt-[env(safe-area-inset-top)]">
+      <header className="sticky top-0 z-50 glass border-b border-border/50 -mx-4 sm:-mx-6 px-4 sm:px-6 safe-top">
         <div className="flex items-center justify-between h-14">
           <div className="flex items-center gap-2 sm:gap-3">
             <button onClick={() => navigate(-1)}>
@@ -747,7 +747,7 @@ export default function EditProfile() {
                 <span className="text-muted-foreground text-xs">No minimum set</span>
               )}
             </div>
-            <span className="text-muted-foreground mt-5 text-sm">—</span>
+            <span className="text-muted-foreground mt-5 text-sm"></span>
             <div className="flex-1 space-y-1">
               <Label htmlFor="budgetMax" className="text-xs">
                 Maximum

@@ -89,19 +89,21 @@ export default function ResetPassword() {
   };
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
-      {/* Header */}
-      <header className="sticky top-0 z-50 glass border-b border-border/50 pt-[env(safe-area-inset-top)]">
-        <div className="container max-w-lg mx-auto flex h-16 items-center px-4">
-          <Button variant="ghost" size="icon" onClick={() => navigate(-1)} className="mr-3">
-            <ArrowLeft className="h-5 w-5" />
-          </Button>
-          <h1 className="text-lg font-semibold">Reset Password</h1>
-        </div>
-      </header>
+    <div className="app-shell bg-background">
+      <div className="app-shell-top">
+        <header className="h-full glass border-b border-border/50 safe-x">
+          <div className="h-[var(--safe-top)]" />
+          <div className="container max-w-lg mx-auto flex h-[var(--header-height)] items-center px-4">
+            <Button variant="ghost" size="icon" onClick={() => navigate(-1)} className="mr-3">
+              <ArrowLeft className="h-5 w-5" />
+            </Button>
+            <h1 className="text-lg font-semibold">Reset Password</h1>
+          </div>
+        </header>
+      </div>
 
-      {/* Content */}
-      <div className="flex-1 container max-w-lg mx-auto px-4 py-8">
+      <div className="app-shell-content" style={{ paddingTop: "var(--header-total-height)", paddingBottom: "1rem" }}>
+        <div className="container max-w-lg mx-auto px-4 py-8">
         <div className="mb-8 text-center">
           <h2 className="text-2xl font-bold mb-2">Set a new password</h2>
           <p className="text-muted-foreground">Enter your new password below.</p>
@@ -145,7 +147,8 @@ export default function ResetPassword() {
           <Button type="submit" className="w-full h-12 text-base font-medium rounded-xl" disabled={isSubmitting || !isReady}>
             {isSubmitting ? "Updating..." : "Update Password"}
           </Button>
-        </form>
+          </form>
+        </div>
       </div>
     </div>
   );

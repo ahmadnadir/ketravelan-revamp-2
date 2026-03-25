@@ -1,6 +1,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { supabase } from './supabase';
 
+// Module-level profile cache shared across all fetches and subscriptions.
+// Populated eagerly from conversations list so chat never needs a fresh profile fetch.
+export const profileCache = new Map<string, { id: string; username: string; full_name: string; avatar_url: string }>();
+
 export type ChatAttachment = {
   type: 'image' | 'document' | 'location';
   url?: string; // for image/document
@@ -165,7 +169,13 @@ export async function fetchConversationMessages(conversationId: string, limit = 
     .limit(limit);
 
   if (error) throw error;
-  return data?.reverse() || [];
+  const result = data?.reverse() || [];
+  // Populate module-level profile cache from inline sender data
+  result.forEach((msg: any) => {
+    const s = Array.isArray(msg.sender) ? msg.sender[0] : msg.sender;
+    if (s?.id) profileCache.set(s.id, s);
+  });
+  return result;
 }
 
 export async function sendMessage(conversationId: string, content: string, clientId?: string, attachments?: ChatAttachment[]) {
@@ -253,22 +263,23 @@ export async function subscribeToMessages(conversationId: string, callback: (mes
         filter: `conversation_id=eq.${conversationId}`
       },
       async (payload) => {
-        const { data } = await supabase
-          .from('messages')
-          .select(`
-            *,
-            sender:profiles!messages_sender_id_fkey(id, username, full_name, avatar_url)
-          `)
-          .eq('id', payload.new.id)
-          .single();
+        const raw = payload.new as any;
 
-        if (data) {
-          // Handle system messages that might not have a sender
-          if (data.type === 'system' && !data.sender) {
-            data.sender = null;
+        // Use cached profile or fetch once, then cache
+        let sender = profileCache.get(raw.sender_id) ?? null;
+        if (!sender && raw.sender_id && raw.type !== 'system') {
+          const { data } = await supabase
+            .from('profiles')
+            .select('id, username, full_name, avatar_url')
+            .eq('id', raw.sender_id)
+            .single();
+          if (data) {
+            profileCache.set(raw.sender_id, data);
+            sender = data;
           }
-          callback(data);
         }
+
+        callback({ ...raw, sender });
       }
     )
     .subscribe();
@@ -423,6 +434,16 @@ export async function fetchConversationsWithLastMessages() {
     throw convError;
   }
   
+  // Populate profile cache eagerly from participant data (user1 / user2 for direct chats)
+  participants?.forEach((p: any) => {
+    const conv = Array.isArray(p.conversation) ? p.conversation[0] : p.conversation;
+    if (!conv) return;
+    [conv.user1, conv.user2].forEach((u: any) => {
+      const profile = Array.isArray(u) ? u[0] : u;
+      if (profile?.id) profileCache.set(profile.id, profile);
+    });
+  });
+
   // Filter out deleted conversations in app code
   const activeParticipants = participants?.filter((p: any) => !p.conversation?.is_deleted) || [];
   
@@ -467,11 +488,30 @@ export async function fetchConversationsWithLastMessages() {
     throw msgError;
   }
 
-  // Group messages by conversation and get the latest one
+  // Group messages by conversation: last message + unread count per conversation
   const lastMessageMap = new Map();
-  (messages || []).forEach(msg => {
-    if (!lastMessageMap.has(msg.conversation_id)) {
-      lastMessageMap.set(msg.conversation_id, msg);
+  const unreadCountMap = new Map<string, number>();
+
+  // Build last_read_at lookup per conversation for the current user
+  const lastReadMap = new Map<string, string | null>();
+  uniqueParticipants.forEach((p: any) => {
+    const conv = Array.isArray(p.conversation) ? p.conversation[0] : p.conversation;
+    if (conv?.id) lastReadMap.set(conv.id, p.last_read_at || null);
+  });
+
+  (messages || []).forEach((msg: any) => {
+    const convId = msg.conversation_id;
+    // Last message (first encountered since desc order)
+    if (!lastMessageMap.has(convId)) {
+      lastMessageMap.set(convId, msg);
+    }
+    // Count unread: sender is not current user AND message is after last_read_at
+    if (msg.sender_id !== user.id) {
+      const lastRead = lastReadMap.get(convId);
+      const isUnread = !lastRead || new Date(msg.created_at) > new Date(lastRead);
+      if (isUnread) {
+        unreadCountMap.set(convId, (unreadCountMap.get(convId) || 0) + 1);
+      }
     }
   });
 
@@ -481,13 +521,23 @@ export async function fetchConversationsWithLastMessages() {
     return {
       ...p,
       conversation: conv,
-      lastMessage: lastMessageMap.get(conv?.id) || null
+      lastMessage: lastMessageMap.get(conv?.id) || null,
+      unreadCount: unreadCountMap.get(conv?.id) || 0,
     };
   });
 
   return enriched.sort((a: any, b: any) => {
-    const aTime = a.lastMessage?.created_at ? new Date(a.lastMessage.created_at).getTime() : 0;
-    const bTime = b.lastMessage?.created_at ? new Date(b.lastMessage.created_at).getTime() : 0;
+    // Primary: latest message timestamp.
+    // Fallback: participant.created_at — the moment THIS user joined the conversation.
+    // This ensures newly created or newly joined trip groups appear at the top
+    // before any messages exist, without relying on conversation.created_at which
+    // reflects when the trip was published (potentially weeks ago).
+    const aTime = a.lastMessage?.created_at
+      ? new Date(a.lastMessage.created_at).getTime()
+      : new Date(a.created_at ?? a.conversation?.created_at ?? 0).getTime();
+    const bTime = b.lastMessage?.created_at
+      ? new Date(b.lastMessage.created_at).getTime()
+      : new Date(b.created_at ?? b.conversation?.created_at ?? 0).getTime();
     return bTime - aTime;
   });
 }

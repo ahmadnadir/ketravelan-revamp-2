@@ -294,7 +294,7 @@ export default function Onboarding() {
   return (
     <div className="min-h-screen bg-background flex flex-col">
       {/* Header */}
-      <header className="sticky top-0 z-50 glass border-b border-border/50 pt-[env(safe-area-inset-top)]">
+      <header className="sticky top-0 z-50 glass border-b border-border/50 safe-top">
         <div className="container max-w-lg mx-auto flex h-16 items-center px-4">
           {currentStep > 1 ? (
             <Button variant="ghost" size="icon" onClick={handleBack} className="mr-3">

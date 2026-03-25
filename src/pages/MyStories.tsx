@@ -362,10 +362,10 @@ function MyStoriesContent() {
 
           <SegmentedControl
             options={[
-              { label: "Published", value: "published", count: counts.published },
-              { label: "Drafts", value: "drafts", count: counts.drafts },
-              { label: "Liked", value: "liked", count: counts.liked },
-              { label: "Saved", value: "saved", count: counts.saved },
+              { label: "Published", value: "published" },
+              { label: "Drafts", value: "drafts" },
+              { label: "Liked", value: "liked" },
+              { label: "Saved", value: "saved" },
             ]}
             value={tab}
             onChange={setTab}

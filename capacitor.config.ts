@@ -15,7 +15,7 @@ const config: CapacitorConfig = {
       }
     : undefined,
   ios: {
-    contentInset: "automatic",
+    contentInset: "never",
     backgroundColor: "#ffffff",
     preferredContentMode: "mobile",
   },
@@ -25,16 +25,16 @@ const config: CapacitorConfig = {
   },
   plugins: {
     SplashScreen: {
-      launchShowDuration: 2000,
+      launchShowDuration: 1000,
       launchAutoHide: true,
-      backgroundColor: "#1a1a2e",
+      backgroundColor: "#ffffff",
       showSpinner: false,
       androidScaleType: "CENTER_CROP",
       splashFullScreen: true,
       splashImmersive: true,
     },
     Keyboard: {
-      resize: "native",
+      resize: "none",
       resizeOnFullScreen: true,
     },
     StatusBar: {

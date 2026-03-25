@@ -17,7 +17,7 @@ export function HeroSection() {
               DIY Trips Are Better When Costs Are Shared
             </h1>
             <p className="text-base sm:text-lg text-muted-foreground max-w-md mx-auto lg:mx-0 leading-relaxed">
-              Travel with friends or new travel buddies. Ketravelan tracks shared expenses and automatically calculates the net settlement for everyone—so cost sharing unlocks better experiences, not awkward conversations.
+              Travel with friends or new travel buddies. Ketravelan tracks shared expenses and automatically calculates the net settlement for everyoneso cost sharing unlocks better experiences, not awkward conversations.
             </p>
           </div>
 

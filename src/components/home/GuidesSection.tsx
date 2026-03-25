@@ -29,7 +29,7 @@ export function GuidesSection() {
           One App, Two Ways to Travel
         </h2>
         <p className="text-sm text-muted-foreground">
-          With friends or with new people — plan, share, and settle together.
+          With friends or with new people  plan, share, and settle together.
         </p>
       </div>
 

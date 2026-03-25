@@ -359,7 +359,7 @@ export default function CreateStory() {
 
       {/* Exit Confirmation Drawer */}
       <Drawer open={showExitDialog} onOpenChange={setShowExitDialog}>
-        <DrawerContent className="pt-[env(safe-area-inset-top)]">
+        <DrawerContent className="pt-safe">
           <DrawerHeader className="text-center">
             <DrawerTitle>Leave story creation?</DrawerTitle>
             <DrawerDescription>

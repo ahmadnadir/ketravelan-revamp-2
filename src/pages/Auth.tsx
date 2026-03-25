@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable no-useless-escape */
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowLeft, Mail, Lock, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -58,7 +58,13 @@ export default function Auth() {
 
 
 
+  // Synchronous ref guard — prevents concurrent calls from rapid double-taps
+  // (React state updates are async so isSubmitting alone is not enough).
+  const googleSignInInProgress = useRef(false);
+
   const handleGoogleSignIn = async () => {
+    if (googleSignInInProgress.current) return;
+    googleSignInInProgress.current = true;
     try {
       setIsSubmitting(true);
       await signInWithGoogle();
@@ -70,6 +76,7 @@ export default function Auth() {
       });
     } finally {
       setIsSubmitting(false);
+      googleSignInInProgress.current = false;
     }
   };
 
@@ -233,26 +240,29 @@ export default function Auth() {
   };
 
   return (
-    <div className="min-h-dvh bg-background flex flex-col">
-      {/* Header */}
-      <header className="z-50 glass border-b border-border/50 flex-shrink-0 pt-[env(safe-area-inset-top)]">
-        <div className="container max-w-lg mx-auto flex h-14 items-center px-4 safe-area">
-          <Button 
-            variant="ghost" 
-            size="icon" 
-            onClick={() => navigate(-1)}
-            className="mr-3 h-10 w-10"
-          >
-            <ArrowLeft className="h-5 w-5" />
-          </Button>
-          <h1 className="text-base font-semibold">
-            {mode === "login" ? "Log In" : "Sign Up"}
-          </h1>
-        </div>
-      </header>
+    <div className="app-shell bg-background">
+      {/* Header  lives in the protected non-scrollable zone */}
+      <div className="app-shell-top">
+        <header className="h-full bg-white/90 backdrop-blur-xl border-b border-black/[0.06] safe-x">
+          <div className="h-[var(--safe-top)]" />
+          <div className="container max-w-lg mx-auto flex h-[var(--header-height)] items-center px-5">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => navigate(-1)}
+              className="mr-2 h-9 w-9 rounded-xl text-muted-foreground hover:bg-black/5"
+            >
+              <ArrowLeft className="h-[22px] w-[22px]" />
+            </Button>
+            <h1 className="text-base font-semibold">
+              {mode === "login" ? "Log In" : "Sign Up"}
+            </h1>
+          </div>
+        </header>
+      </div>
 
-      {/* Content */}
-      <div className="flex-1 container max-w-lg mx-auto px-4 pt-8 pb-6 overflow-y-auto">
+      {/* Content  the only scrollable zone; keyboard open shrinks this naturally */}
+      <div className="app-shell-content container max-w-lg mx-auto px-4 pt-8 pb-6">
         <div className="mb-8 text-center">
           <div className="flex items-center justify-center mx-auto mb-4">
             <img

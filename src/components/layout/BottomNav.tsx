@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
-import { Compass, PlusCircle, MessageCircle, Users, User } from "lucide-react";
+import { Compass, Plus, MessageCircle, Users, User } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
-import { useKeyboardHeight } from "@/hooks/useKeyboardHeight";
+import { useUnreadChatCount } from "@/hooks/useConversations";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/dialog";
 
 interface NavItem {
-  icon?: React.ComponentType<{ className?: string }>;
+  icon?: React.ComponentType<{ className?: string; strokeWidth?: string | number }>;
   label: string;
   path: string;
   isPrimary?: boolean;
@@ -24,7 +24,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { icon: Compass, label: "Explore", path: "/explore" },
   { icon: MessageCircle, label: "Chat", path: "/chat" },
-  { icon: PlusCircle, label: "Create", path: "/create", isPrimary: true },
+  { label: "Create", path: "/create", isPrimary: true },
   { icon: Users, label: "Community", path: "/community" },
   { label: "Profile", path: "/profile", isProfile: true },
 ];
@@ -39,7 +39,7 @@ export function BottomNav({ inline = false }: BottomNavProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const { isAuthenticated, user } = useAuth();
-  const keyboardHeight = useKeyboardHeight();
+  const unreadCount = useUnreadChatCount(user?.id);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [hasStoryDraft, setHasStoryDraft] = useState(false);
 
@@ -82,23 +82,20 @@ export function BottomNav({ inline = false }: BottomNavProps) {
     return null;
   }
 
-  // Hide bottom nav when keyboard is visible on mobile
-  if (keyboardHeight > 0) {
-    return null;
-  }
-
   return (
     <>
-      <nav className={cn(
-        "z-50 glass border-t border-border/50 transition-all duration-300",
-        inline ? "" : "fixed bottom-0 left-0 right-0 w-full"
-      )}>
-        <div className="w-full px-0 pb-[env(safe-area-inset-bottom)]">
-          <div className="flex items-center justify-between h-16 sm:h-18 w-full px-2 sm:px-4">
+      <nav
+        className={cn(
+          "z-[80] bg-white/[0.97] backdrop-blur-xl safe-x lg:hidden",
+          "border-t border-black/[0.07]",
+          inline ? "relative w-full" : "fixed bottom-0 left-0 right-0 w-full"
+        )}
+        style={{ boxShadow: '0 -0.5px 0 rgba(0,0,0,0.08)' }}
+      >
+        <div className="flex h-[var(--tabbar-height)] items-stretch">
           {navItems.map((item) => {
-            const isActive = location.pathname === item.path || 
+            const isActive = location.pathname === item.path ||
               (item.path !== "/" && location.pathname.startsWith(item.path));
-
             const Icon = item.icon;
 
             if (item.isPrimary) {
@@ -107,57 +104,77 @@ export function BottomNav({ inline = false }: BottomNavProps) {
                   key={item.path}
                   type="button"
                   onClick={handleCreateClick}
-                  className={cn(
-                    "flex flex-col items-center justify-center gap-0.5 sm:gap-1 px-3 sm:px-4 py-2 rounded-xl transition-all flex-1",
-                    isActive 
-                      ? "text-nav-active" 
-                      : "text-nav-inactive hover:text-foreground"
-                  )}
+                  className="flex flex-col items-center justify-center flex-1 gap-[3px] active:opacity-60 transition-opacity duration-75"
+                  aria-label="Create"
                 >
-                  <Icon className={cn("h-6 w-6 sm:h-7 sm:w-7", isActive && "stroke-[2.5]")} />
-                  <span className="text-xs sm:text-sm font-medium truncate">{item.label}</span>
+                  <span className="flex items-center justify-center w-11 h-7 bg-foreground rounded-[14px]">
+                    <Plus className="h-[19px] w-[19px] text-background" strokeWidth={2.5} />
+                  </span>
+                  <span className="text-[10px] font-semibold text-foreground leading-none tracking-tight">{item.label}</span>
                 </button>
               );
             }
 
-            // Profile item with icon
             if (item.isProfile) {
               return (
                 <Link
                   key={item.path}
                   to={item.path}
                   className={cn(
-                    "flex flex-col items-center justify-center gap-0.5 sm:gap-1 px-3 sm:px-4 py-2 rounded-xl transition-colors flex-1",
-                    isActive 
-                      ? "text-nav-active" 
-                      : "text-nav-inactive hover:text-foreground"
+                    "flex flex-col items-center justify-center flex-1 gap-[3px] active:opacity-60 transition-opacity duration-75",
+                    isActive ? "text-foreground" : "text-foreground/40"
                   )}
                 >
-                  <User className={cn("h-6 w-6 sm:h-7 sm:w-7", isActive && "stroke-[2.5]")} />
-                  <span className="text-xs sm:text-sm font-medium truncate">{item.label}</span>
+                  <span className="flex h-7 w-11 items-center justify-center">
+                    <User
+                      className="h-[22px] w-[22px] transition-all"
+                      strokeWidth={isActive ? 2.25 : 1.6}
+                    />
+                  </span>
+                  <span className={cn(
+                    "text-[10px] leading-none tracking-tight",
+                    isActive ? "font-semibold" : "font-normal"
+                  )}>
+                    {item.label}
+                  </span>
                 </Link>
               );
             }
 
-            // Regular nav items
             return (
               <Link
                 key={item.path}
                 to={item.path}
                 className={cn(
-                  "flex flex-col items-center justify-center gap-0.5 sm:gap-1 px-3 sm:px-4 py-2 rounded-xl transition-colors flex-1",
-                  isActive 
-                    ? "text-nav-active" 
-                    : "text-nav-inactive hover:text-foreground"
+                  "flex flex-col items-center justify-center flex-1 gap-[3px] active:opacity-60 transition-opacity duration-75",
+                  isActive ? "text-foreground" : "text-foreground/40"
                 )}
               >
-                {Icon && <Icon className={cn("h-6 w-6 sm:h-7 sm:w-7", isActive && "stroke-[2.5]")} />}
-                <span className="text-xs sm:text-sm font-medium truncate">{item.label}</span>
+                <span className="flex h-7 w-11 items-center justify-center relative">
+                  {Icon && (
+                    <Icon
+                      className="h-[22px] w-[22px] transition-all"
+                      strokeWidth={isActive ? 2.25 : 1.6}
+                    />
+                  )}
+                  {item.path === "/chat" && unreadCount > 0 && (
+                    <span className="absolute top-0 right-1.5 min-w-[16px] h-4 px-[3px] rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center leading-none">
+                      {unreadCount > 99 ? "99+" : unreadCount}
+                    </span>
+                  )}
+                </span>
+                <span className={cn(
+                  "text-[10px] leading-none tracking-tight",
+                  isActive ? "font-semibold" : "font-normal"
+                )}>
+                  {item.label}
+                </span>
               </Link>
             );
           })}
-          </div>
         </div>
+        {/* Bottom safe area fill  same background as nav so home bar area matches */}
+        <div className="h-[var(--safe-bottom)]" />
       </nav>
       <Dialog open={showCreateModal} onOpenChange={setShowCreateModal}>
         <DialogContent className="sm:max-w-sm">

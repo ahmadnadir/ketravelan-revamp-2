@@ -8,11 +8,12 @@ import { CommunitySection } from "@/components/home/CommunitySection";
 import { ExpensesFeatureSection } from "@/components/home/ExpensesFeatureSection";
 import { FAQSection } from "@/components/home/FAQSection";
 import { BottomCTASection } from "@/components/home/BottomCTASection";
+import { FooterSection } from "@/components/home/FooterSection";
 import { AnimatedSection } from "@/components/shared/AnimatedSection";
 
 export default function Home() {
   return (
-    <AppLayout>
+    <AppLayout wideLayout>
       <InstallBanner />
       <div className="py-4 sm:py-6 space-y-10 sm:space-y-14">
         <AnimatedSection>
@@ -39,6 +40,7 @@ export default function Home() {
         <AnimatedSection delay={50}>
           <BottomCTASection />
         </AnimatedSection>
+        <FooterSection />
       </div>
     </AppLayout>
   );

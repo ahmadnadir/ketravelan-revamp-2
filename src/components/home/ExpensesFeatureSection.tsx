@@ -199,7 +199,7 @@ const featureCards = [
   {
     id: "settlement",
     title: "Net Settlement, Simplified",
-    description: "We offset expenses automatically — no mental maths, no confusion.",
+    description: "We offset expenses automatically  no mental maths, no confusion.",
     mockup: <SettlementMockup />,
   },
 ];

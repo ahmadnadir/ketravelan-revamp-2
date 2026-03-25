@@ -20,15 +20,17 @@ export function SegmentedControl({
           key={option.value}
           onClick={() => onChange(option.value)}
           className={cn(
-            "flex-1 px-2 sm:px-4 py-2 text-sm font-medium rounded-lg transition-all min-w-0 truncate",
+            "flex-1 flex items-center justify-center gap-1.5 px-2 sm:px-4 py-2 text-sm font-medium rounded-lg transition-all min-w-0",
             value === option.value
               ? "bg-card text-foreground shadow-sm"
               : "text-muted-foreground hover:text-foreground"
           )}
         >
           <span className="truncate">{option.label}</span>
-          {option.hasUnread && (
-            <span className="ml-1.5 h-2 w-2 rounded-full bg-red-500 inline-block" />
+          {option.count != null && option.count > 0 && (
+            <span className="shrink-0 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center leading-none">
+              {option.count > 99 ? "99+" : option.count}
+            </span>
           )}
         </button>
       ))}

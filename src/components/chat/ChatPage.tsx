@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import { ChevronLeft, Check, Clock } from "lucide-react";
+import { ChevronLeft, Check, Clock, ChevronDown } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -39,6 +39,7 @@ interface ChatPageProps {
   showSenderInfo?: boolean;
   tripMembers?: TripMember[];
   tripId?: string;
+  scrollContainerRef?: React.RefObject<HTMLElement | null>;
 }
 
 export function ChatPage({
@@ -55,10 +56,12 @@ export function ChatPage({
   showSenderInfo = true,
   tripMembers = [],
   tripId,
+  scrollContainerRef,
 }: ChatPageProps) {
   const [confirmedMessages, setConfirmedMessages] = useState<ChatPageMessage[]>([]);
   const [pendingMessages, setPendingMessages] = useState<ChatPageMessage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [showScrollBtn, setShowScrollBtn] = useState(false);
   const queryClient = useQueryClient();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const unsubscribeRef = useRef<(() => void) | null>(null);
@@ -104,6 +107,18 @@ export function ChatPage({
     );
   };
 
+  // Track scroll position to show/hide scroll-to-bottom button
+  useEffect(() => {
+    const container = scrollContainerRef?.current;
+    if (!container) return;
+    const onScroll = () => {
+      const distFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+      setShowScrollBtn(distFromBottom > 120);
+    };
+    container.addEventListener('scroll', onScroll, { passive: true });
+    return () => container.removeEventListener('scroll', onScroll);
+  }, [scrollContainerRef, isLoading]);
+
   // Scroll to bottom helper
   const scrollToBottom = (instant = false) => {
     requestAnimationFrame(() => {
@@ -119,18 +134,17 @@ export function ChatPage({
 
     const setupChat = async () => {
       try {
-        setIsLoading(true);
+        // Cache-then-network: show cached messages instantly, skip skeleton on revisit
+        const cached = queryClient.getQueryData<ChatPageMessage[]>(['messages', conversationId]);
+        if (cached && cached.length > 0) {
+          setConfirmedMessages(cached);
+          setIsLoading(false);
+        } else {
+          setIsLoading(true);
+        }
 
-        // Fetch initial messages
-        const msgs = await fetchConversationMessages(conversationId);
-        if (!isMounted) return;
-        
-        // Normalize sender field - handle both array and object formats
-        const normalizedMsgs = normalizeMessages(msgs as unknown[]);
-        setConfirmedMessages((prev) => mergeById(prev, normalizedMsgs));
-
-        // Subscribe to realtime updates
-        unsubscribeRef.current = await subscribeToMessages(conversationId, (newMsg: ChatPageMessage) => {
+        // Start subscription immediately in parallel — don't await
+        subscribeToMessages(conversationId, (newMsg: ChatPageMessage) => {
           if (!isMounted) return;
 
           const normalizedIncoming: ChatPageMessage = {
@@ -139,7 +153,6 @@ export function ChatPage({
             status: 'sent',
           };
 
-          // Remove matching pending message
           setPendingMessages((prev) =>
             prev.filter(m => {
               if (normalizedIncoming.client_id && m.client_id) {
@@ -149,12 +162,25 @@ export function ChatPage({
             })
           );
 
-          // Add confirmed message if not already present
-          setConfirmedMessages((prev) => mergeById(prev, [normalizedIncoming]));
+          setConfirmedMessages((prev) => {
+            const merged = mergeById(prev, [normalizedIncoming]);
+            queryClient.setQueryData(['messages', conversationId], merged);
+            return merged;
+          });
 
-          // Auto scroll when new message arrives
           setTimeout(() => scrollToBottom(), 50);
+        }).then(unsub => {
+          if (isMounted) unsubscribeRef.current = unsub;
+          else unsub();
         });
+
+        // Fetch fresh messages
+        const msgs = await fetchConversationMessages(conversationId);
+        if (!isMounted) return;
+
+        const normalizedMsgs = normalizeMessages(msgs as unknown[]);
+        setConfirmedMessages(normalizedMsgs);
+        queryClient.setQueryData(['messages', conversationId], normalizedMsgs);
       } catch (err) {
         console.error('Error setting up chat:', err);
       } finally {
@@ -172,25 +198,11 @@ export function ChatPage({
     };
   }, [conversationId]);
 
-  // Mark conversation as read when opening chat
+  // Mark conversation as read — fully fire-and-forget, no query invalidation on open
   useEffect(() => {
     if (!conversationId) return;
-    let cancelled = false;
-
-    updateLastRead(conversationId)
-      .then(() => {
-        if (cancelled) return;
-        queryClient.invalidateQueries({ queryKey: ["conversations"] });
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        console.warn("Failed to update last_read_at:", err);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [conversationId, queryClient]);
+    updateLastRead(conversationId).catch(() => {});
+  }, [conversationId]);
 
   useEffect(() => {
     if (!conversationId) return;
@@ -291,9 +303,10 @@ export function ChatPage({
 
   // Header component
   const headerContent = (
-    <header className="glass border-b border-border/50 pt-[env(safe-area-inset-top)]">
+    <header className="h-full glass border-b border-border/50 safe-x">
+      <div className="h-[var(--safe-top)]" />
       <div className="container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto px-3 sm:px-4">
-        <div className="flex items-center gap-3 h-20 sm:h-18">
+        <div className="flex items-center gap-3 h-[var(--header-height)]">
           {showBackButton && (
             <Button variant="ghost" size="icon" className="h-9 w-9" onClick={onBackClick}>
               <ChevronLeft className="h-5 w-5" />
@@ -343,30 +356,46 @@ export function ChatPage({
   );
 
   // Render messages
+  const skeletonMessages = [
+    { isOwn: false, bubbleW: "w-52", bubbleH: "h-10", nameW: "w-20" },
+    { isOwn: false, bubbleW: "w-64", bubbleH: "h-16", nameW: "w-24" },
+    { isOwn: true,  bubbleW: "w-44", bubbleH: "h-10", nameW: null },
+    { isOwn: false, bubbleW: "w-56", bubbleH: "h-10", nameW: "w-16" },
+    { isOwn: true,  bubbleW: "w-60", bubbleH: "h-16", nameW: null },
+    { isOwn: true,  bubbleW: "w-36", bubbleH: "h-10", nameW: null },
+    { isOwn: false, bubbleW: "w-48", bubbleH: "h-16", nameW: "w-20" },
+    { isOwn: true,  bubbleW: "w-52", bubbleH: "h-10", nameW: null },
+  ];
+
   const messagesContent = isLoading ? (
-    <>
-      {[1, 2, 3, 4, 5, 6].map((i) => (
-        <div
-          key={i}
-          className={cn(
-            "flex flex-col gap-1.5 animate-pulse",
-            i % 3 === 0 && "items-end"
+    <div className="space-y-3 animate-pulse">
+      {skeletonMessages.map((s, i) => (
+        <div key={i} className={cn("flex gap-2 py-1", s.isOwn ? "justify-end" : "justify-start")}>
+          {/* Avatar placeholder for other users */}
+          {!s.isOwn && (
+            <div className="h-6 w-6 rounded-full bg-muted shrink-0 mt-5" />
           )}
-        >
-          <div
-            className={cn(
-              "h-16 rounded-2xl bg-muted",
-              i % 2 === 0 ? "w-48" : "w-64",
-              i % 3 === 0 ? "rounded-br-sm" : "rounded-bl-sm"
+
+          <div className={cn("flex flex-col gap-1", s.isOwn ? "items-end" : "items-start")}>
+            {/* Sender name placeholder */}
+            {!s.isOwn && s.nameW && (
+              <div className={cn("h-3 rounded bg-muted", s.nameW)} />
             )}
-          />
-          <div className={cn(
-            "h-3 w-12 bg-muted rounded mt-1",
-            i % 3 === 0 ? "mr-1" : "ml-2"
-          )} />
+            {/* Bubble */}
+            <div
+              className={cn(
+                "rounded-2xl bg-muted",
+                s.bubbleW,
+                s.bubbleH,
+                s.isOwn ? "rounded-br-sm" : "rounded-bl-sm"
+              )}
+            />
+            {/* Timestamp placeholder */}
+            <div className="h-2.5 w-10 rounded bg-muted/70" />
+          </div>
         </div>
       ))}
-    </>
+    </div>
   ) : allMessages.length === 0 ? (
     <div className="flex items-center justify-center py-12">
       <div className="text-muted-foreground text-center">
@@ -491,5 +520,15 @@ export function ChatPage({
     footerContent,
     messagesEndRef,
     scrollToBottom,
+    scrollToBottomButton: showScrollBtn ? (
+      <button
+        type="button"
+        onClick={() => scrollToBottom()}
+        className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+5.5rem)] right-4 z-50 flex h-8 w-8 items-center justify-center rounded-full bg-background border border-border shadow-lg hover:bg-muted transition-colors"
+        aria-label="Scroll to bottom"
+      >
+        <ChevronDown className="h-5 w-5 text-foreground" />
+      </button>
+    ) : null,
   };
 }

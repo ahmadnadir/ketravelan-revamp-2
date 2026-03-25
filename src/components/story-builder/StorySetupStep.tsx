@@ -480,7 +480,7 @@ export function StorySetupStep({ draft, onComplete }: StorySetupStepProps) {
       </div>
 
       {/* Continue Button - Fixed at bottom */}
-      <div className="fixed bottom-above-nav left-0 right-0 p-4 bg-background/95 backdrop-blur-sm border-t border-border/50">
+      <div className="fixed bottom-above-nav left-0 right-0 p-4 bg-background border-t border-border/50">
         <div className="container max-w-3xl mx-auto">
           <Button
             onClick={handleContinue}

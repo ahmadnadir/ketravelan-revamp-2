@@ -44,37 +44,15 @@ export function AskQuestionDrawer({ open, onOpenChange, onCreated }: AskQuestion
   const [isAnonymous, setIsAnonymous] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Preload user's country using browser geolocation API
+  // Preload user's country using device location (native + web)
   useEffect(() => {
     if (open && !location) {
-      // Try to get user's location via Geolocation API
-      if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
-          async (position) => {
-            const { latitude, longitude } = position.coords;
-            try {
-              // Use reverse geocoding to get country name
-              const response = await fetch(
-                `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`
-              );
-              const data = await response.json();
-              const country = data.address?.country || data.country || "";
-              if (country) {
-                setLocation(country);
-              }
-            } catch (error) {
-              console.error("Error fetching country from coordinates:", error);
-              fallbackToLocaleDetection();
-            }
-          },
-          (error) => {
-            console.error("Geolocation error:", error);
-            fallbackToLocaleDetection();
-          }
-        );
-      } else {
-        fallbackToLocaleDetection();
-      }
+      import("@/lib/geolocation").then(({ getCurrentCoords, getCountryFromCoords }) => {
+        getCurrentCoords()
+          .then(coords => getCountryFromCoords(coords))
+          .then(country => { if (country) setLocation(country); })
+          .catch(() => fallbackToLocaleDetection());
+      });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -174,7 +152,7 @@ export function AskQuestionDrawer({ open, onOpenChange, onCreated }: AskQuestion
         <DrawerHeader className="text-left">
           <DrawerTitle>Ask the Community</DrawerTitle>
           <DrawerDescription>
-            No such thing as a silly question — the community's here to help.
+            No such thing as a silly question  the community's here to help.
           </DrawerDescription>
         </DrawerHeader>
 

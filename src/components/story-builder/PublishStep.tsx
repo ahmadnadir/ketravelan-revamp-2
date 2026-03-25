@@ -230,7 +230,7 @@ export function PublishStep({
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-dvh bg-background">
       {/* Preview Header */}
       <div className="sticky top-0 z-30 border-b border-border/50 bg-background/95 backdrop-blur-sm">
         <div className="px-4 py-3">
@@ -347,7 +347,7 @@ export function PublishStep({
       </div>
 
       {/* Action Buttons - Fixed at bottom */}
-      <div className="fixed bottom-above-nav left-0 right-0 p-4 bg-background/95 backdrop-blur-sm border-t border-border/50">
+      <div className="fixed bottom-above-nav left-0 right-0 p-4 bg-background border-t border-border/50">
         <div className="max-w-2xl mx-auto flex gap-3">
           <Button
             onClick={handleSaveDraft}

@@ -141,7 +141,7 @@ export function blocksToLegacy(blocks: EditorBlock[]): {
         content = block.content;
         foundFirstText = true;
       } else {
-        // Text after media — attach to the preceding media block's contentAfter
+        // Text after media  attach to the preceding media block's contentAfter
         const prevMedia = inlineMedia[inlineMedia.length - 1];
         if (prevMedia) {
           prevMedia.contentAfter = block.content;

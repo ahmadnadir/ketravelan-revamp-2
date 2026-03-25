@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { X, Download, Smartphone } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Capacitor } from "@capacitor/core";
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
@@ -15,6 +16,9 @@ export function InstallBanner() {
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
 
   useEffect(() => {
+    // Never show in native iOS/Android app
+    if (Capacitor.isNativePlatform()) return;
+
     // Check if already dismissed
     const dismissed = localStorage.getItem(BANNER_DISMISSED_KEY);
     if (dismissed) return;

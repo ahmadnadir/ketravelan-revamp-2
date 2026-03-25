@@ -1,5 +1,6 @@
 import { Capacitor } from "@capacitor/core";
 import { PushNotifications } from "@capacitor/push-notifications";
+import { App } from "@capacitor/app";
 import { Device } from "@capacitor/device";
 import { supabase } from "@/lib/supabase";
 import { clearStoredWebToken, ensureWebServiceWorker, getStoredWebToken, getWebPushToken, registerWebPushListeners } from "@/lib/webPush";
@@ -7,6 +8,7 @@ import { clearStoredWebToken, ensureWebServiceWorker, getStoredWebToken, getWebP
 const TOKEN_STORAGE_KEY = "ketravelan-push-token";
 const WEB_TOKEN_STORAGE_KEY = "ketravelan-push-token-web";
 let listenersRegistered = false;
+let appStateListenerRegistered = false;
 let activeUserId: string | null = null;
 let registrationInFlight = false;
 
@@ -142,10 +144,17 @@ function registerListeners() {
     console.warn("Push registration error", error);
   });
 
-  PushNotifications.addListener("pushNotificationReceived", (notification) => {
+  PushNotifications.addListener("pushNotificationReceived", async (notification) => {
     const data = (notification as { data?: Record<string, unknown> })?.data ?? {};
     if (shouldSuppressForegroundNotification(data)) return;
     console.info("Push received", notification);
+    // Sync badge count with the backend so the app icon reflects true unread total.
+    try {
+      const { syncBadgeWithUnreadCount } = await import("@/lib/notifications");
+      await syncBadgeWithUnreadCount();
+    } catch (err) {
+      console.warn("[badge] Failed to sync badge on foreground push", err);
+    }
   });
 
   PushNotifications.addListener("pushNotificationActionPerformed", (notification) => {
@@ -164,6 +173,22 @@ function registerListeners() {
 
 export async function syncPushNotifications(userId: string, enabled: boolean) {
   activeUserId = userId;
+
+  // Register an App state-change listener once so the badge count is synced
+  // with the Supabase backend every time the app returns to the foreground.
+  if (isNative() && !appStateListenerRegistered) {
+    appStateListenerRegistered = true;
+    App.addListener("appStateChange", async ({ isActive }) => {
+      if (isActive && activeUserId) {
+        try {
+          const { syncBadgeWithUnreadCount } = await import("@/lib/notifications");
+          await syncBadgeWithUnreadCount();
+        } catch (err) {
+          console.warn("[badge] Failed to sync badge on app foreground", err);
+        }
+      }
+    });
+  }
 
   if (!isNative()) {
     if (!enabled) {
@@ -238,4 +263,12 @@ export async function clearPushToken() {
   } catch (err) {
     console.warn("Failed to unregister push notifications", err);
   }
+  // Clear the app icon badge on logout so it does not show stale counts.
+  try {
+    const { clearBadgeCount } = await import("@/lib/badge");
+    await clearBadgeCount();
+  } catch (err) {
+    console.warn("[badge] Failed to clear badge on logout", err);
+  }
+  activeUserId = null;
 }

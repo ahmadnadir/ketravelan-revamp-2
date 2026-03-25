@@ -86,7 +86,7 @@ function mapConversationToChatItem(participant: any, currentUserId?: string) {
     lastMessage: previewText,
     lastMessageSender: lastMsg?.sender?.full_name || "",
     lastMessageCreatedAt: lastMsg?.created_at || null,
-    unread: hasUnread ? 1 : 0,
+    unread: participant.unreadCount ?? (hasUnread ? 1 : 0),
     imageUrl,
   };
 }
@@ -96,7 +96,10 @@ export default function Chat() {
   const [searchParams, setSearchParams] = useSearchParams();
   const initialTab = searchParams.get("tab") === "direct" ? "direct" : "trips";
   const [chatFilter, setChatFilter] = useState<"trips" | "direct">(initialTab);
-  const [searchQuery, setSearchQuery] = useState("");
+  // Persist search in URL so it survives navigation away and back
+  const searchQuery = searchParams.get("q") ?? "";
+  const setSearchQuery = (val: string) =>
+    setSearchParams((prev) => { const p = new URLSearchParams(prev); val ? p.set("q", val) : p.delete("q"); return p; }, { replace: true });
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; type: "trip" | "direct"; name: string } | null>(null);
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -148,8 +151,8 @@ export default function Chat() {
     });
   }, [chatFilter, searchQuery, chats]);
 
-  const tripsHaveUnread = chats.some((c) => c.type === "trip" && c.unread > 0);
-  const directHaveUnread = chats.some((c) => c.type === "direct" && c.unread > 0);
+  const tripsUnreadCount = chats.filter((c) => c.type === "trip").reduce((s, c) => s + c.unread, 0);
+  const directUnreadCount = chats.filter((c) => c.type === "direct").reduce((s, c) => s + c.unread, 0);
 
   // Keep URL in sync so back navigation selects correct tab
   useEffect(() => {
@@ -210,7 +213,7 @@ export default function Chat() {
         <h1 className="text-3xl font-bold text-foreground">Messages</h1>
 
         {/* Search Bar */}
-        <div className="relative">
+        <div className="relative" data-disable-keyboard-autoscroll="true">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Search chats..."
@@ -231,8 +234,8 @@ export default function Chat() {
         {/* Tabs */}
         <SegmentedControl
           options={[
-            { label: "DIY Trips", value: "trips", hasUnread: loading ? false : tripsHaveUnread },
-            { label: "Direct Messages", value: "direct", hasUnread: loading ? false : directHaveUnread },
+            { label: "DIY Trips", value: "trips", count: loading ? 0 : tripsUnreadCount },
+            { label: "Direct Messages", value: "direct", count: loading ? 0 : directUnreadCount },
           ]}
           value={chatFilter}
           onChange={(value) => setChatFilter(value as "trips" | "direct")}
