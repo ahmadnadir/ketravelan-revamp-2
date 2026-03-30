@@ -69,7 +69,7 @@ export function AppLayout({
 
         {/* Header is outside scroll container to keep it visually locked */}
         {headerContent && (
-          <div className={`app-shell-top ${isAuthenticated ? "lg:pl-60" : ""}`}>
+          <div className={`app-shell-top ${isAuthenticated ? "lg:ml-60" : ""}`}>
             {headerContent}
             {subHeaderContent && (
               <div className="flex-none">{subHeaderContent}</div>
@@ -80,7 +80,7 @@ export function AppLayout({
         {/* Only this area scrolls */}
         <div
           ref={scrollContainerRef as RefObject<HTMLDivElement>}
-          className={`app-shell-content overflow-y-auto overflow-x-hidden overscroll-contain ${isAuthenticated ? "lg:pl-60" : ""} ${className || ""}`}
+          className={`app-shell-content overflow-y-auto overflow-x-hidden overscroll-contain ${isAuthenticated ? "lg:ml-60" : ""} ${className || ""}`}
           style={{
             paddingBottom: footerContent
               ? "0.5rem"
@@ -94,7 +94,7 @@ export function AppLayout({
 
         {/* Footer zone - truly anchored */}
         {footerContent && (
-          <div className={`flex-none z-20 safe-bottom keyboard-aware-footer ${isAuthenticated ? "lg:pl-60" : ""}`}>
+          <div className={`flex-none z-20 safe-bottom keyboard-aware-footer ${isAuthenticated ? "lg:ml-60" : ""}`}>
             {footerContent}
           </div>
         )}

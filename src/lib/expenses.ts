@@ -635,9 +635,13 @@ export async function fetchUserTripExpenses(tripId: string) {
  * compute accurate per-currency balances without relying on the
  * `get_who_owes_who` RPC (which sums amounts across currencies).
  */
-export async function fetchTripsExpenseOverview(tripIds: string[]) {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not authenticated');
+export async function fetchTripsExpenseOverview(tripIds: string[], userId?: string) {
+  let currentUserId = userId;
+  if (!currentUserId) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('Not authenticated');
+    currentUserId = user.id;
+  }
 
   // 1. All non-deleted expenses for these trips (no creator filter)
   const { data: expenses, error: expErr } = await supabase
@@ -657,7 +661,7 @@ export async function fetchTripsExpenseOverview(tripIds: string[]) {
   const { data: owed, error: owedErr } = await supabase
     .from('expense_participants')
     .select('expense_id, amount_owed, is_paid')
-    .eq('user_id', user.id)
+    .eq('user_id', currentUserId)
     .in('expense_id', expenseIds);
   if (owedErr) throw owedErr;
 
@@ -665,7 +669,7 @@ export async function fetchTripsExpenseOverview(tripIds: string[]) {
   const { data: userPayments, error: payErr } = await supabase
     .from('expense_payments')
     .select('expense_id')
-    .eq('user_id', user.id)
+    .eq('user_id', currentUserId)
     .in('expense_id', expenseIds);
   if (payErr) throw payErr;
 
@@ -675,7 +679,7 @@ export async function fetchTripsExpenseOverview(tripIds: string[]) {
     const { data: creditData } = await supabase
       .from('expense_participants')
       .select('expense_id, amount_owed, is_paid')
-      .neq('user_id', user.id)
+      .neq('user_id', currentUserId)
       .in('expense_id', paidExpenseIds)
       .eq('is_paid', false);
     credited = creditData || [];

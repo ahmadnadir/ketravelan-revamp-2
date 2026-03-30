@@ -6,12 +6,13 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useUnreadChatCount } from "@/hooks/useConversations";
 import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+} from "@/components/ui/drawer";
+import premiumTravelImage from "@/assets/travel-social-explorer.png";
 
 interface NavItem {
   icon?: React.ComponentType<{ className?: string; strokeWidth?: string | number }>;
@@ -176,26 +177,40 @@ export function BottomNav({ inline = false }: BottomNavProps) {
         {/* Bottom safe area fill  same background as nav so home bar area matches */}
         <div className="h-[var(--safe-bottom)]" />
       </nav>
-      <Dialog open={showCreateModal} onOpenChange={setShowCreateModal}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Create</DialogTitle>
-            <DialogDescription>Choose how you want to start.</DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-2">
-            <Button variant="outline" onClick={handleCreateTrip}>
+      <Drawer open={showCreateModal} onOpenChange={setShowCreateModal}>
+        <DrawerContent className="rounded-t-[36px] border-t border-black/10">
+          <DrawerHeader className="text-center pb-2 pt-2">
+            <DrawerTitle className="text-xl font-semibold tracking-tight">Create</DrawerTitle>
+            <DrawerDescription className="text-sm">Start bold. Build the trip people will talk about all year.</DrawerDescription>
+          </DrawerHeader>
+          <div className="grid gap-2 px-4 pb-6">
+            <Button
+              onClick={handleCreateTrip}
+              className="h-11 rounded-xl bg-black text-white text-sm font-semibold hover:bg-black/90"
+            >
               Create a Trip
             </Button>
             <Button
               variant="secondary"
               onClick={handleContinueDraft}
               disabled={!hasStoryDraft}
+              className="h-11 rounded-xl text-sm"
             >
               Continue Draft
             </Button>
+            <div className="mt-1 flex items-center justify-center">
+              <div className="h-32 w-80 overflow-hidden rounded-2xl border border-black/10">
+                <img
+                  src={premiumTravelImage}
+                  alt="Hero"
+                  className="h-full w-full object-cover"
+                  loading="lazy"
+                />
+              </div>
+            </div>
           </div>
-        </DialogContent>
-      </Dialog>
+        </DrawerContent>
+      </Drawer>
     </>
   );
 }

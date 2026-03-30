@@ -7,7 +7,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-import { fetchUserTrips } from "@/lib/trips";
+import { fetchUserTripMeta } from "@/lib/trips";
 import { fetchTripsExpenseOverview } from "@/lib/expenses";
 import { getLiveConversionRatesToMYR, getCurrencyInfo, CurrencyCode } from "@/lib/currencyUtils";
 import { cn } from "@/lib/utils";
@@ -69,7 +69,7 @@ export default function Expenses() {
       if (!user?.id) { setIsLoading(false); return; }
       try {
         setIsLoading(true);
-        const rawTrips: any[] = await fetchUserTrips(user.id);
+        const rawTrips: any[] = await fetchUserTripMeta(user.id);
         if (rawTrips.length === 0) { setTrips([]); setRawOverview(null); return; }
 
         setTrips(rawTrips.map((t: any) => ({
@@ -79,7 +79,7 @@ export default function Expenses() {
         })));
 
         const tripIds = rawTrips.map((t: any) => t.id);
-        const overview = await fetchTripsExpenseOverview(tripIds);
+        const overview = await fetchTripsExpenseOverview(tripIds, user.id);
         setRawOverview(overview);
       } catch {
         toast({ title: "Failed to load expenses", description: "Please try again later" });

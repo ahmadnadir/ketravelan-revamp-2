@@ -1157,7 +1157,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
             date: expense.date,
             shareAmount,
             status,
-            category: getCategoryFromTitle(expense.title),
+            category: expense.category || getCategoryFromTitle(expense.title),
             paidBy: expense.paidBy,
           });
         }
@@ -1183,7 +1183,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
             date: expense.date,
             shareAmount,
             status,
-            category: getCategoryFromTitle(expense.title),
+            category: expense.category || getCategoryFromTitle(expense.title),
             paidBy: expense.paidBy,
           });
         }

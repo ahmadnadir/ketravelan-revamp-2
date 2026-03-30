@@ -10,6 +10,8 @@ import {
   LogOut,
   FileCheck,
   Plus,
+  Wallet,
+  MessageSquare,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
@@ -21,9 +23,11 @@ const primaryNavItems = [
   { icon: MessageCircle, label: "Chat", path: "/chat", hasUnread: true },
   { icon: Users, label: "Community", path: "/community" },
   { icon: Map, label: "My Trips", path: "/my-trips" },
+  { icon: Wallet, label: "Expenses", path: "/expenses" },
   { icon: FileCheck, label: "Approvals", path: "/approvals" },
   { icon: Heart, label: "Favourites", path: "/favourites" },
   { icon: BookOpen, label: "My Stories", path: "/my-stories" },
+  { icon: MessageSquare, label: "Feedback", path: "/feedback" },
 ];
 
 export function DesktopSidebar() {

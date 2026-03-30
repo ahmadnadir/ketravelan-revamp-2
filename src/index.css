@@ -227,6 +227,10 @@
     --keyboard-offset: 0px;
   }
 
+  body.create-drawer-open .app-shell-content {
+    overflow: hidden !important;
+  }
+
   body.native-ios-no-safe-area.keyboard-open {
     --keyboard-offset: var(--keyboard-height);
   }

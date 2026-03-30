@@ -1402,17 +1402,43 @@ export default function CreateTrip() {
                     return;
                   }
 
-                  if (!draftId) {
-                    // Create new draft
-                    await createTrip(convertDraftToTripData(draft, 'draft'));
-                  } else {
-                    // Update existing draft
-                    await updateTrip(draftId, convertDraftToTripData(draft, 'draft'));
+                  if (!draft.primaryDestination.trim()) {
+                    toast({
+                      title: 'Destination required',
+                      description: 'Please enter a destination before saving as a draft.',
+                      variant: 'destructive',
+                    });
+                    return;
                   }
+
+                  const resolvedDraftId =
+                    (draft as any)?.draftId ??
+                    draftId ??
+                    editTripId ??
+                    localStorage.getItem('ketravelan-draft-trip-id');
+
+                  const payload = convertDraftToTripData(draft, 'draft');
+
+                  if (resolvedDraftId) {
+                    // Update existing draft (or existing trip in edit mode)
+                    await updateTrip(resolvedDraftId, payload);
+                    localStorage.setItem('ketravelan-draft-trip-id', resolvedDraftId);
+                    updateDraft('draftId', resolvedDraftId);
+                  } else {
+                    // Create new draft and persist id for future updates
+                    const created = await createTrip(payload);
+                    if (!created?.id) {
+                      throw new Error('Create draft failed');
+                    }
+                    localStorage.setItem('ketravelan-draft-trip-id', created.id);
+                    updateDraft('draftId', created.id);
+                  }
+
                   toast({ title: 'Draft saved', description: 'Your trip draft has been saved.' });
                   setShowExitModal(false);
                   navigate('/my-trips?tab=draft');
                 } catch (err) {
+                  console.error('[CreateTrip] Save as Draft failed', err);
                   toast({ title: 'Failed to save draft', description: 'Please try again.', variant: 'destructive' });
                 }
               }}

@@ -1,4 +1,16 @@
--- Fix double-increment appearance when approving the first join request.
+Implement a global Offline State for the Ketravelan app.
+
+Requirements:
+- Detect when device has no internet connection.
+- Show a clear offline banner or screen instead of empty UI.
+- Keep last cached data visible when possible.
+- If data cannot be loaded, show a friendly "No Internet Connection" screen.
+- Provide a Retry button to attempt fetching data again.
+- Automatically refresh data when connection is restored.
+
+UI should be modern and clean similar to Airbnb / Instagram offline handling.
+
+Do not show empty states or broken UI when network is unavailable.-- Fix double-increment appearance when approving the first join request.
 --
 -- Root cause: the COUNT-based approve_join_request RPC was counting the trip
 -- organizer (role = 'organizer') together with regular members, but

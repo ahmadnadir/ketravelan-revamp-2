@@ -1,13 +1,15 @@
 /* eslint-disable no-empty */
 import { useEffect, useState, useRef } from "react";
-import { Send, Paperclip, X } from "lucide-react";
+import { Send, Paperclip, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AttachmentSheet } from "./AttachmentSheet";
 import { getMentionSuggestions } from "@/lib/chatMentions";
+import { Capacitor } from "@capacitor/core";
+import { Camera, CameraResultType, CameraSource } from "@capacitor/camera";
 
 import type { ChatAttachment } from "@/lib/conversations";
-import { uploadChatFile, getCurrentLocation } from "@/lib/chatAttachments";
+import { uploadChatFile, getCurrentLocation, compressImage } from "@/lib/chatAttachments";
 
 type PendingAttachment =
   | { type: "image"; file: File; previewUrl: string }
@@ -32,6 +34,7 @@ export function ChatComposer({ onSend, placeholder = "Type a message...", onTypi
   const [message, setMessage] = useState("");
   const [attachmentOpen, setAttachmentOpen] = useState(false);
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
+  const [isProcessing, setIsProcessing] = useState(false);
   const [mentionSuggestions, setMentionSuggestions] = useState<TripMember[]>([]);
   const [showMentionDropdown, setShowMentionDropdown] = useState(false);
   const [cursorPosition, setCursorPosition] = useState(0);
@@ -39,19 +42,24 @@ export function ChatComposer({ onSend, placeholder = "Type a message...", onTypi
 
   const handleSend = async () => {
     if (!message.trim() && pendingAttachments.length === 0) return;
+    setIsProcessing(true);
     // Upload files now (on send)
     const uploaded: ChatAttachment[] = [];
-    for (const att of pendingAttachments) {
-      if (att.type === "image" || att.type === "document") {
-        try {
-          const up = await uploadChatFile(att.file);
-          uploaded.push({ type: up.type, url: up.url, name: up.name, mime: up.mime, size: up.size });
-        } catch (e) {
-          console.error("Upload failed", e);
+    try {
+      for (const att of pendingAttachments) {
+        if (att.type === "image" || att.type === "document") {
+          try {
+            const up = await uploadChatFile(att.file);
+            uploaded.push({ type: up.type, url: up.url, name: up.name, mime: up.mime, size: up.size });
+          } catch (e) {
+            console.error("Upload failed", e);
+          }
+        } else if (att.type === "location") {
+          uploaded.push({ type: "location", lat: att.lat, lng: att.lng });
         }
-      } else if (att.type === "location") {
-        uploaded.push({ type: "location", lat: att.lat, lng: att.lng });
       }
+    } finally {
+      setIsProcessing(false);
     }
 
     // Extract mentioned user IDs from message content
@@ -84,6 +92,35 @@ export function ChatComposer({ onSend, placeholder = "Type a message...", onTypi
 
   const handleAttachment = async (type: "image" | "document" | "location") => {
     if (type === "image") {
+      if (Capacitor.isNativePlatform()) {
+        // Use native Capacitor Camera on iOS/Android to avoid crash
+        setAttachmentOpen(false);
+        try {
+          setIsProcessing(true);
+          const photo = await Camera.getPhoto({
+            quality: 80,
+            allowEditing: false,
+            resultType: CameraResultType.Uri,
+            source: CameraSource.Prompt,
+          });
+          const webPath = photo.webPath;
+          if (!webPath) return;
+          const response = await fetch(webPath);
+          const blob = await response.blob();
+          const rawFile = new File([blob], `photo-${Date.now()}.jpg`, { type: "image/jpeg" });
+          const compressed = await compressImage(rawFile);
+          const previewUrl = URL.createObjectURL(compressed);
+          setPendingAttachments(prev => [...prev, { type: "image", file: compressed, previewUrl }]);
+        } catch (err: unknown) {
+          // User cancelled — not an error
+          if (err instanceof Error && err.message !== "User cancelled photos app") {
+            console.error("Camera error", err);
+          }
+        } finally {
+          setIsProcessing(false);
+        }
+        return;
+      }
       const el = document.getElementById(imageInputId) as HTMLInputElement | null;
       el?.click();
     } else if (type === "document") {
@@ -98,19 +135,25 @@ export function ChatComposer({ onSend, placeholder = "Type a message...", onTypi
     setAttachmentOpen(false);
   };
 
-  const handleFilesSelected = (files: FileList | null) => {
+  const handleFilesSelected = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
-    const items: PendingAttachment[] = [];
-    for (const f of Array.from(files)) {
-      const isImage = (f.type || "").startsWith("image/");
-      if (isImage) {
-        const previewUrl = URL.createObjectURL(f);
-        items.push({ type: "image", file: f, previewUrl });
-      } else {
-        items.push({ type: "document", file: f });
+    setIsProcessing(true);
+    try {
+      const items: PendingAttachment[] = [];
+      for (const f of Array.from(files)) {
+        const isImage = (f.type || "").startsWith("image/");
+        if (isImage) {
+          const compressed = await compressImage(f);
+          const previewUrl = URL.createObjectURL(compressed);
+          items.push({ type: "image", file: compressed, previewUrl });
+        } else {
+          items.push({ type: "document", file: f });
+        }
       }
+      if (items.length > 0) setPendingAttachments(prev => [...prev, ...items]);
+    } finally {
+      setIsProcessing(false);
     }
-    if (items.length > 0) setPendingAttachments(prev => [...prev, ...items]);
   };
 
   // Typing detection with mention support
@@ -273,9 +316,13 @@ export function ChatComposer({ onSend, placeholder = "Type a message...", onTypi
                 className="shrink-0 rounded-full h-8 w-8 hover:opacity-80"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={handleSend}
-                disabled={!message.trim() && pendingAttachments.length === 0}
+                disabled={(!message.trim() && pendingAttachments.length === 0) || isProcessing}
               >
-                <Send className="h-3.5 w-3.5" />
+                {isProcessing ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Send className="h-3.5 w-3.5" />
+                )}
               </Button>
             </div>
           </div>

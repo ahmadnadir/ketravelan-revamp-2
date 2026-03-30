@@ -52,7 +52,7 @@ import { supabase } from "@/lib/supabase";
 import SafetyNotice from "@/components/trip-details/SafetyNotice";
 import { tripCategories } from "@/data/categories";
 import { cn } from "@/lib/utils";
-import { createJoinRequest, fetchJoinRequests, createTripInvite, cancelTrip } from "@/lib/trips";
+import { createJoinRequest, fetchJoinRequests, createTripInvite, cancelTrip, deleteDraftTrip } from "@/lib/trips";
 import { useAuth } from "@/contexts/AuthContext";
 import { createDirectConversation } from "@/lib/conversations";
 import { useTripDetails, useJoinRequestStatus } from "@/hooks/useTrips";
@@ -409,6 +409,7 @@ export default function TripDetails() {
 
   // Check if current user is the organizer
   const isOrganizer = isDbTrip && user && dbTrip?.creator_id === user.id;
+  const isDraftTrip = isDbTrip && String(dbTrip?.status || '').toLowerCase() === 'draft';
 
   // Transform trip members from DB to UI format
   const transformedMembers = useMemo(() => {
@@ -756,6 +757,25 @@ export default function TripDetails() {
     }
   };
 
+  const handleDiscardDraftTrip = async () => {
+    if (!dbTrip?.id) return;
+    try {
+      setIsCancellingTrip(true);
+      await deleteDraftTrip(dbTrip.id);
+      toast({ title: "Draft discarded", description: "Your draft trip has been removed." });
+      navigate("/my-trips?tab=draft");
+    } catch (error) {
+      toast({
+        title: "Discard failed",
+        description: error instanceof Error ? error.message : "Could not discard draft trip.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsCancellingTrip(false);
+      setShowCancelConfirm(false);
+    }
+  };
+
   if (isLoading) {
     return <TripDetailsSkeleton />;
   }
@@ -1083,9 +1103,11 @@ export default function TripDetails() {
         <Dialog open={showCancelConfirm} onOpenChange={setShowCancelConfirm}>
           <DialogContent className="sm:max-w-md w-[calc(100%-2rem)] sm:w-full rounded-2xl">
             <DialogHeader>
-              <DialogTitle>Cancel this trip?</DialogTitle>
+              <DialogTitle>{isDraftTrip ? "Discard this draft?" : "Cancel this trip?"}</DialogTitle>
               <DialogDescription>
-                This will notify all participants and remove the trip from listings.
+                {isDraftTrip
+                  ? "This will permanently delete this draft trip."
+                  : "This will notify all participants and remove the trip from listings."}
               </DialogDescription>
             </DialogHeader>
             <div className="flex gap-2 pt-2">
@@ -1094,28 +1116,28 @@ export default function TripDetails() {
                 onClick={() => setShowCancelConfirm(false)}
                 className="flex-1"
               >
-                Keep Trip
+                {isDraftTrip ? "Keep Draft" : "Keep Trip"}
               </Button>
               <Button
                 variant="destructive"
-                onClick={handleCancelTrip}
+                onClick={isDraftTrip ? handleDiscardDraftTrip : handleCancelTrip}
                 disabled={isCancellingTrip}
                 className="flex-1"
               >
-                {isCancellingTrip ? "Cancelling..." : "Cancel Trip"}
+                {isCancellingTrip ? (isDraftTrip ? "Discarding..." : "Cancelling...") : (isDraftTrip ? "Discard Trip" : "Cancel Trip")}
               </Button>
             </div>
           </DialogContent>
         </Dialog>
       )}
 
-      <AppLayout>
+      <AppLayout wideLayout>
         <div className="pb-36">
         {/* Image Gallery */}
         {images.length > 0 && (
-        <div className="relative -mx-4 sm:-mx-6">
+        <div className="relative -mx-5 sm:-mx-6 lg:-mx-8">
           <div 
-            className="aspect-[4/3] sm:aspect-[16/10] overflow-hidden cursor-pointer group"
+            className="aspect-[16/9] overflow-hidden cursor-pointer group"
             onClick={() => {
               setLightboxIndex(currentImage);
               setLightboxOpen(true);
@@ -1142,51 +1164,53 @@ export default function TripDetails() {
           </Link>
 
           {/* Actions */}
-          <div className="absolute top-3 sm:top-4 right-3 sm:right-4 flex gap-1.5 sm:gap-2">
-            <button 
-              onClick={handleShare}
-              className="h-9 w-9 sm:h-10 sm:w-10 rounded-full bg-card/80 backdrop-blur-sm flex items-center justify-center transition-transform active:scale-95"
-            >
-              <Share2 className="h-4 w-4 sm:h-5 sm:w-5 text-foreground" />
-            </button>
-            <button 
-              onClick={handleFavourite}
-              className={`h-9 w-9 sm:h-10 sm:w-10 rounded-full bg-card/80 backdrop-blur-sm flex items-center justify-center transition-all duration-300 ${isAnimating ? 'scale-125' : ''}`}
-            >
-              <Heart 
-                className={`h-4 w-4 sm:h-5 sm:w-5 transition-all duration-300 ${
-                  isFavourited 
-                    ? 'fill-destructive text-destructive scale-110' 
-                    : 'fill-transparent text-foreground'
-                }`} 
-              />
-            </button>
-            {isDbTrip && isOrganizer && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button
-                    className="h-9 w-9 sm:h-10 sm:w-10 rounded-full bg-card/80 backdrop-blur-sm flex items-center justify-center transition-transform active:scale-95"
-                    aria-label="Trip actions"
-                  >
-                    <MoreVertical className="h-4 w-4 sm:h-5 sm:w-5 text-foreground" />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="min-w-[12rem]">
-                  <DropdownMenuItem onSelect={() => setShowInviteModal(true)}>
-                    Invite by email
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    onSelect={() => setShowCancelConfirm(true)}
-                    className="text-destructive focus:text-destructive"
-                    disabled={isCancellingTrip}
-                  >
-                    {isCancellingTrip ? "Cancelling..." : "Cancel trip"}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
-          </div>
+          {!isDraftTrip && (
+            <div className="absolute top-3 sm:top-4 right-3 sm:right-4 flex gap-1.5 sm:gap-2">
+              <button 
+                onClick={handleShare}
+                className="h-9 w-9 sm:h-10 sm:w-10 rounded-full bg-card/80 backdrop-blur-sm flex items-center justify-center transition-transform active:scale-95"
+              >
+                <Share2 className="h-4 w-4 sm:h-5 sm:w-5 text-foreground" />
+              </button>
+              <button 
+                onClick={handleFavourite}
+                className={`h-9 w-9 sm:h-10 sm:w-10 rounded-full bg-card/80 backdrop-blur-sm flex items-center justify-center transition-all duration-300 ${isAnimating ? 'scale-125' : ''}`}
+              >
+                <Heart 
+                  className={`h-4 w-4 sm:h-5 sm:w-5 transition-all duration-300 ${
+                    isFavourited 
+                      ? 'fill-destructive text-destructive scale-110' 
+                      : 'fill-transparent text-foreground'
+                  }`} 
+                />
+              </button>
+              {isDbTrip && isOrganizer && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      className="h-9 w-9 sm:h-10 sm:w-10 rounded-full bg-card/80 backdrop-blur-sm flex items-center justify-center transition-transform active:scale-95"
+                      aria-label="Trip actions"
+                    >
+                      <MoreVertical className="h-4 w-4 sm:h-5 sm:w-5 text-foreground" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="min-w-[12rem]">
+                    <DropdownMenuItem onSelect={() => setShowInviteModal(true)}>
+                      Invite by email
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onSelect={() => setShowCancelConfirm(true)}
+                      className="text-destructive focus:text-destructive"
+                      disabled={isCancellingTrip}
+                    >
+                      {isCancellingTrip ? "Cancelling..." : "Cancel trip"}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+            </div>
+          )}
 
           {/* Navigation */}
           {images.length > 1 && (
@@ -1595,24 +1619,49 @@ export default function TripDetails() {
         <div className="fixed bottom-above-nav lg:bottom-0 left-0 lg:left-60 right-0 z-40 bg-background border-t border-border/50">
           <div className="container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto px-4 py-3">
             <div className="grid grid-cols-2 gap-3">
-              <Button
-                size="lg"
-                className="w-full rounded-xl text-sm sm:text-base gap-2 bg-black text-white hover:bg-neutral-800 border-none"
-                variant="default"
-                onClick={handleEditTrip}
-              >
-                <Pencil className="h-4 w-4" />
-                Edit Trip
-              </Button>
-              <Button
-                size="lg"
-                variant="outline"
-                className="w-full rounded-xl text-sm sm:text-base gap-2"
-                onClick={() => navigate(`/trip/${dbTrip?.id || id}/hub`)}
-              >
-                <MessageCircle className="h-4 w-4" />
-                Trip Chat
-              </Button>
+              {isDraftTrip ? (
+                <>
+                  <Button
+                    size="lg"
+                    variant="outline"
+                    className="w-full rounded-xl text-sm sm:text-base gap-2 border-destructive/40 text-destructive hover:bg-destructive/10"
+                    onClick={() => setShowCancelConfirm(true)}
+                  >
+                    <X className="h-4 w-4" />
+                    Discard Trip
+                  </Button>
+                  <Button
+                    size="lg"
+                    className="w-full rounded-xl text-sm sm:text-base gap-2 bg-black text-white hover:bg-neutral-800 border-none"
+                    variant="default"
+                    onClick={handleEditTrip}
+                  >
+                    <Pencil className="h-4 w-4" />
+                    Edit Trip
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button
+                    size="lg"
+                    className="w-full rounded-xl text-sm sm:text-base gap-2 bg-black text-white hover:bg-neutral-800 border-none"
+                    variant="default"
+                    onClick={handleEditTrip}
+                  >
+                    <Pencil className="h-4 w-4" />
+                    Edit Trip
+                  </Button>
+                  <Button
+                    size="lg"
+                    variant="outline"
+                    className="w-full rounded-xl text-sm sm:text-base gap-2"
+                    onClick={() => navigate(`/trip/${dbTrip?.id || id}/hub`)}
+                  >
+                    <MessageCircle className="h-4 w-4" />
+                    Trip Chat
+                  </Button>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -1622,7 +1671,7 @@ export default function TripDetails() {
       {isDbTrip && !isOrganizer && (
         <div className="fixed bottom-above-nav lg:bottom-0 left-0 lg:left-60 right-0 z-40 bg-background border-t border-border/50">
           <div className="container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto px-4 py-3">
-            <div className="grid grid-cols-2 gap-3">
+            <div className={cn("grid gap-3", joinRequestStatus === 'member' && isDraftTrip ? "grid-cols-1" : "grid-cols-2")}>
               {joinRequestStatus === 'member' ? (
                 <Button size="lg" disabled className="w-full rounded-xl text-sm sm:text-base gap-2">
                   <Check className="h-4 w-4" />
@@ -1659,7 +1708,7 @@ export default function TripDetails() {
                   Request to Join
                 </Button>
               )}
-              {joinRequestStatus === 'member' ? (
+              {joinRequestStatus === 'member' && !isDraftTrip ? (
                 <Button
                   size="lg"
                   variant="outline"

@@ -291,7 +291,7 @@ export default function TripHub() {
                   </div>
                 )
               )}
-              {activeTab === "expenses" && <TripExpenses tripId={trip.id} members={displayMembers} conversationId={conversation?.id} />}
+              {activeTab === "expenses" && <TripExpenses tripId={trip.id} members={displayMembers} conversationId={conversation?.id} tripName={trip.title} />}
               {activeTab === "notes" && <TripNotes tripId={trip.id} />}
             </>
           )}

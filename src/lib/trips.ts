@@ -193,6 +193,24 @@ export async function fetchUserTrips(userId: string) {
   return data?.map(item => item.trip) || [];
 }
 
+// Lightweight variant for list screens that only need basic trip cards.
+export async function fetchUserTripMeta(userId: string) {
+  const { data, error } = await supabase
+    .from('trip_members')
+    .select(`
+      trip:trips(
+        id,
+        title,
+        cover_image
+      )
+    `)
+    .eq('user_id', userId)
+    .is('left_at', null);
+
+  if (error) throw error;
+  return data?.map((item: any) => item.trip).filter(Boolean) || [];
+}
+
 export async function fetchSavedTrips(userId?: string) {
   // Resolve userId if not provided
   let uid = userId;
@@ -1029,6 +1047,11 @@ export async function updateTrip(tripId: string, data: Partial<CreateTripData>) 
   if (data.price !== undefined && data.price !== currentTrip.price) {
     updateData.price = data.price;
     changedFields.push('price');
+  }
+
+  // No-op updates should not fail callers (e.g., manual "Save as Draft" with unchanged data).
+  if (Object.keys(updateData).length === 0) {
+    return currentTrip;
   }
 
   const { data: trip, error } = await supabase

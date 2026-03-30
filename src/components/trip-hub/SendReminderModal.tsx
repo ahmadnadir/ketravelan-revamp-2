@@ -38,7 +38,8 @@ export function SendReminderModal({
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
-  const defaultMessage = `Hey 👋 Just a reminder to settle RM${amountDisplay} for our ${tripName} trip. Thanks!`;
+  const tripLabel = /\btrip\b/i.test(tripName) ? tripName : `${tripName} trip`;
+  const defaultMessage = `Hey 👋 Just a reminder to settle RM${amountDisplay} for our ${tripLabel}. Thanks!`;
   const [message, setMessage] = useState(defaultMessage);
   const [isSending, setIsSending] = useState(false);
 

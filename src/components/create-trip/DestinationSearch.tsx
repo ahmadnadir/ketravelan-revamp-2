@@ -94,9 +94,9 @@ export function DestinationSearch({
 
   const handleSelect = (destination: string, locationData?: any) => {
     if (locationData && 'displayName' in locationData) {
-      // Real API result
+      // Real API result — name is already the clean city name
       onChange(destination, {
-        place: locationData.displayName.split(',')[0].trim(),
+        place: locationData.name || destination,
         state: locationData.region,
         country: locationData.country,
         displayName: locationData.displayName,
@@ -170,8 +170,13 @@ export function DestinationSearch({
             results.map((result, idx) => {
               // Handle both LocationResult and mock format
               const isApiResult = 'displayName' in result;
-              const place = isApiResult 
-                ? result.displayName.split(',')[0].trim() 
+              // For API results: show the clean "City, Country" displayName
+              // For mock results: show the name field
+              const displayLabel = isApiResult
+                ? result.displayName  // already "Osaka, Japan" from enhanced API
+                : (result as any).name;
+              const cityName = isApiResult
+                ? (result.name || result.displayName.split(',')[0].trim())
                 : (result as any).name;
               const region = isApiResult 
                 ? result.region 
@@ -179,16 +184,16 @@ export function DestinationSearch({
               
               return (
                 <button
-                  key={`${place}-${idx}`}
+                  key={`${cityName}-${idx}`}
                   type="button"
-                  onClick={() => handleSelect(place, result)}
+                  onClick={() => handleSelect(cityName, result)}
                   className={cn(
                     "w-full px-4 py-3 flex items-start gap-3 hover:bg-accent transition-colors text-left border-b border-border/50 last:border-b-0"
                   )}
                 >
                   <MapPin className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-foreground truncate">{place}</p>
+                    <p className="text-sm font-medium text-foreground truncate">{displayLabel}</p>
                     {region && (
                       <p className="text-xs text-muted-foreground truncate">{region}</p>
                     )}

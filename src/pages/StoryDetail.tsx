@@ -136,9 +136,9 @@ export default function StoryDetail() {
 
   if (isLoading) {
     return (
-      <AppLayout>
-        <div className="relative -mx-4 sm:-mx-6 -mt-4">
-          <Skeleton className="aspect-[16/10] sm:aspect-[21/9] w-full" />
+      <AppLayout wideLayout>
+        <div className="relative -mx-5 sm:-mx-6 -mt-4 lg:-mx-8">
+          <Skeleton className="aspect-[16/9] w-full" />
           <div className="absolute top-4 left-4">
             <Skeleton className="h-9 w-9 rounded-full" />
           </div>
@@ -152,7 +152,7 @@ export default function StoryDetail() {
           </div>
         </div>
 
-        <div className="py-6 sm:py-6 max-w-3xl mx-auto">
+        <div className="py-6 sm:py-6">
           <div className="flex flex-wrap items-center gap-3 mb-8 sm:mb-6">
             <Skeleton className="h-4 w-32" />
             <Skeleton className="h-4 w-24" />
@@ -417,7 +417,7 @@ export default function StoryDetail() {
   };
 
   return (
-    <AppLayout>
+    <AppLayout wideLayout>
       <SEOHead
         title={`${story?.title || "Story"} | Ketravelan Stories`}
         description={story?.excerpt || ""}
@@ -425,8 +425,8 @@ export default function StoryDetail() {
       />
 
       {/* Hero image with overlay header */}
-      <div className="relative -mx-4 sm:-mx-6 -mt-4">
-        <div className="aspect-[16/10] sm:aspect-[21/9]">
+      <div className="relative -mx-5 sm:-mx-6 -mt-4 lg:-mx-8">
+        <div className="aspect-[16/9]">
           <img
             src={story?.coverImage}
             alt={story?.title}
@@ -489,7 +489,7 @@ export default function StoryDetail() {
       </div>
 
       {/* Content */}
-      <div className="py-6 sm:py-6 max-w-3xl mx-auto">
+      <div className="py-6 sm:py-6">
         {/* Meta bar */}
         <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground mb-8 sm:mb-6">
           <span className="flex items-center gap-1">

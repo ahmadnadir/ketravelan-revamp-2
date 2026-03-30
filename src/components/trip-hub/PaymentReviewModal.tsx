@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Download, ZoomIn, ZoomOut, ImageIcon, CheckCircle, Bell, X } from "lucide-react";
+import { Download, ZoomIn, ZoomOut, ImageIcon, CheckCircle, Bell, X, Eye } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -65,6 +65,11 @@ export function PaymentReviewModal({
       link.click();
       document.body.removeChild(link);
     }
+  };
+
+  const handleViewReceipt = () => {
+    if (!payment.receiptUrl) return;
+    window.open(payment.receiptUrl, "_blank", "noopener,noreferrer");
   };
 
   const getStatusBadge = () => (
@@ -194,19 +199,6 @@ export function PaymentReviewModal({
             )}
           </div>
 
-          {/* Send Reminder Button - Only show if pending payment */}
-          {!isSettled && !hasReceipt && onRemind && expenseId && (
-            <Button
-              variant="outline"
-              className="w-full"
-              onClick={() => onRemind(member.id)}
-              disabled={isLoading}
-            >
-              <Bell className="h-4 w-4 mr-2" />
-              {isLoading ? "Sending..." : "Remind"}
-            </Button>
-          )}
-
           {/* Payer Note */}
           {payment.payerNote && (
             <div>
@@ -217,15 +209,48 @@ export function PaymentReviewModal({
             </div>
           )}
 
-          {/* Action Button - Only show if not settled and has receipt */}
+          {/* Action Buttons - Only show if not settled */}
+          {!isSettled && !hasReceipt && (
+            <div className="flex gap-2">
+              {onRemind && expenseId && (
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => onRemind(member.id)}
+                  disabled={isLoading}
+                >
+                  <Bell className="h-4 w-4 mr-2" />
+                  {isLoading ? "Sending..." : "Remind"}
+                </Button>
+              )}
+              <Button
+                className="flex-1"
+                onClick={onConfirmReceived}
+              >
+                <CheckCircle className="h-4 w-4 mr-2" />
+                Payment Received
+              </Button>
+            </div>
+          )}
+
           {!isSettled && hasReceipt && (
-            <Button
-              className="w-full"
-              onClick={onConfirmReceived}
-            >
-              <CheckCircle className="h-4 w-4 mr-2" />
-              Confirm & Mark as Settled
-            </Button>
+            <div className="grid gap-2">
+              <Button
+                className="w-full"
+                onClick={onConfirmReceived}
+              >
+                <CheckCircle className="h-4 w-4 mr-2" />
+                Payment Received
+              </Button>
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={handleViewReceipt}
+              >
+                <Eye className="h-4 w-4 mr-2" />
+                View Receipt
+              </Button>
+            </div>
           )}
         </div>
       </DialogContent>

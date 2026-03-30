@@ -758,7 +758,7 @@ export function ExpenseDetailsModal({
                       const memberPayment = memberPayments.find(p => p.memberId === memberId);
 
                       return (
-                        <Card key={memberId} className="p-4 border-border/50">
+                        <Card key={memberId} className="p-4 rounded-3xl border border-border/60 bg-white shadow-sm">
                           {/* Top Row: Avatar + Name + Amount */}
                           <div className="flex items-center gap-3">
                             <Avatar className="h-10 w-10 shrink-0">
@@ -791,10 +791,10 @@ export function ExpenseDetailsModal({
                                   amount
                                 });
                               }}
-                              className="h-7 text-xs"
+                              className="h-8 rounded-full border-border bg-white px-4 text-xs text-foreground hover:bg-secondary"
                             >
                               <Eye className="h-3.5 w-3.5 mr-1" />
-                              View Receipt
+                              Receipt
                             </Button>
                           </div>
                         </Card>
@@ -856,7 +856,7 @@ export function ExpenseDetailsModal({
                       };
 
                       return (
-                        <Card key={memberId} className="p-4 border-border/50">
+                        <Card key={memberId} className="p-4 rounded-3xl border border-border/60 bg-white shadow-sm">
                           {/* Top Row: Avatar + Name + Amount */}
                           <div className="flex items-center gap-3">
                             <Avatar className="h-10 w-10 shrink-0">
@@ -876,22 +876,34 @@ export function ExpenseDetailsModal({
                             </div>
                           </div>
                           
-                          {/* Status + View Payment Row */}
+                          {/* Status + Actions Row */}
                           <div className="flex items-center justify-between mt-3 ml-13">
                             {getStatusBadge()}
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => setReviewingPayment({
-                                member,
-                                payment: memberPayment || { memberId, status: "pending" as const },
-                                amount
-                              })}
-                              className="h-7 text-xs"
-                            >
-                              <Eye className="h-3.5 w-3.5 mr-1" />
-                              {isSettled ? "View Receipt" : "View Payment"}
-                            </Button>
+                            <div className="flex w-[140px] flex-col gap-1.5">
+                              {!isSettled && (
+                                <Button
+                                  size="sm"
+                                  onClick={() => handleMarkMemberSettled(memberId)}
+                                  className="h-8 rounded-full bg-slate-950 text-xs text-white hover:bg-black"
+                                >
+                                  <CheckCircle className="h-3.5 w-3.5 mr-1" />
+                                  Received
+                                </Button>
+                              )}
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setReviewingPayment({
+                                  member,
+                                  payment: memberPayment || { memberId, status: "pending" as const },
+                                  amount
+                                })}
+                                className="h-8 rounded-full border-border bg-white text-xs text-foreground hover:bg-secondary"
+                              >
+                                <Eye className="h-3.5 w-3.5 mr-1" />
+                                {isSettled ? "Receipt" : "Receipt"}
+                              </Button>
+                            </div>
                           </div>
                         </Card>
                       );

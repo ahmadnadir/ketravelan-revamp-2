@@ -231,7 +231,7 @@ export function SettlementBreakdownModal({
                   return (
                     <Card key={expense.expenseId} className="p-3 border-border/50">
                       <div className="flex items-start gap-3">
-                        <div className="h-9 w-9 rounded-lg bg-secondary flex items-center justify-center shrink-0">
+                        <div className={`h-9 w-9 rounded-md flex items-center justify-center shrink-0 ${categoryData.color.split(' ')[0]}`}>
                           <span className="text-base">{categoryData.emoji}</span>
                         </div>
                         <div className="flex-1 min-w-0">
@@ -282,7 +282,7 @@ export function SettlementBreakdownModal({
                   return (
                     <Card key={expense.expenseId} className="p-3 border-border/50">
                       <div className="flex items-start gap-3">
-                        <div className="h-9 w-9 rounded-lg bg-secondary flex items-center justify-center shrink-0">
+                        <div className={`h-9 w-9 rounded-md flex items-center justify-center shrink-0 ${categoryData.color.split(' ')[0]}`}>
                           <span className="text-base">{categoryData.emoji}</span>
                         </div>
                         <div className="flex-1 min-w-0">

@@ -52,7 +52,7 @@ export function Header({ onNotificationsClick, onMenuClick }: HeaderProps) {
               </button>
               <button
                 type="button"
-                className="flex items-center justify-center w-11 h-11 rounded-2xl text-foreground/70 hover:text-foreground active:bg-black/[0.06] transition-colors"
+                className="lg:hidden flex items-center justify-center w-11 h-11 rounded-2xl text-foreground/70 hover:text-foreground active:bg-black/[0.06] transition-colors"
                 onClick={onMenuClick}
                 aria-label="Menu"
               >

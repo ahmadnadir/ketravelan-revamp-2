@@ -4,6 +4,20 @@ import { Capacitor } from "@capacitor/core";
 import App from "./App.tsx";
 import "./index.css";
 
+// Aborted browser operations (for example canceled share dialogs) can surface
+// as unhandled promise rejections in WebKit. Ignore only AbortError globally.
+window.addEventListener("unhandledrejection", (event) => {
+  const reason = event.reason;
+  const name =
+    typeof reason === "object" && reason !== null && "name" in reason
+      ? String((reason as { name?: unknown }).name)
+      : "";
+
+  if (name === "AbortError") {
+    event.preventDefault();
+  }
+});
+
 if (Capacitor.isNativePlatform()) {
   const viewport = document.querySelector('meta[name="viewport"]');
   if (viewport) {

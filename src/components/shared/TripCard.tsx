@@ -323,7 +323,7 @@ export function TripCard({
         </DialogContent>
       </Dialog>
 
-      <Card className={cn("overflow-hidden border-border/50 shadow-sm", className)}>
+      <Card className={cn("overflow-hidden border-border/50 shadow-sm flex flex-col h-full", className)}>
       <Link to={tripLink}>
         {/* Image */}
         <div className="relative aspect-[16/10] sm:aspect-[16/9] overflow-hidden">
@@ -338,14 +338,18 @@ export function TripCard({
               {noPhotoIcon}
             </div>
           )}
-          {(isAlmostFull || isOngoing) && (
+          {(isAlmostFull || isOngoing || slotsLeft === 0) && (
             <div className="absolute top-2 sm:top-3 left-2 sm:left-3 flex flex-col gap-1">
               {isOngoing && (
                 <span className="bg-emerald-500 text-white text-[10px] sm:text-xs font-semibold px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full">
                   Ongoing
                 </span>
               )}
-              {isAlmostFull && (
+              {slotsLeft === 0 ? (
+                <span className="bg-red-500 text-white text-[10px] sm:text-xs font-semibold px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full">
+                  Full
+                </span>
+              ) : isAlmostFull && (
                 <span className="bg-warning text-warning-foreground text-[10px] sm:text-xs font-semibold px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full">
                   Almost Full
                 </span>
@@ -395,7 +399,7 @@ export function TripCard({
       </Link>
 
       {/* Content */}
-      <div className="p-3 sm:p-4 flex flex-col h-full space-y-2 sm:space-y-3">
+      <div className="p-3 sm:p-4 flex flex-col flex-1 gap-2 sm:gap-3">
         <Link to={tripLink}>
           <h3 className="font-semibold text-foreground line-clamp-1 hover:text-primary transition-colors text-sm sm:text-base">
             {safeTitle}
@@ -437,40 +441,44 @@ export function TripCard({
           )}
         </div>
 
-        {/* Footer - always at bottom in desktop */}
-        <div className="mt-auto flex items-center justify-between pt-2 border-t border-border/50 gap-2">
-          {status === 'draft' ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleDelete}
-              disabled={isDeleting}
-              className="text-destructive hover:text-destructive hover:bg-destructive/10 gap-1"
-            >
-              <Trash2 className="h-4 w-4" />
-              <span className="text-xs sm:text-sm">{isDeleting ? 'Deleting...' : 'Delete'}</span>
-            </Button>
-          ) : onCancel ? (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleCancel}
-              className="text-destructive border-destructive/40 hover:bg-destructive/10 gap-1"
-            >
-              <X className="h-4 w-4" />
-              <span className="text-xs sm:text-sm">Cancel</span>
-            </Button>
-          ) : (
-            <div className="flex items-center gap-1 sm:gap-1.5 text-xs sm:text-sm text-muted-foreground min-w-0">
-              <Users className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
-              <span className="truncate">{safeSlotsLeft} slots left</span>
+        {/* Footer - pinned to bottom */}
+        <div className="mt-auto pt-2 border-t border-border/50">
+          <div className="flex items-center justify-between gap-2">
+            {status === 'draft' ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleDelete}
+                disabled={isDeleting}
+                className="text-destructive hover:text-destructive hover:bg-destructive/10 gap-1"
+              >
+                <Trash2 className="h-4 w-4" />
+                <span className="text-xs sm:text-sm">{isDeleting ? 'Deleting...' : 'Delete'}</span>
+              </Button>
+            ) : onCancel ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleCancel}
+                className="text-destructive border-destructive/40 hover:bg-destructive/10 gap-1"
+              >
+                <X className="h-4 w-4" />
+                <span className="text-xs sm:text-sm">Cancel</span>
+              </Button>
+            ) : (
+              <div className="flex items-center gap-1 sm:gap-1.5 text-xs sm:text-sm min-w-0">
+                <Users className={cn("h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0", slotsLeft === 0 ? "text-red-500" : "text-muted-foreground")} />
+                <span className={cn("truncate font-medium", slotsLeft === 0 ? "text-red-500" : "text-muted-foreground")}>
+                  {slotsLeft === 0 ? "0 slots left" : `${safeSlotsLeft} slots left`}
+                </span>
+              </div>
+            )}
+            <div className="text-right shrink-0 flex flex-col items-end">
+              <span className="text-base sm:text-lg font-bold text-foreground">
+                {safeCurrency} {safePrice != null ? safePrice.toLocaleString() : 'N/A'}
+              </span>
+              <span className="text-xs text-muted-foreground ml-1">budget per person</span>
             </div>
-          )}
-          <div className="text-right shrink-0 flex flex-col items-end">
-            <span className="text-base sm:text-lg font-bold text-foreground">
-              {safeCurrency} {safePrice != null ? safePrice.toLocaleString() : 'N/A'}
-            </span>
-            <span className="text-xs text-muted-foreground ml-1">budget per person</span>
           </div>
         </div>
       </div>
