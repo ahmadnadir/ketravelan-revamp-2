@@ -5,7 +5,7 @@ export async function fetchUserTrips(userId: string) {
   // Fetch trips created by user (select only essential fields)
   const { data: createdTrips, error: createdError } = await supabase
     .from('trips')
-    .select('id, title, destination, cover_image, start_date, end_date, price, currency, max_participants, current_participants, tags, status, type, slug, created_at')
+    .select('id, title, destination, cover_image, start_date, end_date, price, currency, max_participants, current_participants, tags, requirements, status, visibility, type, slug, created_at')
     .eq('creator_id', userId);
 
   if (createdError) {
@@ -20,7 +20,7 @@ export async function fetchUserTrips(userId: string) {
       trip:trips(
         id, title, destination, cover_image, start_date, end_date, 
         price, currency, max_participants, current_participants, 
-        tags, status, type, slug, created_at
+        tags, requirements, status, visibility, type, slug, created_at
       )
     `)
     .eq('user_id', userId)

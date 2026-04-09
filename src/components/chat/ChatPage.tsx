@@ -58,6 +58,21 @@ export function ChatPage({
   tripId,
   scrollContainerRef,
 }: ChatPageProps) {
+  const formatSystemMessageContent = (content: string): string => {
+    return content.replace(/\b(RM|[A-Z]{3})\s+(\d[\d,]*(?:\.\d+)?)/g, (_, code: string, rawAmount: string) => {
+      const parsed = Number(rawAmount.replace(/,/g, ""));
+      if (!Number.isFinite(parsed)) return `${code} ${rawAmount}`;
+
+      const hasMeaningfulDecimals = rawAmount.includes(".") && !/\.0+$/.test(rawAmount);
+      const formatted = parsed.toLocaleString("en-US", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+
+      return `${code} ${formatted}`;
+    });
+  };
+
   const [confirmedMessages, setConfirmedMessages] = useState<ChatPageMessage[]>([]);
   const [pendingMessages, setPendingMessages] = useState<ChatPageMessage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -421,7 +436,7 @@ export function ChatPage({
           return (
             <div key={String(msg.id)} className="flex justify-center py-3">
               <p className="text-xs sm:text-sm text-muted-foreground text-center px-4">
-                {msg.content}
+                {formatSystemMessageContent(msg.content)}
               </p>
             </div>
           );

@@ -49,22 +49,23 @@ export function getCurrencyInfo(code: CurrencyCode): CurrencyInfo | undefined {
 export const travelCurrencies = currencies.filter(c => c.code !== "MYR");
 
 // Approximate conversion rates TO MYR (base currency)
+// Last updated: April 6, 2026 - Fetched live from Frankfurter API
 export const conversionRatesToMYR: Record<CurrencyCode, number> = {
   MYR: 1,
-  USD: 4.76,
-  EUR: 5.00,
-  IDR: 0.000296,
-  SGD: 3.52,
-  THB: 0.13,
+  USD: 4.04,
+  EUR: 4.66,
+  IDR: 0.000237,
+  SGD: 3.14,
+  THB: 0.123,
   VND: 0.000183,
-  PHP: 0.085,
-  CNY: 0.67,
-  HKD: 0.61,
-  GBP: 6.0,
-  AUD: 3.15,
-  CAD: 3.5,
-  JPY: 0.032,
-  KRW: 0.0038,
+  PHP: 0.0667,
+  CNY: 0.586,
+  HKD: 0.515,
+  GBP: 5.34,
+  AUD: 2.78,
+  CAD: 2.91,
+  JPY: 0.0253,
+  KRW: 0.00266,
 };
 
 // Legacy: rates FROM MYR (for backward compatibility)

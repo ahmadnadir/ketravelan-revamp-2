@@ -41,6 +41,7 @@ export async function fetchTrips(filters?: TripFilters) {
       max_participants,
       current_participants,
       tags,
+      requirements,
       type,
       slug,
       created_at,
@@ -141,7 +142,7 @@ export async function fetchTripDetails(tripIdOrSlug: string) {
       created_at,
       creator_id,
       creator:profiles!trips_creator_id_fkey(id, username, full_name, avatar_url, bio),
-      trip_members!inner(
+      trip_members(
         id,
         role,
         is_admin,
@@ -237,6 +238,7 @@ export async function fetchSavedTrips(userId?: string) {
         max_participants,
         current_participants,
         tags,
+        requirements,
         type,
         slug,
         created_at,

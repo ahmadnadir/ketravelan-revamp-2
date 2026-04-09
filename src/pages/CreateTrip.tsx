@@ -1,4 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { buildPublicUrl, buildTripShareUrl } from "@/lib/publicUrl";
+import { getExpectationIcon, getExpectationLabel } from "@/lib/expectationUtils";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
@@ -419,9 +421,9 @@ export default function CreateTrip() {
         })();
       }
 
-      // For an update, navigate immediately — no blank intermediate state.
-      // For a fresh publish, show the success modal with share/invite actions.
-      if (isUpdating) {
+      // If the trip was already published, this is a normal update: navigate immediately.
+      // If it's a first-time publish (new trip or draft -> published), show success modal.
+      if (isUpdating && wasAlreadyPublished) {
         clearDraft();
         if (isUpdating) localStorage.removeItem('ketravelan-draft-trip-id');
         toast({
@@ -1122,9 +1124,10 @@ export default function CreateTrip() {
                       {draft.expectations.map((exp, i) => (
                         <span
                           key={i}
-                          className="px-2 py-1 bg-secondary text-foreground text-xs rounded-full"
+                          className="inline-flex items-center gap-1 px-2.5 py-1 bg-secondary text-foreground text-xs rounded-full"
                         >
-                          {exp}
+                          <span>{getExpectationIcon(exp)}</span>
+                          <span>{getExpectationLabel(exp)}</span>
                         </span>
                       ))}
                     </div>
@@ -1284,98 +1287,92 @@ export default function CreateTrip() {
 
       {/* Share Modal */}
       <Dialog open={showShareModal} onOpenChange={setShowShareModal}>
-        <DialogContent className="max-w-md w-[calc(100%-2rem)] sm:w-full rounded-2xl p-0 overflow-hidden [&>button]:hidden">
-          {/* No border-b header — full-bleed celebration layout */}
-          <div className="p-6 text-center space-y-2 border-b border-border/50 relative">
-            <button
-              onClick={() => {
-                setShowShareModal(false);
-                navigate(`/trip/${publishedTripId}`);
-              }}
-              className="absolute top-4 right-4 h-8 w-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
-            >
-              <X className="h-4 w-4" />
-            </button>
-            <div className="text-4xl mb-1">🎉</div>
-            <DialogHeader>
-              <DialogTitle className="text-xl font-bold">Trip Published!</DialogTitle>
-            </DialogHeader>
-            <p className="text-sm text-muted-foreground">
-              {draftSnapshotRef.current?.title
-                ? `"${draftSnapshotRef.current.title}" is now live`
-                : 'Your trip is now live'} and ready for people to join.
-            </p>
-          </div>
-          <div className="p-4 space-y-3">
-            {/* Primary CTA */}
-            <Button
-              size="lg"
-              className="w-full rounded-xl gap-2"
-              onClick={() => {
-                setShowShareModal(false);
-                navigate(`/trip/${publishedTripId}`);
-              }}
-            >
-              <CheckCircle2 className="h-4 w-4" />
-              View Trip Details
-            </Button>
+        <DialogContent className="max-w-[360px] w-[calc(100%-2rem)] rounded-2xl p-0 overflow-hidden [&>button]:hidden">
+          {(() => {
+            const publishedShareUrl = buildTripShareUrl({
+              tripId: String(publishedTripId || ""),
+              title: draftSnapshotRef.current?.title,
+            });
 
-            {/* Share link row */}
-            <div className="flex items-center gap-2 p-3 bg-secondary rounded-xl">
-              <input
-                type="text"
-                readOnly
-                value={`${window.location.origin}/trip/${publishedTripId}`}
-                className="flex-1 bg-transparent text-sm text-foreground outline-none truncate"
-              />
-              <Button
-                size="sm"
-                variant="ghost"
-                className="shrink-0"
-                onClick={() => {
-                  navigator.clipboard.writeText(`${window.location.origin}/trip/${publishedTripId}`);
-                  toast({ title: "Link copied!" });
-                }}
-              >
-                <Copy className="h-4 w-4" />
-              </Button>
-            </div>
+            return (
+              <div className="p-5">
+                <button
+                  onClick={() => {
+                    setShowShareModal(false);
+                    navigate(`/trip/${publishedTripId}`);
+                  }}
+                  className="absolute right-3 top-3 h-7 w-7 rounded-full flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
+                  aria-label="Close share dialog"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
 
-            {/* Secondary actions */}
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                size="lg"
-                className="flex-1 rounded-xl gap-2"
-                onClick={() => {
-                  if (navigator.share && draftSnapshotRef.current) {
-                    navigator.share({
-                      title: draftSnapshotRef.current.title,
-                      url: `${window.location.origin}/trip/${publishedTripId}`,
-                    });
-                  } else {
-                    navigator.clipboard.writeText(`${window.location.origin}/trip/${publishedTripId}`);
-                    toast({ title: "Link copied!" });
-                  }
-                }}
-              >
-                <Share2 className="h-4 w-4" />
-                Share
-              </Button>
-              <Button
-                variant="outline"
-                size="lg"
-                className="flex-1 rounded-xl gap-2"
-                onClick={() => {
-                  setShowShareModal(false);
-                  navigate(`/trip/${publishedTripId}`);
-                }}
-              >
-                <UserPlus className="h-4 w-4" />
-                Invite
-              </Button>
-            </div>
-          </div>
+                <div className="text-center pb-4 border-b border-border/50">
+                  <div className="text-3xl leading-none mb-3">🎉</div>
+                  <DialogHeader>
+                    <DialogTitle className="text-base font-semibold tracking-tight text-center">Your trip is live!</DialogTitle>
+                  </DialogHeader>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Share it with friends or let others discover it
+                  </p>
+                </div>
+
+                <div className="mt-4 space-y-3">
+                  <div className="flex items-center gap-2 rounded-lg bg-secondary/70 px-3 py-2">
+                    <input
+                      type="text"
+                      readOnly
+                      value={publishedShareUrl}
+                      className="min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(publishedShareUrl);
+                        toast({ title: "Link copied!" });
+                      }}
+                      className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-background hover:text-foreground transition-colors"
+                      aria-label="Copy link"
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="rounded-lg h-9 text-xs"
+                      onClick={() => {
+                        setShowShareModal(false);
+                        navigate(`/trip/${publishedTripId}`);
+                      }}
+                    >
+                      View Trip
+                    </Button>
+                    <Button
+                      size="sm"
+                      className="rounded-lg h-9 text-xs gap-1.5"
+                      onClick={() => {
+                        if (navigator.share && draftSnapshotRef.current) {
+                          navigator.share({
+                            title: draftSnapshotRef.current.title,
+                            url: publishedShareUrl,
+                          });
+                        } else {
+                          navigator.clipboard.writeText(publishedShareUrl);
+                          toast({ title: "Link copied!" });
+                        }
+                      }}
+                    >
+                      <Share2 className="h-3.5 w-3.5" />
+                      Share
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
         </DialogContent>
       </Dialog>
 

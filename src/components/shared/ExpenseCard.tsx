@@ -205,7 +205,7 @@ export function ExpenseCard({
             </div>
             <div className="flex items-start gap-1 shrink-0">
               <span className="text-base sm:text-lg font-semibold text-foreground">
-                {displayCurrency} {displayAmount.toLocaleString()}
+                {displayCurrency} {displayAmount.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </span>
               {canToggleCurrency && (
                 <Button 

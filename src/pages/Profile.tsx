@@ -104,7 +104,8 @@ export default function Profile() {
   const { userId } = useParams(); // Get userId from URL parameter
   const { user, profile: currentUserProfile, loading, signOut, refreshProfile } = useAuth();
   const { toast } = useToast();
-  const [showAllStyles, setShowAllStyles] = useState(false);
+  const [showAllPreviousTrips, setShowAllPreviousTrips] = useState(false);
+  const [viewerMemberTripIds, setViewerMemberTripIds] = useState<string[]>([]);
   const [uploadingCover, setUploadingCover] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [showCoverImage, setShowCoverImage] = useState(false);
@@ -165,19 +166,72 @@ export default function Profile() {
   // Fetch user's trips for stats and previous trips
   const profileUserId = profile?.id || user?.id;
   const { data: trips = [], isLoading: tripsLoading } = useUserTrips(profileUserId);
+
+  useEffect(() => {
+    const loadViewerMembership = async () => {
+      if (isOwnProfile || !user?.id || !Array.isArray(trips) || trips.length === 0) {
+        setViewerMemberTripIds([]);
+        return;
+      }
+
+      const tripIds = trips.map((trip: any) => trip?.id).filter(Boolean);
+      if (tripIds.length === 0) {
+        setViewerMemberTripIds([]);
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("trip_members")
+        .select("trip_id")
+        .eq("user_id", user.id)
+        .in("trip_id", tripIds)
+        .is("left_at", null);
+
+      if (error) {
+        console.error("Error fetching viewer trip memberships:", error);
+        setViewerMemberTripIds([]);
+        return;
+      }
+
+      setViewerMemberTripIds(Array.isArray(data) ? data.map((row: any) => row.trip_id).filter(Boolean) : []);
+    };
+
+    loadViewerMembership();
+  }, [isOwnProfile, user?.id, trips]);
+
   const canShowTrips = isOwnProfile || profile?.show_trips_publicly;
-  const visibleTrips = canShowTrips ? trips : [];
+  const visibleTrips = canShowTrips
+    ? (Array.isArray(trips)
+        ? trips.filter((trip: any) => {
+            if (isOwnProfile) return true;
+
+            const visibility = String(trip?.visibility || "public").toLowerCase();
+            const isPrivateTrip = visibility === "private";
+
+            if (!isPrivateTrip) return true;
+            return viewerMemberTripIds.includes(trip?.id);
+          })
+        : [])
+    : [];
   const previousTrips = Array.isArray(visibleTrips)
     ? visibleTrips.filter((trip: any) => {
-        // Consider previous if end_date is in the past or status is completed/cancelled
-        if (!trip.end_date) return false;
-        const end = new Date(trip.end_date);
-        const now = new Date();
-        return end < now || ["completed", "cancelled"].includes(trip.status);
+        // Treat trips as previous when they are explicitly closed, or their latest known date is in the past.
+        const normalizedStatus = String(trip.status || "").toLowerCase();
+        const closedStatuses = ["completed", "cancelled", "canceled", "ended", "archived", "done"];
+
+        if (closedStatuses.includes(normalizedStatus)) return true;
+
+        const dateToCheck = trip.end_date || trip.start_date || trip.created_at;
+        if (!dateToCheck) return false;
+
+        const tripDate = new Date(dateToCheck);
+        if (Number.isNaN(tripDate.getTime())) return false;
+
+        return tripDate < new Date();
       })
     : [];
-
-  const displayedStyles = (profile?.travel_styles || []).slice(0, 4);
+  const previousTripsToRender = showAllPreviousTrips ? previousTrips : previousTrips.slice(0, 5);
+  const hasMorePreviousTrips = previousTrips.length > 5;
 
   const handleCoverPhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -455,10 +509,7 @@ export default function Profile() {
             </Card>
 
             {/* Budget Range */}
-            <Card className="p-4 border-border/50">
-              <h3 className="font-semibold text-foreground mb-2 text-sm">Budget Range</h3>
-              <p className="text-xs text-muted-foreground">Not set</p>
-            </Card>
+            
 
             {/* Previous Trips */}
             <div className="space-y-3">
@@ -509,8 +560,6 @@ export default function Profile() {
   const location = profile.location || "";
   const travelStyles = Array.isArray(profile.travel_styles) ? profile.travel_styles : [];
   const socialLinks = profile.social_links || {};
-  const budgetMin = profile.budget_min;
-  const budgetMax = profile.budget_max;
   const bio = profile.bio;
   const countriesCount = profile.countries_visited || 0;
   const tripsCount = visibleTrips.length;
@@ -691,40 +740,15 @@ export default function Profile() {
                 <span className="text-xs text-muted-foreground">{travelStyles.length} selected</span>
               </div>
               <div className="flex flex-wrap gap-2 items-center">
-                {displayedStyles.map((style) => {
+                {travelStyles.map((style) => {
                   const meta = resolveTravelStyle(style);
                   return (
                     <PillChip key={style} label={meta.label} icon={meta.emoji} size="sm" />
                   );
                 })}
-                {travelStyles.length > 0 && (
-                  <button
-                    onClick={() => setShowAllStyles(true)}
-                    className="inline-flex items-center px-2 py-1 text-xs text-primary font-medium hover:text-primary/80 transition-colors"
-                  >
-                    {travelStyles.length > 4 ? `+${travelStyles.length - 4} more` : "View all"}
-                  </button>
-                )}
               </div>
             </Card>
           )}
-
-          {/* Travel Styles Modal */}
-          <Dialog open={showAllStyles} onOpenChange={setShowAllStyles}>
-            <DialogContent className="sm:max-w-md">
-              <DialogHeader>
-                <DialogTitle>Travel Style</DialogTitle>
-              </DialogHeader>
-              <div className="flex flex-wrap gap-2 pt-2">
-                {travelStyles.map((style) => {
-                  const meta = resolveTravelStyle(style);
-                  return (
-                    <PillChip key={style} label={meta.label} icon={meta.emoji} />
-                  );
-                })}
-              </div>
-            </DialogContent>
-          </Dialog>
 
           {/* Home Currency */}
           <Card className="p-4 border-border/50">
@@ -743,16 +767,6 @@ export default function Profile() {
             </div>
           </Card>
 
-          {/* Budget Range */}
-          <Card className="p-4 border-border/50">
-            <h3 className="font-semibold text-foreground mb-2 text-sm">Budget Range</h3>
-            <p className="text-xs text-muted-foreground">
-              {budgetMin && budgetMax
-                ? `RM ${budgetMin} - RM ${budgetMax} per trip`
-                : "Not set"}
-            </p>
-          </Card>
-
           {/* Previous Trips */}
           <div className="space-y-3">
             <h3 className="font-semibold text-foreground text-sm">Previous Trips</h3>
@@ -761,7 +775,7 @@ export default function Profile() {
                 <Card className="p-6 text-center border-border/50">
                   <p className="text-sm text-muted-foreground">Trips are private</p>
                 </Card>
-              ) : previousTrips.length > 0 ? previousTrips.map((trip: any) => (
+              ) : previousTrips.length > 0 ? previousTripsToRender.map((trip: any) => (
                 <Link key={trip.id} to={`/trip/${trip.id}`}>
                   <Card className="overflow-hidden border-border/50 hover:bg-muted/30 transition-colors">
                     <div className="flex gap-3 p-3">
@@ -781,7 +795,9 @@ export default function Profile() {
                           {trip.destination}
                         </p>
                         <p className="text-xs text-muted-foreground mt-1">
-                          {trip.end_date ? new Date(trip.end_date).toLocaleDateString(undefined, { month: 'short', year: 'numeric' }) : ''}
+                          {(trip.end_date || trip.start_date || trip.created_at)
+                            ? new Date(trip.end_date || trip.start_date || trip.created_at).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })
+                            : ''}
                         </p>
                       </div>
                     </div>
@@ -791,6 +807,16 @@ export default function Profile() {
                 <Card className="p-6 text-center border-border/50">
                   <p className="text-sm text-muted-foreground">No previous trips yet</p>
                 </Card>
+              )}
+              {canShowTrips && hasMorePreviousTrips && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full rounded-xl"
+                  onClick={() => setShowAllPreviousTrips((prev) => !prev)}
+                >
+                  {showAllPreviousTrips ? "Show less" : `Show all previous trips (${previousTrips.length})`}
+                </Button>
               )}
             </div>
           </div>

@@ -11,6 +11,7 @@ import { SEOHead } from "@/components/seo/SEOHead";
 import { formatDistanceToNow } from "date-fns";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
+import { buildPublicUrl } from "@/lib/publicUrl";
 import { createDiscussionReply, deleteDiscussionReply, fetchDiscussionById, fetchDiscussionReplies, toggleAcceptDiscussionReply, updateDiscussionReply, incrementDiscussionViews, toggleDiscussionReplyVote, toggleDiscussionReaction } from "@/lib/community";
 import { toast } from "@/hooks/use-toast";
 import {
@@ -136,7 +137,7 @@ export default function DiscussionDetail() {
   };
 
   const handleShare = (reply: DiscussionReply) => {
-    const link = `${window.location.origin}/community/discussions/${id}?reply=${reply.id}`;
+    const link = buildPublicUrl(`/community/discussions/${id}?reply=${reply.id}`);
     setShareLink(link);
     setSelectedReplyForShare(reply);
     setShowShareModal(true);

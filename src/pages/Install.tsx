@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
-import { Download, Share, MoreVertical, Plus, Smartphone, CheckCircle2 } from "lucide-react";
+import { ArrowUpFromLine, CheckCircle2, Download, ShoppingBag } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -10,6 +9,9 @@ interface BeforeInstallPromptEvent extends Event {
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
 }
 
+const PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=dev.ketravelan.app";
+const APP_STORE_URL = "https://apps.apple.com/us/search?term=Ketravelan";
+
 export default function Install() {
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isInstalled, setIsInstalled] = useState(false);
@@ -17,17 +19,14 @@ export default function Install() {
   const [isAndroid, setIsAndroid] = useState(false);
 
   useEffect(() => {
-    // Detect platform
     const ua = navigator.userAgent;
     setIsIOS(/iPad|iPhone|iPod/.test(ua));
     setIsAndroid(/Android/.test(ua));
 
-    // Check if already installed
     if (window.matchMedia("(display-mode: standalone)").matches) {
       setIsInstalled(true);
     }
 
-    // Listen for install prompt
     const handler = (e: Event) => {
       e.preventDefault();
       setDeferredPrompt(e as BeforeInstallPromptEvent);
@@ -39,32 +38,36 @@ export default function Install() {
 
   const handleInstall = async () => {
     if (!deferredPrompt) return;
-    
+
     await deferredPrompt.prompt();
     const { outcome } = await deferredPrompt.userChoice;
-    
+
     if (outcome === "accepted") {
       setIsInstalled(true);
     }
     setDeferredPrompt(null);
   };
 
+  const handleStoreRedirect = () => {
+    window.open(isAndroid ? PLAY_STORE_URL : APP_STORE_URL, "_blank", "noopener,noreferrer");
+  };
+
+  const isStorePrompt = isIOS || isAndroid;
+
   if (isInstalled) {
     return (
       <AppLayout>
         <div className="flex items-center justify-center py-12">
-          <Card className="max-w-sm w-full text-center">
-            <CardContent className="pt-8 pb-6">
+          <Card className="max-w-sm w-full text-center rounded-[28px] border-black/5 shadow-[0_24px_80px_rgba(15,23,42,0.12)]">
+            <CardContent className="pt-8 pb-6 px-6">
               <div className="w-16 h-16 bg-green-500/10 rounded-full flex items-center justify-center mx-auto mb-4">
                 <CheckCircle2 className="w-8 h-8 text-green-500" />
               </div>
-              <h1 className="text-xl font-bold mb-2">App Installed!</h1>
-              <p className="text-muted-foreground mb-6">
-                Ketravelan is now on your home screen. Open it anytime to plan trips with friends.
+              <h1 className="text-2xl font-semibold tracking-[-0.03em] mb-2">Ketravelan is ready</h1>
+              <p className="text-muted-foreground mb-6 leading-7">
+                Open the app anytime from your home screen to plan trips faster.
               </p>
-              <Link to="/">
-                <Button className="w-full">Open App</Button>
-              </Link>
+              <Button className="w-full rounded-2xl" onClick={() => window.location.assign("/")}>Open App</Button>
             </CardContent>
           </Card>
         </div>
@@ -74,166 +77,67 @@ export default function Install() {
 
   return (
     <AppLayout>
-      <div className="py-6 space-y-8">
-        {/* Hero */}
-        <div className="text-center pt-4">
-          <div className="w-20 h-20 bg-primary/10 rounded-2xl flex items-center justify-center mx-auto mb-4">
-            <Smartphone className="w-10 h-10 text-primary" />
-          </div>
-          <h2 className="text-2xl font-bold mb-2">Get the App</h2>
-          <p className="text-muted-foreground">
-            Install Ketravelan on your device for the best experience. Works offline and loads instantly.
-          </p>
-        </div>
+      <div className="flex items-center justify-center py-8 sm:py-12">
+        <Card className="w-full max-w-[420px] rounded-[30px] border-black/5 shadow-[0_24px_80px_rgba(15,23,42,0.12)]">
+          <CardContent className="px-6 pb-6 pt-8 text-center">
+            <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl bg-white shadow-[0_10px_30px_rgba(99,102,241,0.18)] ring-1 ring-black/5">
+              <img src="/ketravelan_icon.jpeg" alt="Ketravelan" className="h-full w-full object-cover" />
+            </div>
 
-        {/* Android Install Button */}
-        {deferredPrompt && (
-          <Button onClick={handleInstall} size="lg" className="w-full gap-2">
-            <Download className="w-5 h-5" />
-            Install App
-          </Button>
-        )}
+            <h1 className="text-[1.9rem] font-semibold tracking-[-0.03em] text-slate-900">Install Ketravelan</h1>
+            <p className="mt-2 text-sm leading-7 text-slate-500">
+              {isStorePrompt
+                ? "Get the full app for a smoother, faster travel planning experience."
+                : "Install the app for a native experience with offline access and faster performance."}
+            </p>
 
-        {/* iOS Instructions */}
-        {isIOS && (
-          <Card>
-            <CardContent className="pt-6 space-y-4">
-              <h3 className="font-semibold flex items-center gap-2">
-                <span className="w-6 h-6 bg-muted rounded-full flex items-center justify-center text-xs font-bold">
-                  
-                </span>
-                iPhone / iPad
-              </h3>
-              <div className="space-y-3">
-                <div className="flex items-start gap-3">
-                  <div className="w-8 h-8 bg-info/10 rounded-lg flex items-center justify-center shrink-0">
-                    <Share className="w-4 h-4 text-info" />
-                  </div>
-                  <div>
-                    <p className="font-medium">1. Tap Share</p>
-                    <p className="text-sm text-muted-foreground">
-                      Find the share icon at the bottom of Safari
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-3">
-                  <div className="w-8 h-8 bg-info/10 rounded-lg flex items-center justify-center shrink-0">
-                    <Plus className="w-4 h-4 text-info" />
-                  </div>
-                  <div>
-                    <p className="font-medium">2. Add to Home Screen</p>
-                    <p className="text-sm text-muted-foreground">
-                      Scroll down and tap "Add to Home Screen"
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-3">
-                  <div className="w-8 h-8 bg-success/10 rounded-lg flex items-center justify-center shrink-0">
-                    <CheckCircle2 className="w-4 h-4 text-success" />
-                  </div>
-                  <div>
-                    <p className="font-medium">3. Confirm</p>
-                    <p className="text-sm text-muted-foreground">
-                      Tap "Add" in the top right corner
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+            <div className="mt-6 rounded-2xl bg-slate-50 px-4 py-5">
+              {isAndroid && (
+                <>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Get the app</p>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">Open Google Play to download Ketravelan and use it like a regular app.</p>
+                </>
+              )}
 
-        {/* Android Instructions */}
-        {isAndroid && !deferredPrompt && (
-          <Card>
-            <CardContent className="pt-6 space-y-4">
-              <h3 className="font-semibold flex items-center gap-2">
-                <span className="w-6 h-6 bg-muted rounded-full flex items-center justify-center text-xs font-bold">
-                  🤖
-                </span>
-                Android
-              </h3>
-              <div className="space-y-3">
-                <div className="flex items-start gap-3">
-                  <div className="w-8 h-8 bg-info/10 rounded-lg flex items-center justify-center shrink-0">
-                    <MoreVertical className="w-4 h-4 text-info" />
-                  </div>
-                  <div>
-                    <p className="font-medium">1. Open Menu</p>
-                    <p className="text-sm text-muted-foreground">
-                      Tap the three dots in Chrome's top right
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-3">
-                  <div className="w-8 h-8 bg-info/10 rounded-lg flex items-center justify-center shrink-0">
-                    <Download className="w-4 h-4 text-info" />
-                  </div>
-                  <div>
-                    <p className="font-medium">2. Install App</p>
-                    <p className="text-sm text-muted-foreground">
-                      Select "Install app" or "Add to Home screen"
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-3">
-                  <div className="w-8 h-8 bg-success/10 rounded-lg flex items-center justify-center shrink-0">
-                    <CheckCircle2 className="w-4 h-4 text-success" />
-                  </div>
-                  <div>
-                    <p className="font-medium">3. Confirm</p>
-                    <p className="text-sm text-muted-foreground">
-                      Tap "Install" in the popup
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+              {isIOS && (
+                <>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Get the app</p>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">Open the App Store to download Ketravelan and start planning your trips.</p>
+                </>
+              )}
 
-        {/* Desktop Instructions */}
-        {!isIOS && !isAndroid && !deferredPrompt && (
-          <Card>
-            <CardContent className="pt-6 space-y-4">
-              <h3 className="font-semibold">Desktop Browser</h3>
-              <p className="text-sm text-muted-foreground">
-                Look for the install icon in your browser's address bar, or use the browser menu to install this app.
-              </p>
-            </CardContent>
-          </Card>
-        )}
+              {!isStorePrompt && (
+                <>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Installation steps</p>
+                  <div className="mt-3 space-y-2 text-sm leading-6 text-slate-700">
+                    <p className="flex items-center justify-center gap-2"><span className="font-medium">1.</span> Tap <ArrowUpFromLine className="h-4 w-4 text-primary" /> in your browser</p>
+                    <p><span className="font-medium">2.</span> Choose "Install app" or "Add to Home Screen"</p>
+                    <p><span className="font-medium">3.</span> Confirm to finish installation</p>
+                  </div>
+                </>
+              )}
+            </div>
 
-        {/* Benefits */}
-        <div className="space-y-3">
-          <h3 className="font-semibold text-center">Why Install?</h3>
-          <div className="grid grid-cols-2 gap-3">
-            <Card className="bg-muted/50">
-              <CardContent className="p-4 text-center">
-                <p className="font-medium text-sm">⚡ Instant Loading</p>
-                <p className="text-xs text-muted-foreground">Opens in a flash</p>
-              </CardContent>
-            </Card>
-            <Card className="bg-muted/50">
-              <CardContent className="p-4 text-center">
-                <p className="font-medium text-sm">📴 Works Offline</p>
-                <p className="text-xs text-muted-foreground">No internet needed</p>
-              </CardContent>
-            </Card>
-            <Card className="bg-muted/50">
-              <CardContent className="p-4 text-center">
-                <p className="font-medium text-sm">🏠 Home Screen</p>
-                <p className="text-xs text-muted-foreground">One tap access</p>
-              </CardContent>
-            </Card>
-            <Card className="bg-muted/50">
-              <CardContent className="p-4 text-center">
-                <p className="font-medium text-sm">🔒 Secure</p>
-                <p className="text-xs text-muted-foreground">Same security as web</p>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
+            <div className="mt-6 flex gap-3">
+              {isStorePrompt ? (
+                <Button className="w-full gap-2 rounded-2xl" onClick={handleStoreRedirect}>
+                  {isAndroid ? <Download className="h-4 w-4" /> : <ShoppingBag className="h-4 w-4" />}
+                  {isAndroid ? "Open Play Store" : "Open App Store"}
+                </Button>
+              ) : deferredPrompt ? (
+                <Button onClick={handleInstall} className="w-full gap-2 rounded-2xl">
+                  <Download className="h-4 w-4" />
+                  Install Now
+                </Button>
+              ) : (
+                <Button className="w-full gap-2 rounded-2xl" onClick={() => window.location.reload()}>
+                  <Download className="h-4 w-4" />
+                  Check Install Option
+                </Button>
+              )}
+            </div>
+          </CardContent>
+        </Card>
       </div>
     </AppLayout>
   );

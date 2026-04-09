@@ -99,6 +99,7 @@ export function ExpenseSettingsSheet({
                   key={currency.code}
                   label={`${currency.symbol} ${currency.code}`}
                   selected={tripTravelCurrencies.includes(currency.code)}
+                  showCheckmark
                   onClick={() => toggleTravelCurrency(currency.code)}
                 />
               ))}

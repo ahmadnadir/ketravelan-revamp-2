@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { Plus, DollarSign, TrendingUp, TrendingDown, Wallet, QrCode, SlidersHorizontal, Settings, ArrowLeftRight } from "lucide-react";
+import { Plus, DollarSign, TrendingUp, TrendingDown, Wallet, QrCode, SlidersHorizontal, Settings, ArrowLeftRight, Loader2 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { SegmentedControl } from "@/components/shared/SegmentedControl";
 import { ScrollableTabBar } from "@/components/shared/ScrollableTabBar";
@@ -263,6 +263,30 @@ interface TripExpensesProps {
   conversationId?: string;
 }
 
+const getTripCurrencyStorageKey = (tripId: string) => `trip-travel-currencies:${tripId}`;
+
+const readCachedTripCurrencies = (tripId: string): CurrencyCode[] | null => {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(getTripCurrencyStorageKey(tripId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return null;
+    return parsed as CurrencyCode[];
+  } catch {
+    return null;
+  }
+};
+
+const writeCachedTripCurrencies = (tripId: string, currencies: CurrencyCode[]) => {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(getTripCurrencyStorageKey(tripId), JSON.stringify(currencies));
+  } catch {
+    // Ignore local cache write errors
+  }
+};
+
 export function TripExpenses({ tripId, members: providedMembers, tripName = "Trip", allowedCurrencies, conversationId }: TripExpensesProps) {
   const isMobile = useIsMobile();
   const [subTab, setSubTab] = useState("breakdown");
@@ -282,9 +306,11 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
   const [settingsSheetOpen, setSettingsSheetOpen] = useState(false);
 
   // Trip travel currencies loaded from trips.currency_settings
-  const [tripTravelCurrencies, setTripTravelCurrencies] = useState<CurrencyCode[]>(
-    Array.isArray(allowedCurrencies) ? allowedCurrencies : []
-  );
+  const [tripTravelCurrencies, setTripTravelCurrencies] = useState<CurrencyCode[]>(() => {
+    const cached = readCachedTripCurrencies(tripId);
+    if (cached) return cached;
+    return Array.isArray(allowedCurrencies) ? allowedCurrencies : [];
+  });
 
   // Currency view toggle - home or original
   const [viewCurrency, setViewCurrency] = useState<"home" | "original">("home");
@@ -444,14 +470,25 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
     try {
       const settings = await getTripCurrencySettings(tripId);
       if (settings && Array.isArray(settings.travel_currencies)) {
-        setTripTravelCurrencies(settings.travel_currencies as CurrencyCode[]);
+        const loadedCurrencies = settings.travel_currencies as CurrencyCode[];
+        setTripTravelCurrencies(loadedCurrencies);
+        writeCachedTripCurrencies(tripId, loadedCurrencies);
       } else {
         setTripTravelCurrencies([]);
+        writeCachedTripCurrencies(tripId, []);
       }
     } catch (e) {
       console.warn('Failed to load trip currency settings, using defaults', e);
+      const cached = readCachedTripCurrencies(tripId);
+      if (cached) {
+        setTripTravelCurrencies(cached);
+      }
     }
   }, [tripId]);
+
+  useEffect(() => {
+    writeCachedTripCurrencies(tripId, tripTravelCurrencies);
+  }, [tripId, tripTravelCurrencies]);
 
   useEffect(() => {
     loadCurrentUser();
@@ -1554,7 +1591,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
         name: "Payment QR",
         description: "My payment QR code",
         qr_code_url: qrCodeUrl,
-        is_default: true
+        is_default: false
       });
 
       // Update local state
@@ -1671,7 +1708,11 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
       // Send system message to chat if conversationId is available
       if (conversationId && payer) {
         try {
-          const expenseDetail = `${newExpense.title} - ${currencySymbol} ${newExpense.amount.toFixed(2)}`;
+          const formattedSystemAmount = newExpense.amount.toLocaleString("en-US", {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          });
+          const expenseDetail = `${newExpense.title} - ${currencySymbol} ${formattedSystemAmount}`;
           await sendSystemMessage({
             conversationId,
             action: "expense_added",
@@ -2089,6 +2130,16 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
     <div className="relative">
       {/* Scroll anchor for auto-scroll on subtab change */}
       <div ref={topScrollAnchorRef} className="absolute top-0 left-0" />
+
+      {isLoadingExpenses && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-background/65 backdrop-blur-[1px]">
+          <div className="flex items-center gap-2 rounded-full border border-border bg-card px-4 py-2 text-sm text-muted-foreground shadow-sm">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Loading trip expenses...
+          </div>
+        </div>
+      )}
+
       {/* Always Visible: Header + Stat Cards */}
       <div className="px-3 sm:px-4 pt-3 sm:pt-4 space-y-4">
         {/* Header */}
@@ -2583,7 +2634,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
                 })
               ) : (
                 <Card className="p-6 text-center border-border/50">
-                  <p className="text-sm text-muted-foreground">No expenses found</p>
+                  <p className="text-sm text-muted-foreground">No expenses yet. Add your first expense and it will show up here</p>
                 </Card>
               )}
             </div>
@@ -2660,7 +2711,11 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
                   ))
                 ) : (
                   <Card className="p-6 text-center border-border/50">
-                    <p className="text-sm text-green-600 font-semibold">All settled!</p>
+                    {expenses.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No expenses yet. Add expenses to see settlements here</p>
+                    ) : (
+                      <p className="text-sm font-semibold text-green-600">All settled!</p>
+                    )}
                   </Card>
                 )}
             </div>
@@ -3073,6 +3128,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
         tripTravelCurrencies={tripTravelCurrencies}
         onTravelCurrenciesChange={async (currs) => {
           setTripTravelCurrencies(currs);
+          writeCachedTripCurrencies(tripId, currs);
           try {
             await updateTripCurrencySettings(tripId, { travel_currencies: currs });
           } catch (e) {

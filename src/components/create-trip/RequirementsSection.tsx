@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, X } from 'lucide-react';
+import { Plus, X, ChevronDown, ChevronUp } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 
@@ -8,15 +8,71 @@ interface RequirementsSectionProps {
   onChange: (expectations: string[]) => void;
 }
 
-const predefinedExpectations = [
-  { label: 'Shared accommodation', emoji: '🏠' },
-  { label: 'Some hiking involved', emoji: '🥾' },
-  { label: 'Early mornings', emoji: '🌅' },
-  { label: 'Able to swim', emoji: '🏊' },
-  { label: 'Passport / Visa required', emoji: '🛂' },
-  { label: 'Budget-friendly', emoji: '💰' },
-  { label: 'Photography-focused', emoji: '📸' },
-  { label: 'Vegetarian-friendly', emoji: '🥗' },
+const predefinedExpectationGroups = [
+  {
+    title: 'Budget & Spending',
+    icon: '💸',
+    options: [
+      { label: 'Budget-focused trip', emoji: '💰' },
+      { label: 'Shared expenses throughout', emoji: '🤝' },
+      { label: 'Pay upfront for some bookings', emoji: '💳' },
+      { label: 'Reimbursements via expense tracking', emoji: '📊' },
+      { label: 'Eat local, not fancy', emoji: '🍜' },
+    ],
+  },
+  {
+    title: 'Trip Style & Pace',
+    icon: '🧭',
+    options: [
+      { label: 'Moderate walking involved', emoji: '🚶' },
+      { label: 'Physically active days', emoji: '💪' },
+      { label: 'Early starts on some days', emoji: '🌅' },
+      { label: 'Flexible itinerary', emoji: '🔀' },
+      { label: 'Weather-dependent activities', emoji: '🌤️' },
+    ],
+  },
+  {
+    title: 'Logistics & Responsibility',
+    icon: '🛂',
+    options: [
+      { label: 'Passport required', emoji: '🛂' },
+      { label: 'Visa may be required', emoji: '📋' },
+      { label: 'Travel insurance recommended', emoji: '🛡️' },
+      { label: 'Self-responsible for documents', emoji: '📄' },
+      { label: 'Flights booked individually', emoji: '✈️' },
+    ],
+  },
+  {
+    title: 'Stay & Comfort',
+    icon: '🏠',
+    options: [
+      { label: 'Shared accommodation', emoji: '🏠' },
+      { label: 'Budget stays', emoji: '🛏️' },
+      { label: 'Basic amenities', emoji: '🧼' },
+      { label: 'Limited luggage space', emoji: '🎒' },
+    ],
+  },
+  {
+    title: 'Group Dynamics',
+    icon: '🤝',
+    options: [
+      { label: 'Small group travel', emoji: '👥' },
+      { label: 'Open to meeting new people', emoji: '🧑‍🤝‍🧑' },
+      { label: 'Group decisions & voting', emoji: '🗳️' },
+      { label: 'Respect personal space', emoji: '🧘' },
+      { label: 'Chill / non-party vibes', emoji: '😌' },
+    ],
+  },
+  {
+    title: 'Preferences (optional)',
+    icon: '🌿',
+    options: [
+      { label: 'Able to swim', emoji: '🏊' },
+      { label: 'Some hiking involved', emoji: '🥾' },
+      { label: 'Photography-focused', emoji: '📸' },
+      { label: 'Vegetarian-friendly', emoji: '🥗' },
+    ],
+  },
 ];
 
 export function RequirementsSection({
@@ -24,6 +80,7 @@ export function RequirementsSection({
   onChange,
 }: RequirementsSectionProps) {
   const [customInput, setCustomInput] = useState('');
+  const [showMoreOptions, setShowMoreOptions] = useState(false);
 
   const toggleExpectation = (exp: string) => {
     if (expectations.includes(exp)) {
@@ -41,10 +98,14 @@ export function RequirementsSection({
     }
   };
 
-  const predefinedLabels = predefinedExpectations.map(e => e.label);
+  const predefinedLabels = predefinedExpectationGroups.flatMap((group) =>
+    group.options.map((option) => option.label)
+  );
   const customExpectations = expectations.filter(
     e => !predefinedLabels.includes(e)
   );
+  const primaryGroup = predefinedExpectationGroups[0];
+  const additionalGroups = predefinedExpectationGroups.slice(1);
 
   return (
     <div className="space-y-4">
@@ -57,22 +118,67 @@ export function RequirementsSection({
         </p>
       </div>
 
-      {/* Predefined chips */}
-      <div className="flex flex-wrap gap-2">
-        {predefinedExpectations.map((exp) => (
+      {/* Predefined chips by category */}
+      <div className="space-y-4">
+        <div className="space-y-2">
+          <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+            <span>{primaryGroup.icon}</span>
+            <span>{primaryGroup.title}</span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {primaryGroup.options.map((exp) => (
+              <button
+                key={exp.label}
+                type="button"
+                onClick={() => toggleExpectation(exp.label)}
+                className={cn(
+                  "px-3 py-1.5 text-sm rounded-full border transition-all active:scale-95",
+                  expectations.includes(exp.label)
+                    ? "bg-foreground text-background border-foreground font-medium"
+                    : "bg-white border-border text-muted-foreground hover:bg-foreground hover:text-background"
+                )}
+              >
+                {exp.emoji} {exp.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {additionalGroups.length > 0 && (
           <button
-            key={exp.label}
             type="button"
-            onClick={() => toggleExpectation(exp.label)}
-            className={cn(
-              "px-3 py-1.5 text-sm rounded-full border transition-all active:scale-95",
-              expectations.includes(exp.label)
-                ? "bg-foreground text-background border-foreground font-medium"
-                : "bg-white border-border text-muted-foreground hover:bg-foreground hover:text-background"
-            )}
+            onClick={() => setShowMoreOptions((prev) => !prev)}
+            className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
           >
-            {exp.emoji} {exp.label}
+            {showMoreOptions ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+            {showMoreOptions ? 'Show fewer options' : 'Show more options'}
           </button>
+        )}
+
+        {showMoreOptions && additionalGroups.map((group) => (
+          <div key={group.title} className="space-y-2 pt-1">
+            <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+              <span>{group.icon}</span>
+              <span>{group.title}</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {group.options.map((exp) => (
+                <button
+                  key={exp.label}
+                  type="button"
+                  onClick={() => toggleExpectation(exp.label)}
+                  className={cn(
+                    "px-3 py-1.5 text-sm rounded-full border transition-all active:scale-95",
+                    expectations.includes(exp.label)
+                      ? "bg-foreground text-background border-foreground font-medium"
+                      : "bg-white border-border text-muted-foreground hover:bg-foreground hover:text-background"
+                  )}
+                >
+                  {exp.emoji} {exp.label}
+                </button>
+              ))}
+            </div>
+          </div>
         ))}
       </div>
 

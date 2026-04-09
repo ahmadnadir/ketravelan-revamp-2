@@ -299,6 +299,7 @@ serve(async (req: Request) => {
       .maybeSingle();
 
     const senderName = senderProfile?.full_name || senderProfile?.username || "Someone";
+    const isSystemMessage = !message.sender_id;
 
     let tripTitle: string | null = null;
     if (conversation?.trip_id) {
@@ -355,7 +356,7 @@ serve(async (req: Request) => {
 
     const title = isTrip ? (tripTitle || conversation?.name || "Trip Chat") : senderName;
     const bodyText = isTrip
-      ? `${senderName}: ${contentText || fallbackBody}`
+      ? (isSystemMessage ? (contentText || fallbackBody) : `${senderName}: ${contentText || fallbackBody}`)
       : (contentText || fallbackBody);
 
     if (recipientIds.length > 0) {

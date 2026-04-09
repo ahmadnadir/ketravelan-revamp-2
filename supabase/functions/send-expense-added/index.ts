@@ -223,12 +223,12 @@ serve(async (req: Request) => {
       .select("id, full_name, username, email_notifications")
       .in("id", userIds);
 
-    const profileMap = new Map((profiles || []).map((p: any) => [p.id, p]));
+    const profileMap = new Map<string, any>((profiles || []).map((p: any) => [p.id, p]));
 
     const tripUrl = `${SITE_ORIGIN}/trip/${trip.slug || trip.id}/hub?tab=expenses`;
 
     const payerProfile = profileMap.get(payerId);
-    const payerName = payerProfile?.full_name || payerProfile?.username || "Trip member";
+    const payerName = payerProfile?.full_name || payerProfile?.username || "";
 
     const totalOwed = (participants || [])
       .filter((p: any) => p.user_id !== payerId)
@@ -263,7 +263,9 @@ serve(async (req: Request) => {
       if (participant.user_id === payerId) continue;
       const amountOwed = Number(participant.amount_owed || 0).toFixed(2);
       const subject = `New expense added  you owe ${expense.currency} ${amountOwed}`;
-      const messageHtml = `Heads up  <strong>${escapeHtml(payerName)}</strong> added <strong>${escapeHtml(expense.description)}</strong> in <strong>${escapeHtml(trip.title)}</strong>. Your share is <strong>${escapeHtml(expense.currency)} ${escapeHtml(amountOwed)}</strong>.`;
+      const messageHtml = payerName
+        ? `Heads up  <strong>${escapeHtml(payerName)}</strong> added <strong>${escapeHtml(expense.description)}</strong> in <strong>${escapeHtml(trip.title)}</strong>. Your share is <strong>${escapeHtml(expense.currency)} ${escapeHtml(amountOwed)}</strong>.`
+        : `Heads up  a new expense <strong>${escapeHtml(expense.description)}</strong> was added in <strong>${escapeHtml(trip.title)}</strong>. Your share is <strong>${escapeHtml(expense.currency)} ${escapeHtml(amountOwed)}</strong>.`;
       await sendToUser(participant.user_id, subject, messageHtml, "You have a new expense" );
 
       await sendSystemPush({

@@ -100,6 +100,7 @@ export default function Favourites() {
                 slotsLeft={trip.max_participants - (trip.current_participants || 0)}
                 totalSlots={trip.max_participants}
                 tags={trip.tags || []}
+                requirements={Array.isArray(trip.requirements) ? trip.requirements : []}
                 isAlmostFull={(trip.current_participants || 0) >= Math.max(1, Math.floor((trip.max_participants || 0) * 0.8))}
                 slug={trip.slug}
                 isPrivate={trip.visibility === 'private'}

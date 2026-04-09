@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useEffect, useCallback } from "react";
-import { X, Upload, Receipt, Users, UserCheck, Pencil, Info } from "lucide-react";
+import { X, Upload, Receipt, Users, UserCheck, Pencil, Info, Calendar as CalendarIcon } from "lucide-react";
 import { expenseCategories } from "@/lib/expenseCategories";
 import { 
   CurrencyCode, 
@@ -29,9 +29,90 @@ import {
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
 import { ExpensePayment } from "@/data/mockData";
 
 // Using expenseCategories from lib for consistency
+
+const toDateInputValue = (date: Date): string => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const getTodayDateInput = (): string => toDateInputValue(new Date());
+
+const parseDateToInput = (dateValue?: string): string => {
+  if (!dateValue) return getTodayDateInput();
+
+  const isoMatch = /^\d{4}-\d{2}-\d{2}$/.test(dateValue);
+  if (isoMatch) return dateValue;
+
+  const normalizedDateValue = dateValue.replace(/(\d+)(st|nd|rd|th)/gi, "$1");
+  const parsed = new Date(normalizedDateValue);
+  if (Number.isNaN(parsed.getTime())) return getTodayDateInput();
+  return toDateInputValue(parsed);
+};
+
+const dateInputToDate = (dateInput: string): Date => {
+  const [year, month, day] = dateInput.split("-").map(Number);
+  return new Date(year, month - 1, day);
+};
+
+const getOrdinalSuffix = (day: number): string => {
+  const mod100 = day % 100;
+  if (mod100 >= 11 && mod100 <= 13) return "th";
+
+  switch (day % 10) {
+    case 1:
+      return "st";
+    case 2:
+      return "nd";
+    case 3:
+      return "rd";
+    default:
+      return "th";
+  }
+};
+
+const formatDateForStorage = (dateInput: string): string => {
+  if (!dateInput) {
+    const now = new Date();
+    const month = now.toLocaleDateString("en-US", { month: "long" });
+    const day = now.getDate();
+    return `${month} ${day}${getOrdinalSuffix(day)}, ${now.getFullYear()}`;
+  }
+
+  const [year, month, day] = dateInput.split("-").map(Number);
+  const parsed = new Date(year, month - 1, day);
+  const monthLabel = parsed.toLocaleDateString("en-US", { month: "long" });
+  const dayNumber = parsed.getDate();
+  return `${monthLabel} ${dayNumber}${getOrdinalSuffix(dayNumber)}, ${parsed.getFullYear()}`;
+};
+
+const sanitizeAmountInput = (value: string): string => {
+  const cleaned = value.replace(/[^\d.]/g, "");
+  const [integerPart = "", decimalPart] = cleaned.split(".");
+  if (decimalPart === undefined) return integerPart;
+  return `${integerPart}.${decimalPart.replace(/\./g, "")}`;
+};
+
+const parseAmountInput = (value: string): number => {
+  const numeric = parseFloat(value.replace(/,/g, ""));
+  return Number.isFinite(numeric) ? numeric : 0;
+};
+
+const formatAmountInput = (value: string): string => {
+  const numeric = parseAmountInput(value);
+  if (numeric <= 0) return "";
+  return numeric.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+};
+
+const formatAmountDisplay = (value: number): string => {
+  return value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+};
 
 export interface CustomSplitAmount {
   memberId: string;
@@ -121,9 +202,23 @@ export function AddExpenseModal({
     return members.find((m) => m.id === id)?.name || "Unknown";
   }, [members]);
 
+  const getLastUsedCurrency = (): CurrencyCode => {
+    try {
+      const saved = localStorage.getItem("lastUsedExpenseCurrency");
+      if (saved && availableCurrencies.some(c => c.code === saved)) {
+        return saved as CurrencyCode;
+      }
+    } catch (e) {
+      console.error("Error reading localStorage:", e);
+    }
+    return homeCurrency;
+  };
+
   const [title, setTitle] = useState("");
   const [amount, setAmount] = useState("");
-  const [currency, setCurrency] = useState<CurrencyCode>(homeCurrency);
+  const [expenseDate, setExpenseDate] = useState(getTodayDateInput());
+  const [datePickerOpen, setDatePickerOpen] = useState(false);
+  const [currency, setCurrency] = useState<CurrencyCode>(getLastUsedCurrency());
   const [category, setCategory] = useState("");
   const [paidBy, setPaidBy] = useState(getMemberIdByName(currentUser));
   const [splitType, setSplitType] = useState<"equal" | "custom">("equal");
@@ -146,7 +241,7 @@ export function AddExpenseModal({
   const isEditMode = !!editingExpense;
   
   // Compute conversion with live rates
-  const numericAmount = parseFloat(amount) || 0;
+  const numericAmount = parseAmountInput(amount);
   const showConversion = currency !== homeCurrency && numericAmount > 0;
   
   // Fetch live conversion when amount or currency changes
@@ -171,7 +266,8 @@ export function AddExpenseModal({
   const resetForm = useCallback(() => {
     setTitle("");
     setAmount("");
-    setCurrency(homeCurrency);
+    setExpenseDate(getTodayDateInput());
+    setCurrency(getLastUsedCurrency());
     setCategory("");
     setPaidBy(getMemberIdByName(currentUser));
     setSplitType("equal");
@@ -180,13 +276,14 @@ export function AddExpenseModal({
     setNotes("");
     setReceiptFile(null);
     setReceiptPreview(null);
-  }, [currentUser, members, homeCurrency, getMemberIdByName]);
+  }, [currentUser, members, getMemberIdByName, getLastUsedCurrency]);
 
   // Load editing expense data
   useEffect(() => {
     if (editingExpense && open) {
       setTitle(editingExpense.title);
-      setAmount(editingExpense.amount.toString());
+      setAmount(formatAmountInput(editingExpense.amount.toString()));
+      setExpenseDate(parseDateToInput(editingExpense.date));
       setCurrency(editingExpense.originalCurrency || "USD");
       setCategory(editingExpense.category || "other");
       setPaidBy(getMemberIdByName(editingExpense.paidBy));
@@ -221,6 +318,15 @@ export function AddExpenseModal({
         setReceiptPreview(reader.result as string);
       };
       reader.readAsDataURL(file);
+    }
+  };
+
+  const handleCurrencyChange = (val: string) => {
+    setCurrency(val as CurrencyCode);
+    try {
+      localStorage.setItem("lastUsedExpenseCurrency", val);
+    } catch (e) {
+      console.error("Error saving to localStorage:", e);
     }
   };
 
@@ -276,7 +382,7 @@ export function AddExpenseModal({
 
     const expense: NewExpense = {
       title: title.trim(),
-      amount: parseFloat(amount),
+      amount: parseAmountInput(amount),
       category,
       paidBy: getMemberNameById(paidBy),
       splitType,
@@ -286,11 +392,7 @@ export function AddExpenseModal({
       receiptFile: receiptFile || undefined,
       // Preserve existing receipt URL when editing and no new file uploaded
       existingReceiptUrl: (isEditMode && !receiptFile && receiptPreview) ? receiptPreview : undefined,
-      date: editingExpense?.date || new Date().toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      }),
+      date: formatDateForStorage(expenseDate),
       // Multi-currency fields
       originalCurrency: currency,
       fxRateToHome: conversion.available ? conversion.rate : undefined,
@@ -313,19 +415,19 @@ export function AddExpenseModal({
     return sum + (parseFloat(customAmounts[memberId] || "0") || 0);
   }, 0);
   
-  const totalAmount = parseFloat(amount) || 0;
+  const totalAmount = parseAmountInput(amount);
   const customAmountDifference = totalAmount - totalCustomAmount;
 
   const isValid = 
     title.trim() && 
-    parseFloat(amount) > 0 && 
+    totalAmount > 0 && 
     category && 
     splitWith.length > 0 &&
     (splitType === "equal" || Math.abs(customAmountDifference) < 0.01);
 
   const perPersonAmount =
-    splitWith.length > 0 && parseFloat(amount) > 0 && splitType === "equal"
-      ? (parseFloat(amount) / splitWith.length).toFixed(2)
+    splitWith.length > 0 && totalAmount > 0 && splitType === "equal"
+      ? formatAmountDisplay(totalAmount / splitWith.length)
       : "0.00";
 
   return (
@@ -373,46 +475,52 @@ export function AddExpenseModal({
 
           {/* Amount with Currency */}
           <div className="space-y-2">
-            <Label htmlFor="amount">Amount *</Label>
             <div className="flex gap-2">
-              <Input
-                id="amount"
-                type="number"
-                placeholder="0.00"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                min="0"
-                step="0.01"
-                className="h-12 rounded-xl flex-1"
-              />
-              <Select value={currency} onValueChange={(val) => setCurrency(val as CurrencyCode)}>
-                <SelectTrigger className="w-auto min-w-[120px] h-12 rounded-xl">
-                  <span className="flex items-center gap-1.5">
-                    <span>{getCurrencySymbol(currency)}</span>
-                    <span>{currency}</span>
-                    {currency === homeCurrency && (
-                      <span className="px-1.5 py-0.5 text-[10px] font-medium bg-primary/10 text-primary rounded-full">
-                        Home
-                      </span>
-                    )}
+              <div className="flex-1 space-y-2">
+                <Label htmlFor="amount">Amount ({currency}) *</Label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground pointer-events-none">
+                    {getCurrencySymbol(currency)}
                   </span>
-                </SelectTrigger>
-                <SelectContent className="rounded-xl">
-                  {availableCurrencies.map((c) => (
-                    <SelectItem key={c.code} value={c.code} className="rounded-lg">
-                      <span className="flex items-center gap-1.5">
-                        <span>{c.symbol}</span>
-                        <span>{c.code}</span>
-                        {c.code === homeCurrency && (
-                          <span className="px-1.5 py-0.5 text-[10px] font-medium bg-primary/10 text-primary rounded-full">
-                            Home
-                          </span>
-                        )}
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                  <Input
+                    id="amount"
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="0.00"
+                    value={amount}
+                    onChange={(e) => setAmount(sanitizeAmountInput(e.target.value))}
+                    onFocus={() => setAmount((prev) => prev.replace(/,/g, ""))}
+                    onBlur={() => setAmount((prev) => formatAmountInput(prev) || prev)}
+                    className="h-12 rounded-xl pl-8"
+                  />
+                </div>
+              </div>
+              <div className="flex-1 space-y-2">
+                <Label htmlFor="currency-select">Currency</Label>
+                <Select value={currency} onValueChange={handleCurrencyChange}>
+                  <SelectTrigger id="currency-select" className="h-12 rounded-xl">
+                    <span className="flex items-center gap-1.5">
+                      <span>{getCurrencySymbol(currency)}</span>
+                      <span>{currency}</span>
+                    </span>
+                  </SelectTrigger>
+                  <SelectContent className="rounded-xl">
+                    {availableCurrencies.map((c) => (
+                      <SelectItem key={c.code} value={c.code} className="rounded-lg">
+                        <span className="flex items-center gap-1.5">
+                          <span>{c.symbol}</span>
+                          <span>{c.code}</span>
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {currency === homeCurrency ? (
+                  <p className="text-[10px] font-medium text-primary">Home</p>
+                ) : (
+                  <p className="text-[10px] font-medium text-muted-foreground">Travel</p>
+                )}
+              </div>
             </div>
             
             {/* Conversion preview */}
@@ -422,10 +530,15 @@ export function AddExpenseModal({
               </p>
             )}
             {showConversion && !isLoadingConversion && conversion.available && (
-              <p className="text-xs text-muted-foreground">
-                ≈ {formatCurrencySpaced(conversion.amount, homeCurrency)} 
-                <span className="ml-1 text-[10px] text-green-600">● Live rate</span>
-              </p>
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground">
+                  ≈ {formatCurrencySpaced(conversion.amount, homeCurrency)}
+                  <span className="ml-1 text-[10px] text-green-600">● Live rate</span>
+                </p>
+                <p className="text-[10px] leading-relaxed text-muted-foreground">
+                  Live rate for reference only. Rates may vary over time and across providers. Settlement amounts are calculated using the rate shown at the time of entry.
+                </p>
+              </div>
             )}
             {showConversion && !isLoadingConversion && !conversion.available && (
               <p className="text-xs text-muted-foreground flex items-center gap-1">
@@ -435,24 +548,54 @@ export function AddExpenseModal({
             )}
           </div>
 
-          {/* Category */}
-          <div className="space-y-2">
-            <Label>Category *</Label>
-            <Select value={category} onValueChange={setCategory}>
-              <SelectTrigger className="h-12 rounded-xl">
-                <SelectValue placeholder="Select category" />
-              </SelectTrigger>
-              <SelectContent className="rounded-xl">
-                {expenseCategories.map((cat) => (
-                  <SelectItem key={cat.id} value={cat.id} className="rounded-lg">
-                    <span className="flex items-center gap-2">
-                      <span className="text-base">{cat.emoji}</span>
-                      <span>{cat.label}</span>
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          {/* Category + Date */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label>Category *</Label>
+              <Select value={category} onValueChange={setCategory}>
+                <SelectTrigger className="h-12 rounded-xl">
+                  <SelectValue placeholder="Select category" />
+                </SelectTrigger>
+                <SelectContent className="rounded-xl">
+                  {expenseCategories.map((cat) => (
+                    <SelectItem key={cat.id} value={cat.id} className="rounded-lg">
+                      <span className="flex items-center gap-2">
+                        <span className="text-base">{cat.emoji}</span>
+                        <span>{cat.label}</span>
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="expense-date">Date</Label>
+              <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    id="expense-date"
+                    type="button"
+                    variant="outline"
+                    className="h-12 w-full rounded-xl justify-between font-normal"
+                  >
+                    <span>{formatDateForStorage(expenseDate)}</span>
+                    <CalendarIcon className="h-4 w-4 text-muted-foreground" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <Calendar
+                    mode="single"
+                    selected={dateInputToDate(expenseDate)}
+                    onSelect={(selectedDate) => {
+                      if (!selectedDate) return;
+                      setExpenseDate(toDateInputValue(selectedDate));
+                      setDatePickerOpen(false);
+                    }}
+                    initialFocus
+                  />
+                </PopoverContent>
+              </Popover>
+            </div>
           </div>
 
           {/* Paid By */}
@@ -570,7 +713,7 @@ export function AddExpenseModal({
                         />
                       </div>
                     ) : (
-                      parseFloat(amount) > 0 && (
+                      totalAmount > 0 && (
                         <span className="text-xs text-muted-foreground">
                           {getCurrencySymbol(currency)} {perPersonAmount}
                         </span>
@@ -582,7 +725,7 @@ export function AddExpenseModal({
             </div>
             
             {/* Summary */}
-            {splitWith.length > 0 && parseFloat(amount) > 0 && (
+            {splitWith.length > 0 && totalAmount > 0 && (
               <div className="space-y-1">
                 {splitType === "equal" ? (
                   <p className="text-xs text-muted-foreground">
@@ -591,15 +734,15 @@ export function AddExpenseModal({
                 ) : (
                   <div className="space-y-1">
                     <p className="text-xs text-muted-foreground">
-                      Total assigned: <span className="font-medium text-foreground">{getCurrencySymbol(currency)} {totalCustomAmount.toFixed(2)}</span>
+                      Total assigned: <span className="font-medium text-foreground">{getCurrencySymbol(currency)} {formatAmountDisplay(totalCustomAmount)}</span>
                       {" / "}
-                      <span className="font-medium">{getCurrencySymbol(currency)} {totalAmount.toFixed(2)}</span>
+                      <span className="font-medium">{getCurrencySymbol(currency)} {formatAmountDisplay(totalAmount)}</span>
                     </p>
                     {Math.abs(customAmountDifference) >= 0.01 && (
                       <p className={`text-xs ${customAmountDifference > 0 ? "text-destructive" : "text-amber-500"}`}>
                         {customAmountDifference > 0 
-                          ? `${getCurrencySymbol(currency)} ${customAmountDifference.toFixed(2)} remaining to assign` 
-                          : `${getCurrencySymbol(currency)} ${Math.abs(customAmountDifference).toFixed(2)} over-assigned`}
+                          ? `${getCurrencySymbol(currency)} ${formatAmountDisplay(customAmountDifference)} remaining to assign` 
+                          : `${getCurrencySymbol(currency)} ${formatAmountDisplay(Math.abs(customAmountDifference))} over-assigned`}
                       </p>
                     )}
                   </div>

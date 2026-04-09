@@ -372,17 +372,68 @@ export async function upsertPaymentMethod(data: {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
 
-  const { data: paymentMethod, error } = await supabase
-    .from('trip_payment_methods')
-    .upsert({
-      ...data,
-      user_id: user.id,
-      is_active: true
-    })
-    .select()
-    .single();
+  if (data.is_default) {
+    const { error: clearDefaultError } = await supabase
+      .from('trip_payment_methods')
+      .update({ is_default: false })
+      .eq('trip_id', data.trip_id)
+      .eq('is_default', true);
 
-  if (error) throw error;
+    if (clearDefaultError) throw clearDefaultError;
+  }
+
+  const { data: existingMethods, error: existingMethodsError } = await supabase
+    .from('trip_payment_methods')
+    .select('id')
+    .eq('trip_id', data.trip_id)
+    .eq('user_id', user.id)
+    .eq('is_active', true)
+    .order('created_at', { ascending: false });
+
+  if (existingMethodsError) throw existingMethodsError;
+
+  let paymentMethod;
+
+  if (existingMethods && existingMethods.length > 0) {
+    const primaryMethodId = existingMethods[0].id;
+
+    if (existingMethods.length > 1) {
+      const duplicateIds = existingMethods.slice(1).map((method) => method.id);
+      const { error: deactivateDuplicatesError } = await supabase
+        .from('trip_payment_methods')
+        .update({ is_active: false, is_default: false })
+        .in('id', duplicateIds);
+
+      if (deactivateDuplicatesError) throw deactivateDuplicatesError;
+    }
+
+    const { data: updatedMethod, error: updateError } = await supabase
+      .from('trip_payment_methods')
+      .update({
+        ...data,
+        is_active: true
+      })
+      .eq('id', primaryMethodId)
+      .select()
+      .single();
+
+    if (updateError) throw updateError;
+    paymentMethod = updatedMethod;
+  } else {
+    const { data: createdMethod, error: insertError } = await supabase
+      .from('trip_payment_methods')
+      .insert({
+        ...data,
+        user_id: user.id,
+        is_active: true
+      })
+      .select()
+      .single();
+
+    if (insertError) throw insertError;
+    paymentMethod = createdMethod;
+  }
+
   return paymentMethod;
 }
 
@@ -646,9 +697,11 @@ export async function fetchTripsExpenseOverview(tripIds: string[], userId?: stri
   // 1. All non-deleted expenses for these trips (no creator filter)
   const { data: expenses, error: expErr } = await supabase
     .from('trip_expenses')
-    .select('id, trip_id, currency, amount')
+    .select('id, trip_id, currency, amount, expense_date, created_at, converted_amount_home, home_currency')
     .in('trip_id', tripIds)
-    .eq('is_deleted', false);
+    .eq('is_deleted', false)
+    .order('expense_date', { ascending: false })
+    .order('created_at', { ascending: false });
   if (expErr) throw expErr;
 
   const expenseIds = (expenses || []).map((e: any) => e.id);

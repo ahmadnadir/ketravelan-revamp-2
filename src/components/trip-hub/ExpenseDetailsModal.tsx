@@ -457,11 +457,11 @@ export function ExpenseDetailsModal({
                 <span className="text-2xl">{category.emoji}</span>
               </div>
               <div className="w-full space-y-2">
-                <p className="text-xl sm:text-lg font-semibold text-foreground">{expense.title}</p>
+                <p className="text-lg sm:text-base font-semibold text-foreground">{expense.title}</p>
                 {/* Progress bar with amount - under title */}
                 <div className="space-y-2">
-                  <span className={`text-sm font-medium ${paymentProgress === 100 ? "text-stat-green" : "text-amber-600"}`}>
-                    {paymentProgress}% settled · {formatCurrencySpaced(Math.round(settledAmount), displayCurrencyCode)}/{formatCurrencySpaced(totalDisplayAmount, displayCurrencyCode)}
+                  <span className={`text-xs font-medium ${paymentProgress === 100 ? "text-stat-green" : "text-amber-600"}`}>
+                    {paymentProgress}% settled · {formatCurrencySpaced(Number(settledAmount.toFixed(2)), displayCurrencyCode)}/{formatCurrencySpaced(Number(totalDisplayAmount.toFixed(2)), displayCurrencyCode)}
                   </span>
                   <Progress 
                     value={paymentProgress} 
@@ -477,8 +477,8 @@ export function ExpenseDetailsModal({
           {/* Fixed Tabs */}
           <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as TabType)} className="w-full">
             <TabsList className="w-full grid grid-cols-2 mx-4 mt-4" style={{ width: "calc(100% - 2rem)" }}>
-              <TabsTrigger value="overview">Overview</TabsTrigger>
-              <TabsTrigger value="payments">Payments</TabsTrigger>
+              <TabsTrigger value="overview" className="text-xs sm:text-sm">Overview</TabsTrigger>
+              <TabsTrigger value="payments" className="text-xs sm:text-sm">Payments</TabsTrigger>
             </TabsList>
           </Tabs>
         </div>
@@ -759,7 +759,6 @@ export function ExpenseDetailsModal({
 
                       return (
                         <Card key={memberId} className="p-4 rounded-3xl border border-border/60 bg-white shadow-sm">
-                          {/* Top Row: Avatar + Name + Amount */}
                           <div className="flex items-center gap-3">
                             <Avatar className="h-10 w-10 shrink-0">
                               <AvatarImage 
@@ -770,32 +769,42 @@ export function ExpenseDetailsModal({
                                 {(member.name || "M").split(" ").map(n => n[0]).join("")}
                               </AvatarFallback>
                             </Avatar>
-                            <div className="flex-1 min-w-0">
-                              <p className="font-medium text-foreground text-[15px] sm:text-sm truncate">{member.name || "Unknown"}</p>
-                              <p className="text-base font-bold text-foreground">
+
+                            <div className="min-w-0 flex-1">
+                              <p className="font-medium text-foreground text-sm sm:text-sm truncate">{member.name || "Unknown"}</p>
+                              <p className="text-[15px] font-semibold text-foreground">
                                 {formatCurrencySpaced(Number(amount.toFixed(2)), displayCurrencyCode)}
                               </p>
+                              <div className="mt-1">
+                                <StatusBadge status="settled" />
+                              </div>
                             </div>
-                          </div>
-                          
-                          {/* Status + View Receipt Row */}
-                          <div className="flex items-center justify-between mt-3 ml-13">
-                            <StatusBadge status="settled" />
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                setReviewingPayment({
-                                  member,
-                                  payment: memberPayment || { memberId, status: "settled" as const },
-                                  amount
-                                });
-                              }}
-                              className="h-8 rounded-full border-border bg-white px-4 text-xs text-foreground hover:bg-secondary"
-                            >
-                              <Eye className="h-3.5 w-3.5 mr-1" />
-                              Receipt
-                            </Button>
+
+                            <div className="flex w-[132px] shrink-0 flex-col gap-1.5">
+                              <Button
+                                size="sm"
+                                disabled
+                                className="h-8 rounded-full text-[11px]"
+                              >
+                                <CheckCircle className="h-3.5 w-3.5 mr-1" />
+                                Received
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  setReviewingPayment({
+                                    member,
+                                    payment: memberPayment || { memberId, status: "settled" as const },
+                                    amount
+                                  });
+                                }}
+                                className="h-8 rounded-full border-border bg-white px-4 text-[11px] text-foreground hover:bg-secondary"
+                              >
+                                <Eye className="h-3.5 w-3.5 mr-1" />
+                                Receipt
+                              </Button>
+                            </div>
                           </div>
                         </Card>
                       );
@@ -808,7 +817,7 @@ export function ExpenseDetailsModal({
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Clock className="h-4 w-4 text-muted-foreground" />
-                    <h3 className="text-[15px] sm:text-sm font-semibold text-foreground">Pending Payments from Others</h3>
+                      <h3 className="text-[13px] sm:text-sm font-semibold text-foreground">Pending Payments from Others</h3>
                   </div>
                   <Button
                     variant="ghost"
@@ -857,7 +866,6 @@ export function ExpenseDetailsModal({
 
                       return (
                         <Card key={memberId} className="p-4 rounded-3xl border border-border/60 bg-white shadow-sm">
-                          {/* Top Row: Avatar + Name + Amount */}
                           <div className="flex items-center gap-3">
                             <Avatar className="h-10 w-10 shrink-0">
                               <AvatarImage 
@@ -868,28 +876,27 @@ export function ExpenseDetailsModal({
                                 {(member.name || "M").split(" ").map(n => n[0]).join("")}
                               </AvatarFallback>
                             </Avatar>
-                            <div className="flex-1 min-w-0">
-                              <p className="font-medium text-foreground text-[15px] sm:text-sm truncate">{member.name || "Unknown"}</p>
-                              <p className="text-base font-bold text-foreground">
+
+                            <div className="min-w-0 flex-1">
+                              <p className="font-medium text-foreground text-sm sm:text-sm truncate">{member.name || "Unknown"}</p>
+                              <p className="text-[15px] font-semibold text-foreground">
                                 {formatCurrencySpaced(Number(amount.toFixed(2)), displayCurrencyCode)}
                               </p>
+                              <div className="mt-1">
+                                {getStatusBadge()}
+                              </div>
                             </div>
-                          </div>
-                          
-                          {/* Status + Actions Row */}
-                          <div className="flex items-center justify-between mt-3 ml-13">
-                            {getStatusBadge()}
-                            <div className="flex w-[140px] flex-col gap-1.5">
-                              {!isSettled && (
-                                <Button
-                                  size="sm"
-                                  onClick={() => handleMarkMemberSettled(memberId)}
-                                  className="h-8 rounded-full bg-slate-950 text-xs text-white hover:bg-black"
-                                >
-                                  <CheckCircle className="h-3.5 w-3.5 mr-1" />
-                                  Received
-                                </Button>
-                              )}
+
+                            <div className="flex w-[132px] shrink-0 flex-col gap-1.5">
+                              <Button
+                                size="sm"
+                                onClick={() => handleMarkMemberSettled(memberId)}
+                                disabled={isSettled}
+                                className="h-8 rounded-full bg-slate-950 text-[11px] text-white hover:bg-black disabled:opacity-50"
+                              >
+                                <CheckCircle className="h-3.5 w-3.5 mr-1" />
+                                Received
+                              </Button>
                               <Button
                                 variant="outline"
                                 size="sm"
@@ -898,10 +905,10 @@ export function ExpenseDetailsModal({
                                   payment: memberPayment || { memberId, status: "pending" as const },
                                   amount
                                 })}
-                                className="h-8 rounded-full border-border bg-white text-xs text-foreground hover:bg-secondary"
+                                className="h-8 rounded-full border-border bg-white text-[11px] text-foreground hover:bg-secondary"
                               >
                                 <Eye className="h-3.5 w-3.5 mr-1" />
-                                {isSettled ? "Receipt" : "Receipt"}
+                                Receipt
                               </Button>
                             </div>
                           </div>
@@ -916,30 +923,12 @@ export function ExpenseDetailsModal({
                 {/* Amount Display - Clean centered design */}
                 <div className="bg-muted/50 rounded-2xl p-6 text-center">
                   <p className="text-[15px] sm:text-sm text-muted-foreground mb-1">Amount</p>
-                  <p className="text-3xl font-bold text-foreground">{
-                    (() => {
-                      // Prefer net pair amount (home currency) when provided
-                      if (typeof pairNetAmount === 'number' && pairNetAmount >= 0) {
-                        return formatCurrencySpaced(Number(pairNetAmount.toFixed(2)), 'MYR');
-                      }
-                      let displayAmt = currentUserOwesAmount;
-                      if (viewCurrency === "home" && expense.convertedAmountHome && expense.amount > 0) {
-                        const ratio = parseFloat(expense.convertedAmountHome.toString()) / expense.amount;
-                        displayAmt = displayAmt * ratio;
-                      }
-                      return formatCurrencySpaced(Number(displayAmt.toFixed(2)), displayCurrencyCode);
-                    })()
-                  }</p>
+                  <p className="text-3xl font-bold text-foreground">
+                    {formatCurrencySpaced(Number(currentUserOwesAmount.toFixed(2)), displayCurrencyCode)}
+                  </p>
                   {typeof pairNetAmount === 'number' && pairNetAmount >= 0 && (
                     <p className="text-[12px] sm:text-xs text-muted-foreground mt-2">
-                      Net outstanding to {expense.paidBy}: {formatCurrencySpaced(Number(pairNetAmount.toFixed(2)), 'MYR')} · This expense share: {(() => {
-                        let displayAmt = currentUserOwesAmount;
-                        if (viewCurrency === "home" && expense.convertedAmountHome && expense.amount > 0) {
-                          const ratio = parseFloat(expense.convertedAmountHome.toString()) / expense.amount;
-                          displayAmt = displayAmt * ratio;
-                        }
-                        return formatCurrencySpaced(Number(displayAmt.toFixed(2)), displayCurrencyCode);
-                      })()}
+                      Net outstanding to {expense.paidBy}: {formatCurrencySpaced(Number(pairNetAmount.toFixed(2)), expense.homeCurrency || 'MYR')}
                     </p>
                   )}
                 </div>
@@ -1098,16 +1087,9 @@ export function ExpenseDetailsModal({
                     <Card className="p-4 border-border/50 space-y-3">
                       <div className="flex justify-between items-center">
                         <span className="text-sm text-muted-foreground">Amount Paid</span>
-                        <span className="text-lg font-bold text-foreground">{
-                          (() => {
-                            let displayAmt = currentUserOwesAmount;
-                            if (viewCurrency === "home" && expense.convertedAmountHome && expense.amount > 0) {
-                              const ratio = parseFloat(expense.convertedAmountHome.toString()) / expense.amount;
-                              displayAmt = displayAmt * ratio;
-                            }
-                            return formatCurrencySpaced(Number(displayAmt.toFixed(2)), displayCurrencyCode);
-                          })()
-                        }</span>
+                        <span className="text-lg font-bold text-foreground">
+                          {formatCurrencySpaced(Number(currentUserOwesAmount.toFixed(2)), displayCurrencyCode)}
+                        </span>
                       </div>
                       
                       {currentUserPayment.payerNote && (

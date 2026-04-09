@@ -15,6 +15,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { fetchStoryBySlug, toggleStoryReaction, deleteStory, createStoryComment, updateStoryComment, deleteStoryComment } from "@/lib/community";
 import { toast } from "@/hooks/use-toast";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { buildPublicUrl } from "@/lib/publicUrl";
 
 const TikTok = ({ className }: { className?: string }) => (
   <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -305,22 +306,23 @@ export default function StoryDetail() {
 
   const handleShare = async () => {
     if (!story) return;
+    const storyUrl = buildPublicUrl(`/community/stories/${story.slug}`);
     const shareData = {
       title: story.title || "Check out this story",
       text: story.excerpt || "",
-      url: window.location.href,
+      url: storyUrl,
     };
 
     try {
       if (navigator.share) {
         await navigator.share(shareData);
       } else {
-        await navigator.clipboard.writeText(window.location.href);
+        await navigator.clipboard.writeText(storyUrl);
         toast({ title: "Link copied to clipboard!" });
       }
     } catch (error) {
       if ((error as Error).name !== "AbortError") {
-        await navigator.clipboard.writeText(window.location.href);
+        await navigator.clipboard.writeText(storyUrl);
         toast({ title: "Link copied to clipboard!" });
       }
     }

@@ -1,12 +1,12 @@
 import { format, parse, isValid } from "date-fns";
 
 /**
- * Standard date format used across the app: "17 Jan 2025"
+ * Standard date format used across the app: "April 4th, 2026"
  */
-export const STANDARD_DATE_FORMAT = "d MMM yyyy";
+export const STANDARD_DATE_FORMAT = "MMMM do, yyyy";
 
 /**
- * Format a date to the standard display format (e.g., "17 Jan 2025")
+ * Format a date to the standard display format (e.g., "April 4th, 2026")
  * Handles various input types: Date object, ISO string, or already formatted string
  */
 export const formatDisplayDate = (date: Date | string | undefined | null): string => {
@@ -28,6 +28,16 @@ export const formatDisplayDate = (date: Date | string | undefined | null): strin
     const altParsed = parse(date, "MMM d, yyyy", new Date());
     if (isValid(altParsed)) {
       return format(altParsed, STANDARD_DATE_FORMAT);
+    }
+
+    const longMonthParsed = parse(date, "MMMM d, yyyy", new Date());
+    if (isValid(longMonthParsed)) {
+      return format(longMonthParsed, STANDARD_DATE_FORMAT);
+    }
+
+    const ordinalParsed = parse(date, "MMMM do, yyyy", new Date());
+    if (isValid(ordinalParsed)) {
+      return format(ordinalParsed, STANDARD_DATE_FORMAT);
     }
   } catch {
     // Fall through

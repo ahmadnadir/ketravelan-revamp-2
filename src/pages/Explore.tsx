@@ -21,8 +21,7 @@ import { TripFilterDrawer, type FilterState } from "@/components/explore/TripFil
 import { AppliedFiltersBar } from "@/components/explore/AppliedFiltersBar";
 import { isDefaultBudgetRange, formatBudgetRange, BudgetRangeSelector } from "@/components/explore/BudgetTierSelector";
 import { useSimulatedLoading } from "@/hooks/useSimulatedLoading";
-import { useAuth } from "@/contexts/AuthContext";
-import { convertPrice, getCurrencySymbol, getCurrencyInfo } from "@/lib/currencyUtils";
+import { convertPrice, getCurrencySymbol, getCurrencyInfo, type CurrencyCode } from "@/lib/currencyUtils";
 import { searchLocations, type LocationResult } from "@/lib/locationApi";
 
 const defaultFilters: FilterState = {
@@ -38,7 +37,6 @@ type DesktopPanel = "where" | "when" | "budget" | "styles" | null;
 
 export default function Explore() {
   const isLoading = useSimulatedLoading(600);
-  const { homeCurrency } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   // Persist tab in URL so it survives navigation away and back
   const tab = searchParams.get("tab") ?? "upcoming";
@@ -87,6 +85,7 @@ export default function Explore() {
 
   // Applied filter state (affects results)
   const [appliedFilters, setAppliedFilters] = useState<FilterState>(defaultFilters);
+  const selectedCurrency = (appliedFilters.currency || "MYR") as CurrencyCode;
 
   // Count active filters for badge
   const activeFilterCount = useMemo(() => {
@@ -125,7 +124,7 @@ export default function Explore() {
       const priceMap: Record<string, number> = {};
       for (const trip of trips) {
         if (typeof trip.price === 'number') {
-          priceMap[trip.id] = await convertPrice(trip.price, homeCurrency);
+          priceMap[trip.id] = await convertPrice(trip.price, selectedCurrency);
         }
       }
       setConvertedPrices(priceMap);
@@ -133,8 +132,10 @@ export default function Explore() {
     
     if (trips.length > 0) {
       convertPrices();
+    } else {
+      setConvertedPrices({});
     }
-  }, [trips, homeCurrency]);
+  }, [trips, selectedCurrency]);
 
   // Handle errors
   if (error) {
@@ -172,6 +173,7 @@ export default function Explore() {
         slotsLeft,
         totalSlots: maxParticipants,
         tags: Array.isArray(trip.tags) ? trip.tags : [],
+        requirements: Array.isArray(trip.requirements) ? trip.requirements : [],
         isAlmostFull: slotsLeft > 0 && slotsLeft <= 2,
         tripType: trip.type ?? undefined,
         slug: trip.slug ?? undefined,
@@ -197,9 +199,11 @@ export default function Explore() {
           return trip.tags?.includes(category?.label || "");
         });
 
-      // Budget match
+      // Budget match — null-price trips always pass (can't compare what isn't set)
       const [minBudget, maxBudget] = appliedFilters.budgetRange;
-      const budgetMatch = typeof trip.price === 'number' && trip.price >= minBudget && trip.price <= maxBudget;
+      const budgetMatch =
+        trip.price === null ||
+        (typeof trip.price === 'number' && trip.price >= minBudget && trip.price <= maxBudget);
 
       // Date range match  trip must overlap with the selected range
       let dateMatch = true;
@@ -343,7 +347,7 @@ export default function Explore() {
               )}>
                 {isDefaultBudgetRange(appliedFilters.budgetRange)
                   ? "Any budget"
-                  : formatBudgetRange(appliedFilters.budgetRange)}
+                  : formatBudgetRange(appliedFilters.budgetRange, selectedCurrency)}
               </span>
             </button>
 
@@ -499,6 +503,7 @@ export default function Explore() {
                   <BudgetRangeSelector
                     value={appliedFilters.budgetRange}
                     onChange={range => setAppliedFilters(f => ({ ...f, budgetRange: range }))}
+                    currency={selectedCurrency}
                   />
                 </div>
               )}
@@ -610,7 +615,7 @@ export default function Explore() {
               Found {displayedTrips.length} {tab} trip{displayedTrips.length !== 1 ? "s" : ""}
             </span>
             <span className="text-muted-foreground hidden sm:block">
-              Showing prices in {getCurrencyInfo(homeCurrency as Parameters<typeof getCurrencyInfo>[0])?.name ?? homeCurrency} ({getCurrencySymbol(homeCurrency)})
+              Showing prices in {getCurrencyInfo(selectedCurrency)?.name ?? selectedCurrency} ({getCurrencySymbol(selectedCurrency)})
             </span>
           </div>
         )}
@@ -637,7 +642,7 @@ export default function Explore() {
                 startDate={trip.startDate}
                 endDate={trip.endDate}
                 price={typeof trip.price === 'number' ? (convertedPrices[trip.id] ?? trip.price) : (trip.price as any)}
-                displayCurrency={getCurrencySymbol(homeCurrency)}
+                displayCurrency={getCurrencySymbol(selectedCurrency)}
                 slotsLeft={trip.slotsLeft}
                 totalSlots={trip.totalSlots}
                 tags={trip.tags}
@@ -646,6 +651,7 @@ export default function Explore() {
                 tripType={trip.tripType}
                 slug={trip.slug}
                 isPrivate={trip.visibility === 'private'}
+                requirements={trip.requirements}
                 returnTo="explore"
                 returnTab={tab}
               />

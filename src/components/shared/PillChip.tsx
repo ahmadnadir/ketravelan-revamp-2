@@ -39,9 +39,9 @@ export function PillChip({
         "inline-flex items-center gap-1.5 rounded-full font-medium transition-all border",
         size === "sm" ? "px-2.5 py-1 text-xs" : "px-3 py-1.5 text-sm",
         onClick && "cursor-pointer active:scale-95",
-        selected 
-          ? "bg-foreground text-background border-foreground" 
-          : "bg-white border-border text-muted-foreground hover:bg-foreground hover:text-background",
+        selected
+          ? "bg-foreground text-background border-foreground"
+          : "bg-white border-border text-muted-foreground active:bg-secondary md:hover:bg-foreground md:hover:text-background",
         className
       )}
     >

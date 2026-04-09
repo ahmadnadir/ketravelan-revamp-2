@@ -1,3 +1,4 @@
+import { buildPublicUrl, buildTripShareUrl, getPublicBaseUrl } from "@/lib/publicUrl";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
@@ -107,6 +108,19 @@ const getDefaultAvatar = (seed: string) => {
   return `https://api.dicebear.com/7.x/notionists/svg?seed=${encodeURIComponent(seed)}`;
 };
 
+// Helper to format date as DDMMYY
+const formatDateDDMMYY = (date: string | Date): string => {
+  const dateObj = typeof date === "string" ? new Date(date) : date;
+  if (isNaN(dateObj.getTime())) return "";
+  
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const month = months[dateObj.getMonth()];
+  const day = dateObj.getDate();
+  const year = dateObj.getFullYear();
+  
+  return `${month} ${day}, ${year}`;
+};
+
 // Generate contextual value proposition based on trip data
 const generateValueProposition = (tripData: any): string => {
   const tags = tripData.tags || [];
@@ -158,6 +172,8 @@ const parseDescriptionToBullets = (description: string): string[] => {
   
   return bullets.length > 0 ? bullets : [description];
 };
+
+import { getExpectationIcon, getExpectationLabel } from "@/lib/expectationUtils";
 
 export default function TripDetails() {
   const { id } = useParams();
@@ -470,7 +486,15 @@ export default function TripDetails() {
   const nextImage = () => setCurrentImage((prev) => (prev + 1) % images.length);
   const prevImage = () => setCurrentImage((prev) => (prev - 1 + images.length) % images.length);
 
-  const tripUrl = `${window.location.origin}/trip/${id}`;
+  const tripUrl = buildPublicUrl(`/trip/${id}`);
+  const shareTripId = dbTrip?.id || String(id || "");
+  const shareTripSlug = dbTrip?.slug || (dbTrip?.id ? "" : String(id || ""));
+  const tripShareUrl = buildTripShareUrl({
+    tripId: shareTripId,
+    slug: shareTripSlug,
+    title: tripData?.title,
+    description: tripData?.description,
+  });
   const shareText = tripData ? `Check out this trip: ${tripData.title} to ${tripData.destination}` : "Check out this trip!";
   const returnTo = searchParams.get("from");
   const returnTab = searchParams.get("tab");
@@ -505,7 +529,7 @@ export default function TripDetails() {
         await navigator.share({
           title: tripData.title,
           text: shareText,
-          url: tripUrl,
+          url: tripShareUrl,
         });
       } catch (err) {
         // User cancelled or share failed - fall back to modal
@@ -521,7 +545,7 @@ export default function TripDetails() {
 
   const handleCopyLink = async () => {
     try {
-      await navigator.clipboard.writeText(tripUrl);
+      await navigator.clipboard.writeText(tripShareUrl);
       setCopied(true);
       toast({
         title: "Link copied!",
@@ -542,7 +566,7 @@ export default function TripDetails() {
       name: "WhatsApp",
       icon: MessageCircle,
       color: "bg-green-500",
-      onClick: () => window.open(`https://wa.me/?text=${encodeURIComponent(shareText + " " + tripUrl)}`, "_blank"),
+      onClick: () => window.open(`https://wa.me/?text=${encodeURIComponent(shareText + " " + tripShareUrl)}`, "_blank"),
     },
     {
       name: "Facebook",
@@ -552,7 +576,7 @@ export default function TripDetails() {
         </svg>
       ),
       color: "bg-blue-600",
-      onClick: () => window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(tripUrl)}`, "_blank"),
+      onClick: () => window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(tripShareUrl)}`, "_blank"),
     },
     {
       name: "Twitter",
@@ -562,7 +586,7 @@ export default function TripDetails() {
         </svg>
       ),
       color: "bg-black dark:bg-white dark:text-black",
-      onClick: () => window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(tripUrl)}`, "_blank"),
+      onClick: () => window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(tripShareUrl)}`, "_blank"),
     },
     {
       name: "Telegram",
@@ -572,7 +596,7 @@ export default function TripDetails() {
         </svg>
       ),
       color: "bg-sky-500",
-      onClick: () => window.open(`https://t.me/share/url?url=${encodeURIComponent(tripUrl)}&text=${encodeURIComponent(shareText)}`, "_blank"),
+      onClick: () => window.open(`https://t.me/share/url?url=${encodeURIComponent(tripShareUrl)}&text=${encodeURIComponent(shareText)}`, "_blank"),
     },
   ];
 
@@ -837,7 +861,7 @@ export default function TripDetails() {
             url={tripUrl}
             organizer={{
               name: dbTrip?.organizer_username || "Trip Organizer",
-              url: dbTrip?.organizer_id ? `${window.location.origin}/user/${dbTrip.organizer_id}` : undefined,
+              url: dbTrip?.organizer_id ? buildPublicUrl(`/user/${dbTrip.organizer_id}`) : undefined,
             }}
             touristTypes={tripData.tags}
             itinerary={
@@ -863,9 +887,9 @@ export default function TripDetails() {
 
           <BreadcrumbSchema
             items={[
-              { name: "Home", url: window.location.origin },
-              { name: "Explore", url: `${window.location.origin}/explore` },
-              { name: tripData.destination, url: `${window.location.origin}/explore?destination=${encodeURIComponent(tripData.destination)}` },
+              { name: "Home", url: getPublicBaseUrl() },
+              { name: "Explore", url: buildPublicUrl("/explore") },
+              { name: tripData.destination, url: `${buildPublicUrl("/explore")}?destination=${encodeURIComponent(tripData.destination)}` },
               { name: tripData.title, url: tripUrl },
             ]}
           />
@@ -1278,17 +1302,27 @@ export default function TripDetails() {
                   {joined}/{tripData.totalSlots} spots filled · <span className={isTripFull ? "text-destructive font-medium" : (tripData.slotsLeft <= 2 ? "text-primary font-medium" : "")}>{slotsStatusText}</span>
                 </span>
               </div>
-              {isPublishedTrip && tripData.dateType === 'exact' && tripData.startDate && (
-                <button
-                  onClick={() => setShowCalendar(true)}
-                  className="flex items-center gap-1.5 hover:text-primary transition-colors"
-                >
+              {/* Date Display - DDMMYY Format */}
+              {((isPublishedTrip && tripData.dateType === 'exact' && tripData.startDate) || (dbTrip?.start_date)) && (
+                <div className="flex items-center gap-1.5">
                   <Calendar className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                  <span className="text-xs sm:text-sm">
-                    {new Date(tripData.startDate).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                    {tripData.endDate && ` - ${new Date(tripData.endDate).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`}
+                  <span className="text-xs sm:text-sm font-medium">
+                    {(() => {
+                      const startDate = dbTrip?.start_date || tripData.startDate;
+                      const endDate = dbTrip?.end_date || tripData.endDate;
+                      
+                      if (startDate) {
+                        const formattedStart = formatDateDDMMYY(startDate);
+                        if (endDate) {
+                          const formattedEnd = formatDateDDMMYY(endDate);
+                          return `${formattedStart} - ${formattedEnd}`;
+                        }
+                        return formattedStart;
+                      }
+                      return "";
+                    })()}
                   </span>
-                </button>
+                </div>
               )}
             </div>
 
@@ -1362,14 +1396,17 @@ export default function TripDetails() {
               {tripData.requirements.length > 0 && (
                 <Card className="p-3 sm:p-4 border-border/50">
                   <h3 className="font-semibold text-foreground mb-2 sm:mb-3 text-sm sm:text-base">What to Expect</h3>
-                  <ul className="space-y-1.5 sm:space-y-2">
+                  <div className="flex flex-wrap gap-1.5 sm:gap-2">
                     {tripData.requirements.map((req, index) => (
-                      <li key={index} className="flex items-start gap-2 text-xs sm:text-sm text-muted-foreground">
-                        <span className="h-1.5 w-1.5 rounded-full bg-primary mt-1.5 sm:mt-2 shrink-0" />
-                        {req}
-                      </li>
+                      <span
+                        key={index}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-border px-2.5 py-1 text-xs sm:text-sm text-muted-foreground"
+                      >
+                        <span>{getExpectationIcon(req)}</span>
+                        <span>{getExpectationLabel(req)}</span>
+                      </span>
                     ))}
-                  </ul>
+                  </div>
                 </Card>
               )}
 
@@ -1736,7 +1773,7 @@ export default function TripDetails() {
 
       {/* Request to Join Confirmation Modal */}
       <Dialog open={showJoinConfirmModal} onOpenChange={setShowJoinConfirmModal}>
-        <DialogContent className="max-w-md w-[calc(100%-2rem)] sm:w-full rounded-2xl p-0 overflow-hidden [&>button]:hidden">
+        <DialogContent className="max-w-md w-[calc(100%-2rem)] sm:w-full rounded-2xl p-0 max-h-[calc(100dvh-1rem)] sm:max-h-[85vh] overflow-y-auto top-[6%] translate-y-0 sm:top-[50%] sm:-translate-y-1/2 [&>button]:hidden">
           <DialogHeader className="p-4 pb-3 border-b border-border/50">
             <div className="flex items-center justify-between">
               <DialogTitle>Request to Join Trip</DialogTitle>
@@ -1778,6 +1815,11 @@ export default function TripDetails() {
                 id="join-note"
                 value={joinNote}
                 onChange={(e) => setJoinNote(e.target.value.slice(0, 300))}
+                onFocus={(e) => {
+                  setTimeout(() => {
+                    e.currentTarget.scrollIntoView({ block: "center", behavior: "smooth" });
+                  }, 120);
+                }}
                 placeholder={`Hi! I'd love to join your ${tripData.destination} trip. A bit about me...`}
                 className="w-full min-h-[80px] p-3 rounded-xl border border-border/50 bg-background text-sm resize-none focus-visible:outline-none focus-visible:border-primary/50"
                 maxLength={300}
@@ -1813,7 +1855,7 @@ export default function TripDetails() {
 
       {/* Message Organizer Modal */}
       <Dialog open={showMessageModal} onOpenChange={setShowMessageModal}>
-        <DialogContent className="max-w-md w-[calc(100%-2rem)] sm:w-full rounded-2xl p-0 overflow-hidden [&>button]:hidden">
+        <DialogContent className="max-w-md w-[calc(100%-2rem)] sm:w-full rounded-2xl p-0 max-h-[calc(100dvh-1rem)] sm:max-h-[85vh] overflow-y-auto top-[6%] translate-y-0 sm:top-[50%] sm:-translate-y-1/2 [&>button]:hidden">
           <DialogHeader className="p-4 pb-3 border-b border-border/50">
             <div className="flex items-center justify-between">
               <DialogTitle>Message Trip Organizer</DialogTitle>
@@ -1852,6 +1894,11 @@ export default function TripDetails() {
                 id="initial-message"
                 value={initialMessage}
                 onChange={(e) => setInitialMessage(e.target.value.slice(0, 500))}
+                onFocus={(e) => {
+                  setTimeout(() => {
+                    e.currentTarget.scrollIntoView({ block: "center", behavior: "smooth" });
+                  }, 120);
+                }}
                 placeholder={`Hi ${organizer.name}, I'm interested in joining your ${tripData.destination} trip...`}
                 className="w-full min-h-[100px] p-3 rounded-xl border border-border/50 bg-background text-sm resize-none focus-visible:outline-none focus-visible:border-primary/50"
                 maxLength={500}

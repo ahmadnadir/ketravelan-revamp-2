@@ -1,7 +1,8 @@
-import { X } from "lucide-react";
+import { Coins, X } from "lucide-react";
 import { format } from "date-fns";
 import type { DateRange } from "react-day-picker";
 import { cn } from "@/lib/utils";
+import { getCurrencyInfo, type CurrencyCode } from "@/lib/currencyUtils";
 import { formatBudgetRange, isDefaultBudgetRange } from "./BudgetTierSelector";
 import type { TripCategoryId } from "@/data/categories";
 
@@ -26,36 +27,37 @@ export function AppliedFiltersBar({
   onClear,
   onEdit,
 }: AppliedFiltersBarProps) {
-  const hasFilters = destination || dates?.from || flexibleDates || !isDefaultBudgetRange(budgetRange) || categories.length > 0;
+  const hasFilters = destination || dates?.from || flexibleDates || !isDefaultBudgetRange(budgetRange) || categories.length > 0 || (currency && currency !== "MYR");
 
   if (!hasFilters) return null;
 
-  const chips: string[] = [];
+  const chips: Array<{ label: string; icon?: "currency" }> = [];
 
   if (destination) {
-    chips.push(destination);
+    chips.push({ label: destination });
   }
 
   if (flexibleDates) {
-    chips.push("Flexible dates");
+    chips.push({ label: "Flexible dates" });
   } else if (dates?.from) {
     if (dates.to) {
-      chips.push(`${format(dates.from, "MMM d")} – ${format(dates.to, "MMM d")}`);
+      chips.push({ label: `${format(dates.from, "MMM d")} – ${format(dates.to, "MMM d")}` });
     } else {
-      chips.push(format(dates.from, "MMM d"));
+      chips.push({ label: format(dates.from, "MMM d") });
     }
   }
 
   if (!isDefaultBudgetRange(budgetRange)) {
-    chips.push(formatBudgetRange(budgetRange));
+    chips.push({ label: formatBudgetRange(budgetRange, (currency || "MYR") as CurrencyCode) });
   }
 
   if (currency && currency !== "MYR") {
-    chips.push(currency);
+    const currencyInfo = getCurrencyInfo(currency as Parameters<typeof getCurrencyInfo>[0]);
+    chips.push({ label: currencyInfo ? `${currencyInfo.flag} ${currencyInfo.code}` : currency, icon: "currency" });
   }
 
   if (categories.length > 0) {
-    chips.push(`${categories.length} style${categories.length > 1 ? "s" : ""}`);
+    chips.push({ label: `${categories.length} style${categories.length > 1 ? "s" : ""}` });
   }
 
   return (
@@ -65,12 +67,13 @@ export function AppliedFiltersBar({
           key={index}
           onClick={onEdit}
           className={cn(
-            "px-3 py-1.5 rounded-full text-xs font-medium",
+            "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium",
             "bg-primary/10 text-primary border border-primary/20",
             "hover:bg-primary/15 transition-colors"
           )}
         >
-          {chip}
+          {chip.icon === "currency" && <Coins className="h-3.5 w-3.5" />}
+          {chip.label}
         </button>
       ))}
       <button

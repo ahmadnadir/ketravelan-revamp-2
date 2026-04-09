@@ -32,6 +32,7 @@ export function UpcomingAdventuresSection() {
           slotsLeft,
           totalSlots: maxParticipants,
           tags: Array.isArray(trip.tags) ? trip.tags : [],
+          requirements: Array.isArray(trip.requirements) ? trip.requirements : [],
           isAlmostFull: slotsLeft <= 2,
           tripType: trip.type ?? undefined,
           slug: trip.slug ?? undefined,

@@ -23,6 +23,7 @@ interface TripBalance {
   youOwed: number;   // already converted to home currency
   youAreOwed: number; // already converted to home currency
   totalExpenses: number; // sum of all expense amounts in home currency
+  latestExpenseAt: string | null;
 }
 
 export default function Expenses() {
@@ -61,6 +62,15 @@ export default function Expenses() {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     })}`;
+  };
+
+  const getExpenseHomeAmount = (expense: any): number => {
+    const convertedAmountHome = Number(expense.converted_amount_home);
+    if (expense.home_currency && Number.isFinite(convertedAmountHome)) {
+      return toHome(convertedAmountHome, expense.home_currency);
+    }
+
+    return toHome(Number(expense.amount), expense.currency || "MYR");
   };
 
   // Load trips + raw expense data — NO currency conversion here
@@ -105,13 +115,21 @@ export default function Expenses() {
     });
 
     const perTrip: Record<string, TripBalance> = {};
-    trips.forEach(t => { perTrip[t.id] = { expenseCount: 0, totalExpenses: 0, youOwed: 0, youAreOwed: 0 }; });
+    trips.forEach(t => { perTrip[t.id] = { expenseCount: 0, totalExpenses: 0, youOwed: 0, youAreOwed: 0, latestExpenseAt: null }; });
 
     // Expense counts + total (converted per expense's own currency)
     expenses.forEach((e: any) => {
       if (!perTrip[e.trip_id]) return;
       perTrip[e.trip_id].expenseCount += 1;
-      perTrip[e.trip_id].totalExpenses += toHome(Number(e.amount), e.currency || "MYR");
+      perTrip[e.trip_id].totalExpenses += getExpenseHomeAmount(e);
+
+      const expenseTimestamp = e.expense_date || e.created_at || null;
+      if (!expenseTimestamp) return;
+
+      const currentLatest = perTrip[e.trip_id].latestExpenseAt;
+      if (!currentLatest || new Date(expenseTimestamp).getTime() > new Date(currentLatest).getTime()) {
+        perTrip[e.trip_id].latestExpenseAt = expenseTimestamp;
+      }
     });
 
     // You owe: unpaid participant rows for the current user
@@ -145,7 +163,33 @@ export default function Expenses() {
     } else if (balanceFilter === 'credited') {
       result = result.filter((t) => (tripBalances[t.id]?.youAreOwed ?? 0) > 0.005);
     }
-    return result;
+
+    return [...result].sort((a, b) => {
+      const aBalance = tripBalances[a.id];
+      const bBalance = tripBalances[b.id];
+
+      const aRecent = aBalance?.latestExpenseAt ? new Date(aBalance.latestExpenseAt).getTime() : 0;
+      const bRecent = bBalance?.latestExpenseAt ? new Date(bBalance.latestExpenseAt).getTime() : 0;
+      if (bRecent !== aRecent) {
+        return bRecent - aRecent;
+      }
+
+      const aFilterAmount = balanceFilter === 'owed'
+        ? (aBalance?.youOwed ?? 0)
+        : balanceFilter === 'credited'
+          ? (aBalance?.youAreOwed ?? 0)
+          : (aBalance?.totalExpenses ?? 0);
+      const bFilterAmount = balanceFilter === 'owed'
+        ? (bBalance?.youOwed ?? 0)
+        : balanceFilter === 'credited'
+          ? (bBalance?.youAreOwed ?? 0)
+          : (bBalance?.totalExpenses ?? 0);
+      if (bFilterAmount !== aFilterAmount) {
+        return bFilterAmount - aFilterAmount;
+      }
+
+      return a.name.localeCompare(b.name);
+    });
   }, [searchQuery, trips, balanceFilter, tripBalances]);
 
   // Aggregate balance summary across all trips
@@ -310,7 +354,7 @@ export default function Expenses() {
               Trips
             </h2>
             {filteredTrips.map((trip) => {
-              const bal = tripBalances[trip.id] ?? { expenseCount: 0, youOwed: 0, youAreOwed: 0, totalExpenses: 0 };
+              const bal = tripBalances[trip.id] ?? { expenseCount: 0, youOwed: 0, youAreOwed: 0, totalExpenses: 0, latestExpenseAt: null };
 
               return (
                 <Link key={trip.id} to={`/trip/${trip.id}/hub?tab=expenses&from=expenses`}>

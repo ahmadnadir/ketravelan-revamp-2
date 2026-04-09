@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { MapPin, Search, X, CalendarDays } from "lucide-react";
+import { MapPin, Search, X, CalendarDays, Check, ChevronDown } from "lucide-react";
 import { format } from "date-fns";
 import type { DateRange } from "react-day-picker";
 import { searchLocations, type LocationResult } from "@/lib/locationApi";
@@ -25,10 +25,12 @@ import { Switch } from "@/components/ui/switch";
 
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
+import { currencies } from "@/lib/currencyUtils";
 
 import { BudgetRangeSelector, isDefaultBudgetRange } from "./BudgetTierSelector";
 import { TravelStylePills } from "./TravelStylePills";
 import type { TripCategoryId } from "@/data/categories";
+import type { CurrencyCode } from "@/lib/currencyUtils";
 
 export interface FilterState {
   destination: string;
@@ -60,12 +62,17 @@ export function TripFilterDrawer({
 
   // Local state for editing
   const [localFilters, setLocalFilters] = useState<FilterState>(filters);
+  const selectedCurrencyCode = localFilters.currency || "MYR";
+  const selectedCurrency = currencies.find((currency) => currency.code === selectedCurrencyCode);
   const [destinationQuery, setDestinationQuery] = useState("");
   const [showDestinationResults, setShowDestinationResults] = useState(false);
   const [destResults, setDestResults] = useState<LocationResult[]>([]);
   const [destLoading, setDestLoading] = useState(false);
   const destSearchTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
   const destinationRef = useRef<HTMLDivElement>(null);
+
+  // Accordion state only for currency
+  const [currencyExpanded, setCurrencyExpanded] = useState(false);
 
   // Debounced location API search
   useEffect(() => {
@@ -129,6 +136,7 @@ export function TripFilterDrawer({
       flexibleDates: false,
       budgetRange: [0, 10000],
       categories: [],
+      currency: "MYR",
     };
     setLocalFilters(resetState);
     onReset();
@@ -278,11 +286,69 @@ export function TripFilterDrawer({
           <BudgetRangeSelector
             value={localFilters.budgetRange}
             onChange={(range) => setLocalFilters((prev) => ({ ...prev, budgetRange: range }))}
+            currency={(localFilters.currency || "MYR") as CurrencyCode}
           />
         </div>
 
-        {/* Section 4: Travel Style */}
-        <div className="bg-card rounded-xl border border-border p-4 space-y-3 animate-fade-in" style={{ animationDelay: "225ms", animationFillMode: "backwards" }}>
+        {/* Section 4: Currency (Dropdown Style) */}
+        <div className="bg-card rounded-xl border border-border overflow-hidden animate-fade-in" style={{ animationDelay: "225ms", animationFillMode: "backwards" }}>
+          <button
+            type="button"
+            onClick={() => setCurrencyExpanded(!currencyExpanded)}
+            className="w-full px-4 py-3 flex items-center justify-between hover:bg-secondary/30 transition-colors"
+          >
+            <div className="flex items-center gap-3 text-left flex-1">
+              <span className="text-lg">{selectedCurrency?.flag}</span>
+              <div>
+                <p className="text-sm font-medium">Currency</p>
+                <p className="text-xs text-muted-foreground">Choose display currency</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-primary">{selectedCurrency?.code}</span>
+              <ChevronDown
+                className={cn(
+                  "h-4 w-4 text-muted-foreground transition-transform",
+                  currencyExpanded && "rotate-180"
+                )}
+              />
+            </div>
+          </button>
+          
+          {currencyExpanded && (
+            <div className="border-t border-border bg-secondary/20 px-4 py-3 space-y-2">
+              {currencies.map((currency) => {
+                const isSelected = selectedCurrencyCode === currency.code;
+                return (
+                  <button
+                    key={currency.code}
+                    type="button"
+                    onClick={() => {
+                      setLocalFilters((prev) => ({ ...prev, currency: currency.code }));
+                      setCurrencyExpanded(false);
+                    }}
+                    className={cn(
+                      "w-full flex items-center gap-3 px-3 py-2 rounded-lg border transition-all text-left text-sm",
+                      isSelected
+                        ? "border-primary bg-primary/10"
+                        : "border-border hover:bg-secondary/50"
+                    )}
+                  >
+                    <span className="text-base">{currency.flag}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium">{currency.code}</p>
+                      <p className="text-xs text-muted-foreground">{currency.name}</p>
+                    </div>
+                    {isSelected && <Check className="h-4 w-4 text-primary shrink-0" />}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Section 5: Travel Style */}
+        <div className="bg-card rounded-xl border border-border p-4 space-y-3 animate-fade-in" style={{ animationDelay: "300ms", animationFillMode: "backwards" }}>
           <h3 className="text-sm font-semibold text-foreground">Travel Style</h3>
           <TravelStylePills
             selected={localFilters.categories}

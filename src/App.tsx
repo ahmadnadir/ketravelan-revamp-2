@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route, useLocation, useNavigate, useParams, Navi
 import { App as CapacitorApp } from "@capacitor/app";
 import { Browser } from "@capacitor/browser";
 import { Preferences } from "@capacitor/preferences";
+import { SplashScreen } from "@capacitor/splash-screen";
 import { supabase } from "@/lib/supabase";
 import { configureIOSStatusBarForLightHeader, isNativePlatform } from "@/lib/capacitor";
 import { ScrollToTop } from "./components/layout/ScrollToTop";
@@ -255,6 +256,50 @@ function IOSStatusBarInitializer() {
   return null;
 }
 
+function NativeAnimatedSplash() {
+  const [visible, setVisible] = useState(isNativePlatform());
+
+  useEffect(() => {
+    if (!isNativePlatform()) {
+      return;
+    }
+
+    let timeoutId: number | undefined;
+
+    const bootSplash = async () => {
+      try {
+        await SplashScreen.hide({ fadeOutDuration: 220 });
+      } catch {
+        // Ignore if native splash is already hidden.
+      }
+
+      timeoutId = window.setTimeout(() => {
+        setVisible(false);
+      }, 1400);
+    };
+
+    bootSplash();
+
+    return () => {
+      if (timeoutId) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, []);
+
+  if (!visible) {
+    return null;
+  }
+
+  return (
+    <div className="native-animated-splash" aria-hidden="true">
+      <div className="native-animated-splash-logo-wrap">
+        <img className="native-animated-splash-logo" src="/ketravelan_icon.jpeg" alt="" />
+      </div>
+    </div>
+  );
+}
+
 const App = () => (
   <AuthProvider>
     <ExpenseProvider>
@@ -264,6 +309,7 @@ const App = () => (
         <Toaster />
         <Sonner />
         <BrowserRouter>
+          <NativeAnimatedSplash />
           <SafeAreaLayout>
             <OfflineBanner />
             <IOSStatusBarInitializer />
@@ -276,6 +322,7 @@ const App = () => (
               <Route path="/" element={<MainPage />} />
               <Route path="/explore" element={<Explore />} />
               <Route path="/trip/:id" element={<TripDetails />} />
+              <Route path="/share/trip/:id" element={<TripDetails />} />
               <Route path="/trip/:id/chat" element={<ProtectedRoute><TripChatRedirect /></ProtectedRoute>} />
               <Route path="/trip/:id/hub" element={<ProtectedRoute><TripHub /></ProtectedRoute>} />
               <Route path="/create" element={<ProtectedRoute><CreateTrip /></ProtectedRoute>} />

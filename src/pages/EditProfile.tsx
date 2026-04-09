@@ -20,7 +20,6 @@ import {
   Coins,
   Settings,
   Link2,
-  AtSign,
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
@@ -41,8 +40,7 @@ import { ImageCropModal } from "@/components/profile/ImageCropModal";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
 import { currencies, CurrencyCode } from "@/lib/currencyUtils";
-import { travelStyles } from "@/data/travelStyles";
-import { PillChip } from "@/components/shared/PillChip";
+import { travelStyles, TravelStyleGrid } from "@/components/onboarding/TravelStyleGrid";
 import { cn } from "@/lib/utils";
 
 // TikTok icon component
@@ -74,8 +72,6 @@ export default function EditProfile() {
     phone: "",
     location: "",
     bio: "",
-    budgetMin: "",
-    budgetMax: "",
     gender: "",
   });
 
@@ -119,8 +115,6 @@ export default function EditProfile() {
           phone: profile.phone || "",
           location: profile.location || "",
           bio: profile.bio || "",
-          budgetMin: profile.budget_min !== undefined && profile.budget_min !== null ? String(profile.budget_min) : "",
-          budgetMax: profile.budget_max !== undefined && profile.budget_max !== null ? String(profile.budget_max) : "",
           gender: gender,
         });
         setOriginalUsername(usernameMorm);
@@ -148,8 +142,6 @@ export default function EditProfile() {
           phone: "",
           location: "",
           bio: "",
-          budgetMin: "",
-          budgetMax: "",
           gender: "",
         });
         setOriginalUsername("");
@@ -350,8 +342,6 @@ export default function EditProfile() {
         bio: formData.bio.trim() || null,
         avatar_url: profileImage || null,
         travel_styles: selectedStyles,
-        budget_min: formData.budgetMin ? parseInt(formData.budgetMin) : null,
-        budget_max: formData.budgetMax ? parseInt(formData.budgetMax) : null,
         social_links: Object.keys(socialLinks).length > 0 ? socialLinks : null,
         home_currency: selectedHomeCurrency,
         gender: formData.gender || null,
@@ -418,6 +408,8 @@ export default function EditProfile() {
   const availablePlatformsToAdd = socialPlatforms.filter(
     (p) => !Object.keys(socialLinks).includes(p.id)
   );
+  const allTravelStyleIds = travelStyles.map((style) => style.id);
+  const allStylesSelected = selectedStyles.length === allTravelStyleIds.length;
 
   const addSocialLink = (platformId: string) => {
     setSocialLinks((prev) => ({
@@ -459,7 +451,7 @@ export default function EditProfile() {
 
   return (
     <AppLayout>
-      <header className="sticky top-0 z-50 glass border-b border-border/50 -mx-4 sm:-mx-6 px-4 sm:px-6 safe-top">
+      <header className="sticky top-0 z-50 glass border-b border-border/50 -mx-4 sm:-mx-6 px-4 sm:px-6">
         <div className="flex items-center justify-between h-14">
           <div className="flex items-center gap-2 sm:gap-3">
             <button onClick={() => navigate(-1)}>
@@ -661,37 +653,34 @@ export default function EditProfile() {
         <Card className="p-3 sm:p-4 border-border/50 space-y-2 sm:space-y-3">
           <div className="flex items-center justify-between">
             <h3 className="font-semibold text-foreground text-sm sm:text-base">Travel Style</h3>
-            <span className="text-xs text-muted-foreground">
-              {selectedStyles.length} selected
-            </span>
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-muted-foreground">
+                {selectedStyles.length} selected
+              </span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={() => {
+                  if (allStylesSelected) {
+                    setSelectedStyles([]);
+                  } else {
+                    setSelectedStyles(allTravelStyleIds);
+                  }
+                }}
+              >
+                {allStylesSelected ? "Clear all" : "Select all"}
+              </Button>
+            </div>
           </div>
           <p className="text-xs sm:text-sm text-muted-foreground">
             Select styles that match your travel preferences
           </p>
-          <div className="flex flex-wrap gap-1.5 sm:gap-2">
-            {travelStyles.map((style) => {
-              const isSelected = selectedStyles.includes(style.id);
-              return (
-                <button
-                  key={style.id}
-                  onClick={() => toggleTravelStyle(style.id)}
-                  className="transition-all"
-                  type="button"
-                >
-                  <PillChip
-                    label={style.label}
-                    icon={style.emoji}
-                    size="sm"
-                    selected={isSelected}
-                    className={isSelected
-                      ? "bg-primary/10 border-primary text-primary ring-1 ring-primary/30"
-                      : "opacity-60 hover:opacity-100"}
-                  />
-                </button>
-              );
-            })}
+          <div>
+            <TravelStyleGrid selectedStyles={selectedStyles} onToggle={toggleTravelStyle} />
             {selectedStyles.length === 0 && (
-              <span className="text-muted-foreground text-xs">No travel styles selected</span>
+              <span className="mt-2 inline-block text-muted-foreground text-xs">No travel styles selected</span>
             )}
           </div>
         </Card>
@@ -721,50 +710,6 @@ export default function EditProfile() {
             <p className="text-xs text-muted-foreground">
               Used to display expense totals and settlements
             </p>
-          </div>
-        </Card>
-
-        <Card className="p-3 sm:p-4 border-border/50 space-y-2 sm:space-y-3">
-          <h3 className="font-semibold text-foreground text-sm sm:text-base">Budget Range</h3>
-          <p className="text-xs sm:text-sm text-muted-foreground">
-            Your typical budget per trip (RM)
-          </p>
-          <div className="flex items-center gap-2 sm:gap-3">
-            <div className="flex-1 space-y-1">
-              <Label htmlFor="budgetMin" className="text-xs">
-                Minimum
-              </Label>
-              <Input
-                id="budgetMin"
-                type="number"
-                value={formData.budgetMin}
-                onChange={(e) => handleInputChange("budgetMin", e.target.value)}
-                placeholder=""
-                className="h-9 sm:h-10 rounded-xl text-sm"
-                min="0"
-              />
-              {formData.budgetMin === "" && (
-                <span className="text-muted-foreground text-xs">No minimum set</span>
-              )}
-            </div>
-            <span className="text-muted-foreground mt-5 text-sm"></span>
-            <div className="flex-1 space-y-1">
-              <Label htmlFor="budgetMax" className="text-xs">
-                Maximum
-              </Label>
-              <Input
-                id="budgetMax"
-                type="number"
-                value={formData.budgetMax}
-                onChange={(e) => handleInputChange("budgetMax", e.target.value)}
-                placeholder=""
-                className="h-9 sm:h-10 rounded-xl text-sm"
-                min="0"
-              />
-              {formData.budgetMax === "" && (
-                <span className="text-muted-foreground text-xs">No maximum set</span>
-              )}
-            </div>
           </div>
         </Card>
 

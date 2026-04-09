@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Calendar, MapPin, Users, Heart, Share2, Copy, MessageCircle, Check, Lock, Trash2, X } from "lucide-react";
+import { Calendar, MapPin, Users, Heart, Share2, Copy, MessageCircle, Check, Lock, Trash2, X, Tag } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { toast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { isTripSaved, saveTrip, unsaveTrip } from "@/lib/savedTrips";
+import { buildPublicUrl, buildTripShareUrl } from "@/lib/publicUrl";
+import { getExpectationIcon, getExpectationLabel } from "@/lib/expectationUtils";
 
 interface TripCardProps {
   id: string;
@@ -36,6 +38,7 @@ interface TripCardProps {
   slug?: string;
   isPrivate?: boolean;
   status?: 'draft' | 'published';
+  requirements?: string[];
   onDelete?: (tripId: string) => void;
   onCancel?: (tripId: string) => void;
   returnTo?: "explore" | "my-trips";
@@ -61,6 +64,7 @@ export function TripCard({
   slug,
   isPrivate,
   status,
+  requirements,
   onDelete,
   onCancel,
   returnTo,
@@ -143,7 +147,12 @@ export function TripCard({
   const tripLink = returnSuffix
     ? `/trip/${tripIdentifier}?${returnSuffix}`
     : `/trip/${tripIdentifier}`;
-  const tripUrl = `${window.location.origin}${tripLink}`;
+  const tripUrl = buildPublicUrl(tripLink);
+  const tripShareUrl = buildTripShareUrl({
+    tripId: id || tripIdentifier,
+    slug,
+    title: safeTitle,
+  });
   const shareText = `Check out this trip: ${safeTitle} to ${safeDestination}`;
 
   const handleFavourite = (e: React.MouseEvent) => {
@@ -177,7 +186,7 @@ export function TripCard({
         await navigator.share({
           title: title,
           text: shareText,
-          url: tripUrl,
+          url: tripShareUrl,
         });
       } catch (err) {
         // User cancelled or share failed - fall back to modal
@@ -193,7 +202,7 @@ export function TripCard({
 
   const handleCopyLink = async () => {
     try {
-      await navigator.clipboard.writeText(tripUrl);
+      await navigator.clipboard.writeText(tripShareUrl);
       setCopied(true);
       toast({
         title: "Link copied!",
@@ -214,7 +223,7 @@ export function TripCard({
       name: "WhatsApp",
       icon: MessageCircle,
       color: "bg-green-500",
-      onClick: () => window.open(`https://wa.me/?text=${encodeURIComponent(shareText + " " + tripUrl)}`, "_blank"),
+      onClick: () => window.open(`https://wa.me/?text=${encodeURIComponent(shareText + " " + tripShareUrl)}`, "_blank"),
     },
     {
       name: "Facebook",
@@ -224,7 +233,7 @@ export function TripCard({
         </svg>
       ),
       color: "bg-blue-600",
-      onClick: () => window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(tripUrl)}`, "_blank"),
+      onClick: () => window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(tripShareUrl)}`, "_blank"),
     },
     {
       name: "Twitter",
@@ -234,7 +243,7 @@ export function TripCard({
         </svg>
       ),
       color: "bg-black dark:bg-white dark:text-black",
-      onClick: () => window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(tripUrl)}`, "_blank"),
+      onClick: () => window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(tripShareUrl)}`, "_blank"),
     },
     {
       name: "Telegram",
@@ -244,7 +253,7 @@ export function TripCard({
         </svg>
       ),
       color: "bg-sky-500",
-      onClick: () => window.open(`https://t.me/share/url?url=${encodeURIComponent(tripUrl)}&text=${encodeURIComponent(shareText)}`, "_blank"),
+      onClick: () => window.open(`https://t.me/share/url?url=${encodeURIComponent(tripShareUrl)}&text=${encodeURIComponent(shareText)}`, "_blank"),
     },
   ];
 
@@ -419,17 +428,19 @@ export function TripCard({
         {/* Tags */}
         <div className="flex flex-wrap gap-1.5 sm:gap-2">
           {safeTags.slice(0, 3).map((tag) => {
-            // Find the emoji for this tag from categories, skip for fallback
+            // Try standard category first, then fall back to expectation icon map
             const category = tripCategories.find(
               (c) => c.label.toLowerCase() === tag.toLowerCase()
             );
-            const emoji = category?.icon || "";
+            const emoji = category?.icon || getExpectationIcon(tag);
             return (
               <span
                 key={tag}
                 className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-secondary text-secondary-foreground"
               >
-                {emoji && <span>{emoji}</span>}
+                {emoji
+                  ? <span>{emoji}</span>
+                  : <Tag className="h-3 w-3 shrink-0" />}
                 <span>{tag}</span>
               </span>
             );
@@ -440,6 +451,31 @@ export function TripCard({
             </span>
           )}
         </div>
+
+        {/* What to Expect */}
+        {Array.isArray(requirements) && requirements.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {requirements.slice(0, 3).map((req, i) => {
+              const icon = getExpectationIcon(req);
+              return (
+                <span
+                  key={i}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs border border-border/60 text-muted-foreground"
+                >
+                  {icon
+                    ? <span>{icon}</span>
+                    : <Tag className="h-3 w-3 shrink-0" />}
+                  <span>{getExpectationLabel(req)}</span>
+                </span>
+              );
+            })}
+            {requirements.length > 3 && (
+              <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs border border-border/60 text-muted-foreground">
+                +{requirements.length - 3} more
+              </span>
+            )}
+          </div>
+        )}
 
         {/* Footer - pinned to bottom */}
         <div className="mt-auto pt-2 border-t border-border/50">

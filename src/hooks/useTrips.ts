@@ -15,6 +15,7 @@ export interface Trip {
   max_participants?: number;
   current_participants?: number;
   tags?: string[];
+  requirements?: string[];
   type?: 'community' | 'guided';
   slug?: string;
   created_at?: string;
