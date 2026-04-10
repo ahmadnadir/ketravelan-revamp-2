@@ -49,6 +49,9 @@ import Contact from "./pages/Contact";
 import About from "./pages/About";
 import HelpCenter from "./pages/HelpCenter";
 import HelpArticleDetail from "./pages/HelpArticleDetail";
+import GuidedRevamp from "./pages/GuidedRevamp";
+import GuidedPaymentGateway from "./guided-revamp/components/Payment/PaymentGateway";
+import GuidedPaymentResult from "./guided-revamp/components/Payment/PaymentResult";
 
 import { PageTransition } from "./components/layout/PageTransition";
 import { OfflineBanner } from "./components/layout/OfflineBanner";
@@ -362,6 +365,9 @@ const App = () => (
               <Route path="/terms-of-service" element={<TermsOfService />} />
               <Route path="/contact" element={<Contact />} />
               <Route path="/about" element={<About />} />
+              <Route path="/guided-revamp" element={<ProtectedRoute><GuidedRevamp /></ProtectedRoute>} />
+              <Route path="/payment-gateway" element={<GuidedPaymentGateway />} />
+              <Route path="/payment-result" element={<GuidedPaymentResult />} />
               <Route path="/help-center" element={<HelpCenter />} />
               <Route path="/help-center/:slug" element={<HelpArticleDetail />} />
               <Route path="/install" element={<Install />} />

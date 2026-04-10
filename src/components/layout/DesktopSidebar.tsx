@@ -12,6 +12,7 @@ import {
   Plus,
   Wallet,
   MessageSquare,
+  MapPinned,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
@@ -20,6 +21,7 @@ import { toast } from "@/hooks/use-toast";
 
 const primaryNavItems = [
   { icon: Compass, label: "Explore", path: "/explore" },
+  { icon: MapPinned, label: "Guided Revamp", path: "/guided-revamp" },
   { icon: MessageCircle, label: "Chat", path: "/chat", hasUnread: true },
   { icon: Users, label: "Community", path: "/community" },
   { icon: Map, label: "My Trips", path: "/my-trips" },
