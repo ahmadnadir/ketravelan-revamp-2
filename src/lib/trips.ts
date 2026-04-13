@@ -2,6 +2,14 @@
 import { supabase } from './supabase';
 import type { CurrencyCode } from './currencyUtils';
 
+export type TripNotificationSettingKey = 'new_members_join' | 'expense_updates' | 'chat_activity';
+
+const TRIP_NOTIFICATION_DEFAULTS: Record<TripNotificationSettingKey, boolean> = {
+  new_members_join: true,
+  expense_updates: true,
+  chat_activity: false,
+};
+
 function isSchemaDriftError(error: any): boolean {
   const message = `${error?.message ?? ''} ${error?.details ?? ''} ${error?.hint ?? ''}`.toLowerCase();
   return (
@@ -139,6 +147,7 @@ export async function fetchTripDetails(tripIdOrSlug: string) {
       budget_mode,
       budget_breakdown,
       travel_styles,
+      trip_settings,
       created_at,
       creator_id,
       creator:profiles!trips_creator_id_fkey(id, username, full_name, avatar_url, bio),
@@ -162,6 +171,33 @@ export async function fetchTripDetails(tripIdOrSlug: string) {
 
   if (error) throw error;
   return data;
+}
+
+export async function isTripNotificationEnabled(
+  tripId: string,
+  key: TripNotificationSettingKey,
+): Promise<boolean> {
+  const fallbackValue = TRIP_NOTIFICATION_DEFAULTS[key];
+
+  if (!tripId) return fallbackValue;
+
+  try {
+    const { data, error } = await supabase
+      .from('trips')
+      .select('trip_settings')
+      .eq('id', tripId)
+      .maybeSingle();
+
+    if (error) throw error;
+
+    const notifications = (data?.trip_settings as any)?.notifications;
+    const rawValue = notifications?.[key];
+
+    return typeof rawValue === 'boolean' ? rawValue : fallbackValue;
+  } catch (error) {
+    console.warn(`Failed to resolve trip notification setting: ${key}`, error);
+    return fallbackValue;
+  }
 }
 
 export async function fetchJoinRequestStatus(tripId: string, userId: string) {
@@ -878,15 +914,191 @@ export async function fetchAllJoinRequestsForUser() {
   return data;
 }
 
-export async function leaveTripMember(tripId: string) {
+export interface LeaveTripMemberResult {
+  didLeave: boolean;
+  didCancelTrip: boolean;
+  tripAlreadyCancelled: boolean;
+  organizersBeforeLeave: number;
+}
+
+export async function leaveTripMember(
+  tripId: string,
+  options?: { forceCancel?: boolean },
+): Promise<LeaveTripMemberResult> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not authenticated');
+
+  const { data, error } = await supabase.rpc('leave_trip_member', {
+    p_force_cancel: Boolean(options?.forceCancel),
+    p_trip_id: tripId,
+  });
+
+  if (error) {
+    const errorCode = (error as any)?.code;
+    const errorMessage = String((error as any)?.message || '').toLowerCase();
+
+    if (
+      errorCode === 'P0001' &&
+      errorMessage.includes('organizers cannot leave their own trip')
+    ) {
+      const { data: trip, error: tripError } = await supabase
+        .from('trips')
+        .select('status')
+        .eq('id', tripId)
+        .single();
+
+      if (tripError) throw tripError;
+
+      const tripAlreadyCancelled = trip?.status === 'cancelled';
+      let didCancelTrip = false;
+
+      if (!tripAlreadyCancelled) {
+        const { error: cancelError } = await supabase
+          .from('trips')
+          .update({ status: 'cancelled' })
+          .eq('id', tripId);
+
+        if (cancelError) throw cancelError;
+        didCancelTrip = true;
+      }
+
+      // Best effort: remove group chat once trip is cancelled.
+      const { error: deleteConversationError } = await supabase
+        .from('conversations')
+        .delete()
+        .eq('trip_id', tripId)
+        .eq('conversation_type', 'trip_group');
+
+      if (deleteConversationError) {
+        console.warn('Unable to delete trip group conversation after organizer leave block:', deleteConversationError);
+      }
+
+      return {
+        didLeave: true,
+        didCancelTrip,
+        tripAlreadyCancelled,
+        organizersBeforeLeave: 1,
+      };
+    }
+
+    if (errorCode !== 'PGRST202') {
+      throw error;
+    }
+
+    // Compatibility fallback when RPC is not visible in schema cache.
+    const [{ data: trip, error: tripError }, { data: membership, error: membershipError }, { count: organizerCount, error: organizerCountError }] = await Promise.all([
+      supabase
+        .from('trips')
+        .select('status')
+        .eq('id', tripId)
+        .single(),
+      supabase
+        .from('trip_members')
+        .select('is_admin')
+        .eq('trip_id', tripId)
+        .eq('user_id', user.id)
+        .is('left_at', null)
+        .maybeSingle(),
+      supabase
+        .from('trip_members')
+        .select('*', { count: 'exact', head: true })
+        .eq('trip_id', tripId)
+        .eq('is_admin', true)
+        .is('left_at', null),
+    ]);
+
+    if (tripError) throw tripError;
+    if (membershipError) throw membershipError;
+    if (organizerCountError) throw organizerCountError;
+    if (!membership) throw new Error('You are not an active member of this trip');
+
+    const organizersBeforeLeave = organizerCount || 0;
+    let didCancelTrip = false;
+    const tripAlreadyCancelled = trip?.status === 'cancelled';
+    const shouldCancelAsLastOrganizer = Boolean(!tripAlreadyCancelled && membership.is_admin && organizersBeforeLeave <= 1);
+
+    const cancelTripAndDeleteChat = async () => {
+      const { error: cancelError } = await supabase
+        .from('trips')
+        .update({ status: 'cancelled' })
+        .eq('id', tripId);
+
+      if (cancelError) throw cancelError;
+
+      // Remove trip group chat for everyone once trip is cancelled by last organizer.
+      const { error: deleteConversationError } = await supabase
+        .from('conversations')
+        .delete()
+        .eq('trip_id', tripId)
+        .eq('conversation_type', 'trip_group');
+
+      // Conversation deletion can be blocked by RLS for non-creator fallback path.
+      if (deleteConversationError) {
+        console.warn('Unable to delete trip group conversation during fallback cancel:', deleteConversationError);
+      }
+
+      didCancelTrip = true;
+    };
+
+    if (shouldCancelAsLastOrganizer) {
+      await cancelTripAndDeleteChat();
+    }
+
+    let { error: leaveError } = await supabase
+      .from('trip_members')
+      .update({ left_at: new Date().toISOString() })
+      .eq('trip_id', tripId)
+      .eq('user_id', user.id)
+      .is('left_at', null);
+
+    const isOrganizerLeaveBlocked =
+      (leaveError as any)?.code === 'P0001' &&
+      String((leaveError as any)?.message || '').toLowerCase().includes('organizers cannot leave');
+
+    if (leaveError && isOrganizerLeaveBlocked && !didCancelTrip) {
+      await cancelTripAndDeleteChat();
+      const retry = await supabase
+        .from('trip_members')
+        .update({ left_at: new Date().toISOString() })
+        .eq('trip_id', tripId)
+        .eq('user_id', user.id)
+        .is('left_at', null);
+
+      leaveError = retry.error;
+    }
+
+    if (leaveError) throw leaveError;
+
+    if (Boolean(options?.forceCancel) && !didCancelTrip && !tripAlreadyCancelled) {
+      await cancelTripAndDeleteChat();
+    }
+
+    return {
+      didLeave: true,
+      didCancelTrip,
+      tripAlreadyCancelled,
+      organizersBeforeLeave,
+    };
+  }
+
+  const row = Array.isArray(data) ? data[0] : data;
+  return {
+    didLeave: Boolean(row?.did_leave ?? true),
+    didCancelTrip: Boolean(row?.did_cancel_trip),
+    tripAlreadyCancelled: Boolean(row?.trip_already_cancelled),
+    organizersBeforeLeave: Number(row?.organizers_before_leave ?? 0),
+  };
+}
+
+export async function deleteTripPermanently(tripId: string) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
 
   const { error } = await supabase
-    .from('trip_members')
-    .update({ left_at: new Date().toISOString() })
-    .eq('trip_id', tripId)
-    .eq('user_id', user.id);
+    .from('trips')
+    .delete()
+    .eq('id', tripId)
+    .eq('creator_id', user.id);
 
   if (error) throw error;
 }
@@ -956,16 +1168,32 @@ export async function updateTrip(tripId: string, data: Partial<CreateTripData>) 
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
 
-  // Fetch current trip to detect changed fields
+  // Fetch current trip to detect changed fields.
+  // Do not hard-filter by creator_id here: admin organizers can also update.
   const { data: currentTrip, error: fetchErr } = await supabase
     .from('trips')
     .select('*')
     .eq('id', tripId)
-    .eq('creator_id', user.id)
     .maybeSingle();
 
   if (fetchErr) throw fetchErr;
-  if (!currentTrip) throw new Error('Trip not found or not authorized');
+
+  let isTripAdmin = false;
+  if (!currentTrip || currentTrip.creator_id !== user.id) {
+    const { data: adminMembership, error: adminErr } = await supabase
+      .from('trip_members')
+      .select('id')
+      .eq('trip_id', tripId)
+      .eq('user_id', user.id)
+      .eq('is_admin', true)
+      .is('left_at', null)
+      .maybeSingle();
+
+    if (adminErr) throw adminErr;
+    isTripAdmin = Boolean(adminMembership);
+  }
+
+  if (!currentTrip && !isTripAdmin) throw new Error('Trip not found or not authorized');
 
   const updateData: Record<string, any> = {};
   const changedFields: string[] = [];
@@ -974,79 +1202,79 @@ export async function updateTrip(tripId: string, data: Partial<CreateTripData>) 
   console.log('updateTrip called with data:', data);
   console.log('Current trip data:', currentTrip);
 
-  if (data.title !== undefined && data.title !== currentTrip.title) {
+  if (data.title !== undefined && (!currentTrip || data.title !== currentTrip.title)) {
     updateData.title = data.title;
     changedFields.push('title');
   }
-  if (data.description !== undefined && data.description !== currentTrip.description) {
+  if (data.description !== undefined && (!currentTrip || data.description !== currentTrip.description)) {
     updateData.description = data.description;
     changedFields.push('description');
   }
-  if (data.destination !== undefined && data.destination !== currentTrip.destination) {
+  if (data.destination !== undefined && (!currentTrip || data.destination !== currentTrip.destination)) {
     updateData.destination = data.destination;
     changedFields.push('destination');
   }
-  if (data.cover_image !== undefined && data.cover_image !== currentTrip.cover_image) {
+  if (data.cover_image !== undefined && (!currentTrip || data.cover_image !== currentTrip.cover_image)) {
     updateData.cover_image = data.cover_image;
     changedFields.push('cover_image');
   }
-  if (data.images !== undefined && JSON.stringify(data.images) !== JSON.stringify(currentTrip.images)) {
+  if (data.images !== undefined && (!currentTrip || JSON.stringify(data.images) !== JSON.stringify(currentTrip.images))) {
     updateData.images = data.images;
     changedFields.push('images');
   }
-  if (data.start_date !== undefined && data.start_date !== currentTrip.start_date) {
+  if (data.start_date !== undefined && (!currentTrip || data.start_date !== currentTrip.start_date)) {
     updateData.start_date = data.start_date;
     changedFields.push('start_date');
   }
-  if (data.end_date !== undefined && data.end_date !== currentTrip.end_date) {
+  if (data.end_date !== undefined && (!currentTrip || data.end_date !== currentTrip.end_date)) {
     updateData.end_date = data.end_date;
     changedFields.push('end_date');
   }
-  if (data.max_participants !== undefined && data.max_participants !== currentTrip.max_participants) {
+  if (data.max_participants !== undefined && (!currentTrip || data.max_participants !== currentTrip.max_participants)) {
     updateData.max_participants = data.max_participants;
     changedFields.push('max_participants');
   }
-  if (data.visibility !== undefined && data.visibility !== currentTrip.visibility) {
+  if (data.visibility !== undefined && (!currentTrip || data.visibility !== currentTrip.visibility)) {
     updateData.visibility = data.visibility;
     changedFields.push('visibility');
   }
-  if (data.tags !== undefined && JSON.stringify(data.tags) !== JSON.stringify(currentTrip.tags)) {
+  if (data.tags !== undefined && (!currentTrip || JSON.stringify(data.tags) !== JSON.stringify(currentTrip.tags))) {
     updateData.tags = data.tags;
     changedFields.push('tags');
   }
-  if (data.travel_styles !== undefined && JSON.stringify(data.travel_styles) !== JSON.stringify(currentTrip.travel_styles)) {
+  if (data.travel_styles !== undefined && (!currentTrip || JSON.stringify(data.travel_styles) !== JSON.stringify(currentTrip.travel_styles))) {
     updateData.travel_styles = data.travel_styles;
     changedFields.push('travel_styles');
   }
-  if (data.stops !== undefined && data.stops !== currentTrip.stops) {
+  if (data.stops !== undefined && (!currentTrip || data.stops !== currentTrip.stops)) {
     updateData.stops = data.stops;
     changedFields.push('stops');
   }
-  if (data.budget_mode !== undefined && data.budget_mode !== currentTrip.budget_mode) {
+  if (data.budget_mode !== undefined && (!currentTrip || data.budget_mode !== currentTrip.budget_mode)) {
     updateData.budget_mode = data.budget_mode;
     changedFields.push('budget_mode');
   }
-  if (data.budget_breakdown !== undefined && JSON.stringify(data.budget_breakdown) !== JSON.stringify(currentTrip.budget_breakdown)) {
+  if (data.budget_breakdown !== undefined && (!currentTrip || JSON.stringify(data.budget_breakdown) !== JSON.stringify(currentTrip.budget_breakdown))) {
     updateData.budget_breakdown = data.budget_breakdown;
     changedFields.push('budget_breakdown');
   }
-  if (data.itinerary_type !== undefined && data.itinerary_type !== currentTrip.itinerary_type) {
+  if (data.itinerary_type !== undefined && (!currentTrip || data.itinerary_type !== currentTrip.itinerary_type)) {
     updateData.itinerary_type = data.itinerary_type;
     changedFields.push('itinerary_type');
   }
-  if (data.itinerary !== undefined && JSON.stringify(data.itinerary) !== JSON.stringify(currentTrip.itinerary)) {
+  if (data.itinerary !== undefined && (!currentTrip || JSON.stringify(data.itinerary) !== JSON.stringify(currentTrip.itinerary))) {
     updateData.itinerary = data.itinerary;
     changedFields.push('itinerary');
   }
-  if (data.status !== undefined && data.status !== currentTrip.status) {
+  if (data.status !== undefined && (!currentTrip || data.status !== currentTrip.status)) {
     updateData.status = data.status;
     changedFields.push('status');
   }
-  if (data.currency !== undefined && data.currency !== currentTrip.currency) {
+  if (data.currency !== undefined && (!currentTrip || data.currency !== currentTrip.currency)) {
     updateData.currency = data.currency;
     changedFields.push('currency');
   }
-  if (data.price !== undefined && data.price !== currentTrip.price) {
+  if (data.price !== undefined && (!currentTrip || data.price !== currentTrip.price)) {
     updateData.price = data.price;
     changedFields.push('price');
   }
@@ -1060,7 +1288,6 @@ export async function updateTrip(tripId: string, data: Partial<CreateTripData>) 
     .from('trips')
     .update(updateData)
     .eq('id', tripId)
-    .eq('creator_id', user.id)
     .select()
     .single();
 

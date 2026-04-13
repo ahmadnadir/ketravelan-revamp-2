@@ -19,6 +19,7 @@ import {
   CircleDollarSign,
   User,
   MessageCircle,
+  Trash2,
   type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -71,6 +72,24 @@ const platformIcons: Record<string, LucideIcon | typeof TikTok> = {
   other: Link2,
 };
 
+const DEFAULT_COVER_PHOTO = "/default-cover-photo.png";
+const DEFAULT_DESKTOP_COVER_PHOTO = "/default-cover-desktop.png";
+
+const buildDicebearAvatar = (seed: string) =>
+  `https://api.dicebear.com/7.x/notionists/svg?seed=${encodeURIComponent(seed)}&backgroundType=solid&backgroundColor=ffffff`;
+
+const getDicebearSeedFromUrl = (url?: string | null) => {
+  if (!url || !url.includes("api.dicebear.com")) return null;
+  try {
+    return new URL(url).searchParams.get("seed");
+  } catch {
+    return null;
+  }
+};
+
+const buildDicebearChoices = (baseSeed: string) =>
+  Array.from({ length: 12 }, (_, i) => buildDicebearAvatar(`${baseSeed}-${i + 1}`));
+
 
 
 // AboutText component with Read more/less functionality
@@ -109,6 +128,7 @@ export default function Profile() {
   const [uploadingCover, setUploadingCover] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [showCoverImage, setShowCoverImage] = useState(false);
+  const [showCoverActions, setShowCoverActions] = useState(false);
   const coverInputRef = useRef<HTMLInputElement>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
   
@@ -124,6 +144,9 @@ export default function Profile() {
   const [avatarViewOpen, setAvatarViewOpen] = useState(false);
   const [avatarCropOpen, setAvatarCropOpen] = useState(false);
   const [avatarImageToCrop, setAvatarImageToCrop] = useState<string>("");
+  const [changePhotoOptionsOpen, setChangePhotoOptionsOpen] = useState(false);
+  const [dicebearModalOpen, setDicebearModalOpen] = useState(false);
+  const [dicebearChoices, setDicebearChoices] = useState<string[]>([]);
   
   // Fetch other user's profile if viewing someone else's profile
   useEffect(() => {
@@ -363,6 +386,80 @@ export default function Profile() {
     }
   };
 
+  const updateAvatarUrl = async (nextAvatarUrl: string | null, successTitle: string, successDescription: string) => {
+    if (!user || !isOwnProfile) return;
+
+    try {
+      setUploadingAvatar(true);
+
+      const { error } = await supabase
+        .from("profiles")
+        .update({ avatar_url: nextAvatarUrl, updated_at: new Date().toISOString() })
+        .eq("id", user.id);
+
+      if (error) throw error;
+
+      await refreshProfile();
+      toast({ title: successTitle, description: successDescription });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to update profile photo.";
+      toast({ title: "Update failed", description: message, variant: "destructive" });
+    } finally {
+      setUploadingAvatar(false);
+    }
+  };
+
+  const handleRemoveAvatar = async () => {
+    setAvatarModalOpen(false);
+    await updateAvatarUrl(null, "Photo removed", "Your profile photo has been removed.");
+  };
+
+  const openDicebearPicker = () => {
+    if (!profile?.id) return;
+    const currentSeed =
+      getDicebearSeedFromUrl(profile?.avatar_url) ||
+      `${profile.id}-${Date.now()}`;
+    setDicebearChoices(buildDicebearChoices(currentSeed));
+    setChangePhotoOptionsOpen(false);
+    setDicebearModalOpen(true);
+  };
+
+  const handleDicebearSelect = async (avatarOption: string) => {
+    setDicebearModalOpen(false);
+    await updateAvatarUrl(avatarOption, "Photo updated", "DiceBear avatar selected.");
+  };
+
+  const handleRemoveCoverPhoto = async () => {
+    if (!user || !isOwnProfile) return;
+
+    try {
+      setUploadingCover(true);
+
+      const { error } = await supabase
+        .from("profiles")
+        .update({ cover_image: null, updated_at: new Date().toISOString() })
+        .eq("id", user.id);
+
+      if (error) throw error;
+
+      setCoverPhoto(null);
+      await refreshProfile();
+      toast({
+        title: "Cover removed",
+        description: "Default cover photo is now applied.",
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to remove cover photo.";
+      toast({
+        title: "Remove failed",
+        description: message,
+        variant: "destructive",
+      });
+    } finally {
+      setUploadingCover(false);
+    }
+  };
+
   const handleMessage = async () => {
     if (!profile?.id) return;
     try {
@@ -420,7 +517,7 @@ export default function Profile() {
   // Fallback for incomplete profile
   if (user && !profile) {
     const displayName = user.email?.split("@")[0] || "User";
-    const avatarUrl = `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.id}`;
+    const avatarUrl = `https://api.dicebear.com/7.x/notionists/svg?seed=${encodeURIComponent(user.id)}&backgroundType=solid&backgroundColor=ffffff`;
     
     return (
       <AppLayout showBottomNav={true} fullWidth mainClassName="px-0 sm:px-4">
@@ -546,23 +643,25 @@ export default function Profile() {
   const getDefaultAvatar = (userId: string, gender: string) => {
     const timestamp = Date.now(); // Cache buster
     if (gender === "male") {
-      return `https://api.dicebear.com/7.x/notionists/svg?seed=${userId}-female&t=${timestamp}`;
+      return `https://api.dicebear.com/7.x/notionists/svg?seed=${encodeURIComponent(`${userId}-female`)}&backgroundType=solid&backgroundColor=ffffff&t=${timestamp}`;
     } else if (gender === "female") {
-      return `https://api.dicebear.com/7.x/notionists/svg?seed=${userId}-male&t=${timestamp}`;
+      return `https://api.dicebear.com/7.x/notionists/svg?seed=${encodeURIComponent(`${userId}-male`)}&backgroundType=solid&backgroundColor=ffffff&t=${timestamp}`;
     }
-    return `https://api.dicebear.com/7.x/notionists/svg?seed=${userId}&t=${timestamp}`;
+    return `https://api.dicebear.com/7.x/notionists/svg?seed=${encodeURIComponent(userId)}&backgroundType=solid&backgroundColor=ffffff&t=${timestamp}`;
   };
-  
-  // Always use gender-based avatar if stored avatar is a dicebear URL
-  // Only keep the avatar if it's a custom uploaded image (not from dicebear)
-  const isDefaultDicebear = profile.avatar_url?.includes('dicebear.com');
-  const avatarUrl = (!profile.avatar_url || isDefaultDicebear) ? getDefaultAvatar(profile.id, gender) : profile.avatar_url;
+
+  // Keep user-selected avatar exactly as saved, including DiceBear URLs.
+  const avatarUrl = profile.avatar_url && String(profile.avatar_url).trim()
+    ? String(profile.avatar_url)
+    : "";
   const location = profile.location || "";
   const travelStyles = Array.isArray(profile.travel_styles) ? profile.travel_styles : [];
   const socialLinks = profile.social_links || {};
   const bio = profile.bio;
   const countriesCount = profile.countries_visited || 0;
   const tripsCount = visibleTrips.length;
+  const coverImageUrl = coverPhoto || DEFAULT_COVER_PHOTO;
+  const coverImageDesktopUrl = coverPhoto || DEFAULT_DESKTOP_COVER_PHOTO;
   const homeCurrency = (profile.home_currency as CurrencyCode | undefined);
   const currencyInfo = homeCurrency ? getCurrencyInfo(homeCurrency) : undefined;
 
@@ -586,33 +685,45 @@ export default function Profile() {
       />
 
       {/* Cover Photo Banner */}
-      <div className={cn("relative", isOwnProfile ? "group" : "cursor-pointer")}>
+      <div className="relative">
         <div className="h-48 sm:h-56 w-full bg-muted overflow-hidden">
           {coverPhoto ? (
             <img
-              src={coverPhoto}
+              src={coverImageUrl}
               alt="Cover"
-              onClick={() => !isOwnProfile && setShowCoverImage(true)}
-              className={cn("h-full w-full object-cover shadow-lg", !isOwnProfile && "hover:opacity-90 transition-opacity")}
+              onClick={() => {
+                if (isOwnProfile) {
+                  setShowCoverActions(true);
+                } else {
+                  setShowCoverImage(true);
+                }
+              }}
+              className={cn(
+                "h-full w-full object-cover shadow-lg cursor-pointer",
+                !isOwnProfile && "hover:opacity-90 transition-opacity"
+              )}
             />
           ) : (
-            <div className="h-full w-full bg-gradient-to-br from-primary/20 to-primary/5 shadow-lg" />
+            <picture>
+              <source media="(min-width: 640px)" srcSet={DEFAULT_DESKTOP_COVER_PHOTO} />
+              <img
+                src={DEFAULT_COVER_PHOTO}
+                alt="Default cover"
+                onClick={() => {
+                  if (isOwnProfile) {
+                    setShowCoverActions(true);
+                  } else {
+                    setShowCoverImage(true);
+                  }
+                }}
+                className={cn(
+                  "h-full w-full object-cover shadow-lg cursor-pointer",
+                  !isOwnProfile && "hover:opacity-90 transition-opacity"
+                )}
+              />
+            </picture>
           )}
         </div>
-        {/* Edit Cover button - Only for owner */}
-        {isOwnProfile && (
-          <button
-            onClick={() => !uploadingCover && coverInputRef.current?.click()}
-            className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity"
-            disabled={uploadingCover}
-          >
-            <div className="flex items-center gap-2 text-white text-sm font-medium">
-              <Camera className="h-4 w-4" />
-              {uploadingCover ? "Uploading..." : "Edit Cover"}
-            </div>
-          </button>
-        )}
-
         {/* Avatar - Centered, overlapping cover */}
         <div className="max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto px-4">
           <div className="flex flex-col items-center -mt-12">
@@ -857,19 +968,47 @@ export default function Profile() {
             <DialogTitle>Cover Photo</DialogTitle>
           </DialogHeader>
           <div className="relative w-full">
-            {coverPhoto ? (
-              <img
-                src={coverPhoto}
-                alt="Cover"
-                className="w-full h-auto max-h-[80vh] object-contain"
-                loading="eager"
-              />
-            ) : ( 
-              <div className="w-full h-64 flex items-center justify-center bg-muted">
-                <p className="text-muted-foreground">No cover photo</p>
-              </div>
-            )}
+            <img
+              src={coverImageDesktopUrl}
+              alt="Cover"
+              className="w-full h-auto max-h-[80vh] object-contain"
+              loading="eager"
+            />
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Cover Actions Dialog - For owners */}
+      <Dialog open={showCoverActions} onOpenChange={setShowCoverActions}>
+        <DialogContent className="max-w-sm w-[90vw] border-border/50 p-4 flex flex-col gap-3">
+          <DialogHeader className="items-center">
+            <DialogTitle className="text-base">Cover Photo</DialogTitle>
+          </DialogHeader>
+
+          <Button
+            type="button"
+            className="w-full rounded-xl"
+            onClick={() => {
+              setShowCoverActions(false);
+              if (!uploadingCover) coverInputRef.current?.click();
+            }}
+            disabled={uploadingCover}
+          >
+            {uploadingCover ? "Uploading..." : "Upload Cover"}
+          </Button>
+
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full rounded-xl text-destructive border-destructive hover:text-destructive"
+            onClick={() => {
+              setShowCoverActions(false);
+              handleRemoveCoverPhoto();
+            }}
+            disabled={uploadingCover || !coverPhoto}
+          >
+            Remove Cover
+          </Button>
         </DialogContent>
       </Dialog>
 
@@ -891,20 +1030,101 @@ export default function Profile() {
             View Photo
           </Button>
           {isOwnProfile && (
+            <>
+              <Button
+                type="button"
+                className="w-full rounded-xl"
+                onClick={() => {
+                  setAvatarModalOpen(false);
+                  setChangePhotoOptionsOpen(true);
+                }}
+                disabled={uploadingAvatar}
+              >
+                Change Photo
+              </Button>
+
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full rounded-xl text-destructive border-destructive hover:text-destructive"
+                onClick={handleRemoveAvatar}
+                disabled={uploadingAvatar}
+              >
+                <Trash2 className="h-4 w-4 mr-2" />
+                Remove Photo
+              </Button>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={changePhotoOptionsOpen} onOpenChange={setChangePhotoOptionsOpen}>
+        <DialogContent className="max-w-sm w-[90vw] border-border/50 p-4 flex flex-col gap-3">
+          <DialogHeader className="items-center">
+            <DialogTitle className="text-base">Change Photo</DialogTitle>
+          </DialogHeader>
+
+          <Button
+            type="button"
+            className="w-full rounded-xl"
+            onClick={() => {
+              if (!uploadingAvatar) {
+                avatarInputRef.current?.click();
+              }
+              setChangePhotoOptionsOpen(false);
+            }}
+            disabled={uploadingAvatar}
+          >
+            {uploadingAvatar ? "Uploading..." : "Upload Photo"}
+          </Button>
+
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full rounded-xl"
+            onClick={openDicebearPicker}
+            disabled={uploadingAvatar}
+          >
+            Choose DiceBear
+          </Button>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={dicebearModalOpen} onOpenChange={setDicebearModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Choose a DiceBear avatar</DialogTitle>
+          </DialogHeader>
+
+          <div className="grid grid-cols-4 gap-3 pt-2">
+            {dicebearChoices.map((avatarOption) => (
+              <button
+                key={avatarOption}
+                type="button"
+                onClick={() => handleDicebearSelect(avatarOption)}
+                className="h-16 w-16 rounded-full border border-border bg-white overflow-hidden hover:border-primary transition-colors"
+              >
+                <img
+                  src={avatarOption}
+                  alt="DiceBear avatar option"
+                  className="h-full w-full rounded-full bg-white object-cover"
+                />
+              </button>
+            ))}
+          </div>
+
+          <div className="pt-3 flex justify-end">
             <Button
               type="button"
-              className="w-full rounded-xl"
+              variant="outline"
               onClick={() => {
-                if (!uploadingAvatar) {
-                  avatarInputRef.current?.click();
-                }
-                setAvatarModalOpen(false);
+                const refreshSeed = `${profile?.id || "user"}-${Date.now()}`;
+                setDicebearChoices(buildDicebearChoices(refreshSeed));
               }}
-              disabled={uploadingAvatar}
             >
-              {uploadingAvatar ? "Uploading..." : "Change Photo"}
+              Refresh options
             </Button>
-          )}
+          </div>
         </DialogContent>
       </Dialog>
 

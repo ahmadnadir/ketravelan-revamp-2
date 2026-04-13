@@ -59,6 +59,8 @@ const socialIcons: Record<string, any> = {
   website: Globe,
 };
 
+const DEFAULT_COVER_PHOTO = "/default-cover-photo.png";
+
 // About text component with truncation
 const AboutText = ({ bio }: { bio: string }) => {
   const [expanded, setExpanded] = useState(false);
@@ -198,6 +200,7 @@ const UserProfilePage = () => {
   const bio = profile.bio;
   const countriesCount = profile.countries_visited || 0;
   const tripsCount = visibleTrips.length;
+  const coverImageUrl = coverPhoto || DEFAULT_COVER_PHOTO;
 
   return (
     <AppLayout
@@ -207,22 +210,18 @@ const UserProfilePage = () => {
     >
       {/* Cover Photo Banner */}
       <div className="relative cursor-pointer">
-        <div className="h-56 sm:h-64 w-full bg-muted overflow-hidden safe-top">
-          {coverPhoto ? (
-            <img
-              src={coverPhoto}
-              alt="Cover"
-              onClick={() => setShowCoverImage(true)}
-              className="h-full w-full object-cover hover:opacity-90 transition-opacity"
-            />
-          ) : (
-            <div className="h-full w-full bg-gradient-to-br from-primary/20 to-primary/5" />
-          )}
+        <div className="h-48 sm:h-56 w-full bg-muted overflow-hidden">
+          <img
+            src={coverImageUrl}
+            alt="Cover"
+            onClick={() => setShowCoverImage(true)}
+            className="h-full w-full object-cover hover:opacity-90 transition-opacity"
+          />
         </div>
 
         {/* Avatar - Centered, overlapping cover */}
-        <div className="container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto px-3 sm:px-4">
-          <div className="flex flex-col items-center -mt-16 sm:-mt-20">
+        <div className="max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto px-4">
+          <div className="flex flex-col items-center -mt-12">
             <button
               type="button"
               onClick={() => setShowAvatarImage(true)}
@@ -424,18 +423,12 @@ const UserProfilePage = () => {
             <DialogTitle>Cover Photo</DialogTitle>
           </DialogHeader>
           <div className="relative w-full">
-            {coverPhoto ? (
-              <img
-                src={coverPhoto}
-                alt="Cover"
-                className="w-full h-auto max-h-[80vh] object-contain"
-                loading="eager"
-              />
-            ) : (
-              <div className="w-full h-64 flex items-center justify-center bg-muted">
-                <p className="text-muted-foreground">No cover photo</p>
-              </div>
-            )}
+            <img
+              src={coverImageUrl}
+              alt="Cover"
+              className="w-full h-auto max-h-[80vh] object-contain"
+              loading="eager"
+            />
           </div>
         </DialogContent>
       </Dialog>

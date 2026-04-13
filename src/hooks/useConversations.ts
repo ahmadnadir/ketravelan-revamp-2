@@ -11,10 +11,15 @@ export function useConversations(
     queryKey: ['conversations', userId],
     queryFn: fetchConversationsWithLastMessages,
     enabled: !!userId,
-    staleTime: 1000 * 10,       // Show cached list instantly; re-fetch in background after 10s
+    staleTime: 1000 * 20,       // Keep list stable a bit longer on mobile networks
     gcTime: 1000 * 60 * 5,
-    refetchOnWindowFocus: true,
-    refetchInterval: 5000,
+    refetchOnWindowFocus: false,
+    refetchInterval: () => {
+      if (typeof navigator !== 'undefined' && !navigator.onLine) return false;
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return 30000;
+      return 15000;
+    },
+    refetchIntervalInBackground: false,
     ...options,
   });
 }

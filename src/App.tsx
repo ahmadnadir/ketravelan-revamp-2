@@ -49,6 +49,7 @@ import Contact from "./pages/Contact";
 import About from "./pages/About";
 import HelpCenter from "./pages/HelpCenter";
 import HelpArticleDetail from "./pages/HelpArticleDetail";
+import { classifyRequestError } from "@/lib/requestErrors";
 
 import { PageTransition } from "./components/layout/PageTransition";
 import { OfflineBanner } from "./components/layout/OfflineBanner";
@@ -67,7 +68,17 @@ const queryClient = new QueryClient({
       refetchOnWindowFocus: false,      // Don't refetch just from switching tabs
       refetchOnReconnect: true,         // Auto-refetch when network is restored
       networkMode: "online",            // Pause query (don't fire) when offline; resume on reconnect
-      retry: false,                     // No retries — offline queries resume automatically on reconnect
+      // Safe retries for transient mobile failures only.
+      retry: (failureCount, error) => {
+        const classified = classifyRequestError(error);
+        if (!classified.retryable) return false;
+        return failureCount < 3;
+      },
+      retryDelay: (attemptIndex) => {
+        const base = 300 * 2 ** Math.max(0, attemptIndex - 1);
+        const jitter = Math.floor(Math.random() * 250);
+        return Math.min(base + jitter, 3500);
+      },
     },
   },
 });

@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 // Declare window.supabase type
 declare global {
   interface Window {
@@ -20,6 +20,7 @@ import { fetchTripConversation } from "@/lib/conversations";
 import { fetchTripDetails } from "@/lib/trips";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
+import { getLoadErrorFeedback } from "@/lib/requestErrors";
 
 export default function TripHub() {
   const { id: tripId } = useParams();
@@ -31,74 +32,111 @@ export default function TripHub() {
   const [conversation, setConversation] = useState<any>(null);
   const [trip, setTrip] = useState<any>(null);
   const [members, setMembers] = useState<any[]>([]);
+  const [canManageTrip, setCanManageTrip] = useState(false);
 
   // Load trip, conversation and members data in parallel for faster initial load
-  useEffect(() => {
-    const loadData = async () => {
-      if (!tripId) {
-        setError("Trip ID is missing");
+  const { user } = useAuth();
+
+  const canEditTripDetails = useMemo(() => {
+    if (!trip || !user?.id) return false;
+
+    if (trip.creator_id === user.id) return true;
+
+    const isAdminMember = members.some((member: any) => member.id === user.id && member.isAdmin);
+    if (isAdminMember) return true;
+
+    const permissions = trip.trip_settings?.permissions;
+    return permissions?.can_edit_trip_details === 'everyone' || permissions?.canEditTripDetails === 'everyone';
+  }, [members, trip, user?.id]);
+
+  const canAddExpenses = useMemo(() => {
+    if (!trip || !user?.id) return false;
+
+    if (trip.creator_id === user.id) return true;
+
+    const isAdminMember = members.some((member: any) => member.id === user.id && member.isAdmin);
+    if (isAdminMember) return true;
+
+    const permissions = trip.trip_settings?.permissions;
+    return permissions?.can_add_expenses !== 'organizer' && permissions?.canAddExpenses !== 'organizer';
+  }, [members, trip, user?.id]);
+
+  const loadData = useCallback(async () => {
+    if (!tripId) {
+      setError("Trip ID is missing");
+      setIsLoading(false);
+      return;
+    }
+
+    try {
+      setIsLoading(true);
+      setError(null);
+
+      const [tripData, convData, membersRes] = await Promise.all([
+        fetchTripDetails(tripId),
+        fetchTripConversation(tripId),
+        supabase
+          .from('trip_members')
+          .select(`
+            id,
+            role,
+            is_admin,
+            user_id,
+            user:profiles(id, username, full_name, avatar_url)
+          `)
+          .eq('trip_id', tripId)
+          .is('left_at', null),
+      ]);
+
+      if (!tripData) {
+        setError("Trip not found");
+        setTrip(null);
+        setConversation(null);
+        setMembers([]);
+        setCanManageTrip(false);
         setIsLoading(false);
         return;
       }
 
-      try {
-        setIsLoading(true);
+      setTrip(tripData);
+      setConversation(convData);
 
-        const [tripData, convData, membersRes] = await Promise.all([
-          fetchTripDetails(tripId),
-          fetchTripConversation(tripId),
-          supabase
-            .from('trip_members')
-            .select(`
-              id,
-              role,
-              is_admin,
-              user:profiles(id, username, full_name, avatar_url)
-            `)
-            .eq('trip_id', tripId)
-            .is('left_at', null),
-        ]);
+      const { data: tripMembers, error: membersError } = membersRes;
 
-        if (!tripData) {
-          setError("Trip not found");
-          setTrip(null);
-          setConversation(null);
-          setMembers([]);
-          setIsLoading(false);
-          return;
-        }
+      if (!membersError && tripMembers) {
+        const processedMembers = tripMembers.map((m: any) => ({
+          id: m.user.id,
+          username: m.user.username,
+          full_name: m.user.full_name,
+          avatar_url: m.user.avatar_url || `https://api.dicebear.com/7.x/notionists/svg?seed=${m.user.id}`,
+          name: m.user.full_name || m.user.username,
+          imageUrl: m.user.avatar_url || `https://api.dicebear.com/7.x/notionists/svg?seed=${m.user.id}`,
+          role: m.is_admin ? 'Organizer' : m.role || 'Member',
+          isAdmin: Boolean(m.is_admin),
+        }));
+        setMembers(processedMembers);
 
-        setTrip(tripData);
-        setConversation(convData);
-
-        const { data: tripMembers, error: membersError } = membersRes;
-
-        if (!membersError && tripMembers) {
-          const processedMembers = tripMembers.map((m: any) => ({
-            id: m.user.id,
-            username: m.user.username,
-            full_name: m.user.full_name,
-            avatar_url: m.user.avatar_url || `https://api.dicebear.com/7.x/notionists/svg?seed=${m.user.id}`,
-            name: m.user.full_name || m.user.username,
-            imageUrl: m.user.avatar_url || `https://api.dicebear.com/7.x/notionists/svg?seed=${m.user.id}`,
-            role: m.is_admin ? 'Admin' : m.role || 'Member'
-          }));
-          setMembers(processedMembers);
-        } else {
-          setMembers([]);
-        }
-
-        setError(null);
-      } catch (err) {
-        console.error('Error loading trip data:', err);
-        setError(err instanceof Error ? err.message : 'Failed to load trip data');
-      } finally {
-        setIsLoading(false);
+        const isOwner = tripData.creator_id === user?.id;
+        const isAdminMember = tripMembers.some((m: any) => m.user_id === user?.id && m.is_admin);
+        setCanManageTrip(isOwner || isAdminMember);
+      } else {
+        setMembers([]);
+        setCanManageTrip(tripData.creator_id === user?.id);
       }
-    };
 
+      setError(null);
+    } catch (err) {
+      console.error('Error loading trip data:', err);
+      const feedback = getLoadErrorFeedback('trip hub', err);
+      setError(feedback.description);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [tripId, user?.id]);
+
+  useEffect(() => {
     loadData();
-  }, [tripId]);
+  }, [loadData]);
 
   // Read tab and from-param from URL query params on mount
   useEffect(() => {
@@ -112,7 +150,6 @@ export default function TripHub() {
 
   const displayTrip = trip;
   const displayMembers = members;
-  const { user } = useAuth();
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   // Always call ChatPage at top level to maintain hook order
@@ -266,13 +303,13 @@ export default function TripHub() {
                 </div>
               )}
             </div>
-          ) : !trip ? (
-            <div className="flex items-center justify-center py-12">
-              <div className="text-muted-foreground">Trip not found.</div>
-            </div>
           ) : error ? (
             <div className="flex items-center justify-center py-12">
               <div className="text-destructive">{error}</div>
+            </div>
+          ) : !trip ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="text-muted-foreground">Trip not found.</div>
             </div>
           ) : (
             <>
@@ -291,7 +328,7 @@ export default function TripHub() {
                   </div>
                 )
               )}
-              {activeTab === "expenses" && <TripExpenses tripId={trip.id} members={displayMembers} conversationId={conversation?.id} tripName={trip.title} />}
+              {activeTab === "expenses" && <TripExpenses tripId={trip.id} members={displayMembers} conversationId={conversation?.id} tripName={trip.title} canAddExpenses={canAddExpenses} />}
               {activeTab === "notes" && <TripNotes tripId={trip.id} />}
             </>
           )}
@@ -302,18 +339,28 @@ export default function TripHub() {
       <GroupInfoModal
         open={groupInfoOpen}
         onOpenChange={setGroupInfoOpen}
+        onTripUpdate={(updates) => setTrip((prev: any) => (prev ? { ...prev, ...updates } : prev))}
         trip={trip ? {
           id: trip.id,
           title: trip.title,
           imageUrl: trip.cover_image || trip.imageUrl,
-          destination: trip.destination
+          destination: trip.destination,
+          visibility: trip.visibility,
+          creatorId: trip.creator_id,
+          tripSettings: trip.trip_settings,
         } : null}
         members={members.map(m => ({
           id: m.id,
           name: m.name,
           role: m.role,
-          imageUrl: m.imageUrl
+          imageUrl: m.imageUrl,
+          isAdmin: Boolean(m.isAdmin),
         }))}
+        currentUserId={user?.id}
+        conversationId={conversation?.id}
+        canManageTrip={canManageTrip}
+        canEditTripDetails={canEditTripDetails}
+        onDataChanged={loadData}
         isLoading={isLoading}
       />
     </>

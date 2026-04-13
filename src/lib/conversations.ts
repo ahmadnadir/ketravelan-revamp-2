@@ -5,6 +5,18 @@ import { supabase } from './supabase';
 // Populated eagerly from conversations list so chat never needs a fresh profile fetch.
 export const profileCache = new Map<string, { id: string; username: string; full_name: string; avatar_url: string }>();
 
+function isVisibleConversation(participant: any) {
+  const conv = participant?.conversation;
+  if (!conv || conv.is_deleted) return false;
+
+  // Hide trip-group chats when the linked trip has been permanently deleted.
+  if (conv.conversation_type === 'trip_group' && !conv.trip) {
+    return false;
+  }
+
+  return true;
+}
+
 export type ChatAttachment = {
   type: 'image' | 'document' | 'location';
   url?: string; // for image/document
@@ -385,7 +397,7 @@ export async function fetchUserConversations() {
         user1_id,
         user2_id,
         is_deleted,
-        trip:trips(id, title, cover_image),
+        trip:trips(id, title, cover_image, status),
         user1:profiles!conversations_user1_id_fkey(id, username, full_name, avatar_url),
         user2:profiles!conversations_user2_id_fkey(id, username, full_name, avatar_url)
       )
@@ -395,8 +407,7 @@ export async function fetchUserConversations() {
 
   if (error) throw error;
   
-  // Filter out deleted conversations in app code
-  return data?.filter((d: any) => !d.conversation?.is_deleted) || [];
+  return data?.filter(isVisibleConversation) || [];
 }
 
 export async function fetchConversationsWithLastMessages() {
@@ -420,7 +431,7 @@ export async function fetchConversationsWithLastMessages() {
         user1_id,
         user2_id,
         is_deleted,
-        trip:trips(id, title, cover_image),
+        trip:trips(id, title, cover_image, status),
         user1:profiles!conversations_user1_id_fkey(id, username, full_name, avatar_url),
         user2:profiles!conversations_user2_id_fkey(id, username, full_name, avatar_url)
       )
@@ -444,8 +455,7 @@ export async function fetchConversationsWithLastMessages() {
     });
   });
 
-  // Filter out deleted conversations in app code
-  const activeParticipants = participants?.filter((p: any) => !p.conversation?.is_deleted) || [];
+  const activeParticipants = participants?.filter(isVisibleConversation) || [];
   
   if (!activeParticipants || activeParticipants.length === 0) {
     console.log('No participants found for user:', user.id);

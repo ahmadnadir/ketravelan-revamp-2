@@ -60,6 +60,11 @@ function truncate(text: string, max = 160) {
   return `${text.slice(0, max - 1)}…`;
 }
 
+function isTripNotificationEnabled(tripSettings: any, key: "new_members_join" | "expense_updates" | "chat_activity", fallback: boolean) {
+  const rawValue = tripSettings?.notifications?.[key];
+  return typeof rawValue === "boolean" ? rawValue : fallback;
+}
+
 function pemToArrayBuffer(pem: string) {
   const clean = pem.replace(/-----BEGIN PRIVATE KEY-----|-----END PRIVATE KEY-----|\n/g, "");
   const raw = atob(clean);
@@ -305,9 +310,17 @@ serve(async (req: Request) => {
     if (conversation?.trip_id) {
       const { data: trip } = await admin
         .from("trips")
-        .select("id, title")
+        .select("id, title, trip_settings")
         .eq("id", conversation.trip_id)
         .maybeSingle();
+
+      if (conversation.conversation_type === "trip_group" && !isTripNotificationEnabled(trip?.trip_settings, "chat_activity", false)) {
+        return new Response(JSON.stringify({ ok: true, skipped: true, reason: "Trip setting disabled chat notifications" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json", ...corsHeaders },
+        });
+      }
+
       tripTitle = trip?.title || null;
     }
 

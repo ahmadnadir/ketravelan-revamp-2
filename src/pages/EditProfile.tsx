@@ -20,6 +20,8 @@ import {
   Coins,
   Settings,
   Link2,
+  MoreHorizontal,
+  Trash2,
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
@@ -34,6 +36,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useToast } from "@/hooks/use-toast";
 import { ImageCropModal } from "@/components/profile/ImageCropModal";
@@ -61,6 +75,21 @@ const socialPlatforms = [
   { id: "other", label: "Other", icon: Link2, placeholder: "linktr.ee/you" },
 ];
 
+const buildDicebearAvatar = (seed: string) =>
+  `https://api.dicebear.com/7.x/notionists/svg?seed=${encodeURIComponent(seed)}&backgroundType=solid&backgroundColor=ffffff`;
+
+const getDicebearSeedFromUrl = (url?: string | null) => {
+  if (!url || !url.includes("api.dicebear.com")) return null;
+  try {
+    return new URL(url).searchParams.get("seed");
+  } catch {
+    return null;
+  }
+};
+
+const buildDicebearChoices = (baseSeed: string) =>
+  Array.from({ length: 12 }, (_, i) => buildDicebearAvatar(`${baseSeed}-${i + 1}`));
+
 export default function EditProfile() {
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -80,6 +109,9 @@ export default function EditProfile() {
   const [selectedStyles, setSelectedStyles] = useState<string[]>([]);
   const [socialLinks, setSocialLinks] = useState<Record<string, string>>({});
   const [profileImage, setProfileImage] = useState<string>("");
+  const [dicebearSeed, setDicebearSeed] = useState<string>("");
+  const [dicebearModalOpen, setDicebearModalOpen] = useState(false);
+  const [dicebearChoices, setDicebearChoices] = useState<string[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [cropModalOpen, setCropModalOpen] = useState(false);
@@ -90,23 +122,11 @@ export default function EditProfile() {
 
   useEffect(() => {
     if (!authLoading && user) {
-      // Generate gender-based default avatar using Notion style
-      const getDefaultAvatar = (userId: string, gender: string) => {
-        const timestamp = Date.now(); // Cache buster
-        if (gender === "male") {
-          return `https://api.dicebear.com/7.x/notionists/svg?seed=${userId}-female&t=${timestamp}`;
-        } else if (gender === "female") {
-          return `https://api.dicebear.com/7.x/notionists/svg?seed=${userId}-male&t=${timestamp}`;
-        }
-        return `https://api.dicebear.com/7.x/notionists/svg?seed=${userId}&t=${timestamp}`;
-      };
-
       if (profile) {
         const gender = profile.gender || "";
-        const defaultAvatar = getDefaultAvatar(user.id, gender);
-        // Always regenerate avatar if it's a dicebear URL, to match current gender
-        const isDefaultDicebear = profile.avatar_url?.includes('dicebear.com');
-        const avatarToUse = (!profile.avatar_url || isDefaultDicebear) ? defaultAvatar : profile.avatar_url;
+        const fallbackSeed = `${user.id}-${gender || "default"}`;
+        const existingSeed = getDicebearSeedFromUrl(profile.avatar_url) || fallbackSeed;
+        const avatarToUse = profile.avatar_url || "";
 
         const usernameMorm = profile.username || "";
         setFormData({
@@ -119,6 +139,7 @@ export default function EditProfile() {
         });
         setOriginalUsername(usernameMorm);
         setProfileImage(avatarToUse);
+        setDicebearSeed(existingSeed);
         // Normalize travel styles: convert labels to IDs if needed
         const normalizedStyles = Array.isArray(profile.travel_styles) 
           ? profile.travel_styles.map((style: string) => {
@@ -135,7 +156,6 @@ export default function EditProfile() {
         setSocialLinks(profile.social_links || {});
         setSelectedHomeCurrency(profile.home_currency || homeCurrency);
       } else {
-        const defaultAvatar = getDefaultAvatar(user.id, "");
         setFormData({
           name: "",
           username: "",
@@ -145,7 +165,8 @@ export default function EditProfile() {
           gender: "",
         });
         setOriginalUsername("");
-        setProfileImage(defaultAvatar);
+        setProfileImage("");
+        setDicebearSeed(`${user.id}-default`);
         setSelectedStyles([]);
         setSocialLinks({});
         setSelectedHomeCurrency(homeCurrency);
@@ -273,6 +294,50 @@ export default function EditProfile() {
     toast({
       title: "Photo updated",
       description: "Your profile photo has been cropped. Remember to save changes.",
+    });
+  };
+
+  const applyDicebearAvatar = (seed: string) => {
+    if (!user) return;
+    const safeSeed = seed || dicebearSeed || `${user.id}-${Date.now()}`;
+    const generated = buildDicebearAvatar(safeSeed);
+    setDicebearSeed(safeSeed);
+    setProfileImage(generated);
+  };
+
+  const openDicebearPicker = () => {
+    if (!user) return;
+    const baseSeed = (formData.name.trim() || dicebearSeed || user.id)
+      .toLowerCase()
+      .replace(/\s+/g, "-");
+    setDicebearChoices(buildDicebearChoices(`${baseSeed}-${Date.now()}`));
+    setDicebearModalOpen(true);
+  };
+
+  const handleDicebearSelect = (avatarUrl: string) => {
+    const selectedSeed = getDicebearSeedFromUrl(avatarUrl);
+    if (selectedSeed) setDicebearSeed(selectedSeed);
+    setProfileImage(avatarUrl);
+    setDicebearModalOpen(false);
+    toast({
+      title: "DiceBear avatar selected",
+      description: "Remember to save changes.",
+    });
+  };
+
+  const handleUseNameInitials = () => {
+    setProfileImage("");
+    toast({
+      title: "Initials avatar selected",
+      description: "Your profile will show your name initials after save.",
+    });
+  };
+
+  const handleRemoveAvatar = () => {
+    setProfileImage("");
+    toast({
+      title: "Avatar removed",
+      description: "Your avatar will be cleared after you save.",
     });
   };
 
@@ -489,9 +554,9 @@ export default function EditProfile() {
             className="hidden"
           />
           <div className="relative">
-            <Avatar className="h-20 w-20 sm:h-24 sm:w-24 border-4 border-background shadow-lg">
-              <AvatarImage src={profileImage} alt="Profile" />
-              <AvatarFallback className="text-xl sm:text-2xl font-semibold">
+            <Avatar className="h-20 w-20 sm:h-24 sm:w-24 border-4 border-background shadow-lg bg-white">
+              <AvatarImage src={profileImage} alt="Profile" className="bg-white object-cover" />
+              <AvatarFallback className="text-xl sm:text-2xl font-semibold bg-white">
                 {formData.name.charAt(0) || "U"}
               </AvatarFallback>
             </Avatar>
@@ -502,12 +567,31 @@ export default function EditProfile() {
               <Camera className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
             </button>
           </div>
-          <button
-            onClick={handleImageChange}
-            className="mt-2 sm:mt-3 text-xs sm:text-sm text-primary font-medium"
-          >
-            Change Photo
-          </button>
+          <div className="mt-2 sm:mt-3 flex items-center gap-2">
+            <span className="text-xs sm:text-sm text-primary font-medium">Change Photo</span>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button type="button" variant="ghost" size="icon" className="h-8 w-8 rounded-full">
+                  <MoreHorizontal className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="center" className="w-52">
+                <DropdownMenuItem onClick={handleImageChange}>
+                  Upload from device
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleUseNameInitials}>
+                  Use name initials
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={openDicebearPicker}>
+                  Choose from DiceBear
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleRemoveAvatar} className="text-destructive focus:text-destructive">
+                  <Trash2 className="h-3.5 w-3.5 mr-2" />
+                  Remove avatar
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </div>
 
         <Card className="p-3 sm:p-4 border-border/50 space-y-3 sm:space-y-4">
@@ -780,6 +864,37 @@ export default function EditProfile() {
         imageSrc={imageToCrop}
         onCropComplete={handleCropComplete}
       />
+
+      <Dialog open={dicebearModalOpen} onOpenChange={setDicebearModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Choose a DiceBear avatar</DialogTitle>
+          </DialogHeader>
+
+          <div className="grid grid-cols-4 gap-3 pt-2">
+            {dicebearChoices.map((avatarUrl) => (
+              <button
+                key={avatarUrl}
+                type="button"
+                onClick={() => handleDicebearSelect(avatarUrl)}
+                className="h-16 w-16 rounded-full border border-border bg-white overflow-hidden hover:border-primary transition-colors"
+              >
+                <img
+                  src={avatarUrl}
+                  alt="DiceBear avatar option"
+                  className="h-full w-full rounded-full bg-white object-cover"
+                />
+              </button>
+            ))}
+          </div>
+
+          <div className="pt-3 flex justify-end">
+            <Button type="button" variant="outline" onClick={openDicebearPicker}>
+              Refresh options
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </AppLayout>
   );
 }

@@ -38,7 +38,7 @@ import { mockExpenses as initialMockExpenses, mockMembers } from "@/data/mockDat
 import { toast } from "@/hooks/use-toast";
 import { getCategoryFromTitle } from "@/lib/expenseCategories";
 import { fetchTripExpenses, createExpense, deleteExpense, calculateTripBalances, getWhoOwesWho, fetchTripPaymentMethods, addExpensePayments, markParticipantsAsPaid, uploadPaymentQR, upsertPaymentMethod, uploadReceipt } from "@/lib/expenses";
-import { getTripCurrencySettings, updateTripCurrencySettings } from "@/lib/trips";
+import { getTripCurrencySettings, updateTripCurrencySettings, isTripNotificationEnabled } from "@/lib/trips";
 import { supabase } from "@/lib/supabase";
 import { sendSettlementReminder } from "@/lib/settlementReminders";
 import { useExpenses } from "@/contexts/ExpenseContext";
@@ -261,6 +261,7 @@ interface TripExpensesProps {
   tripName?: string;
   allowedCurrencies?: CurrencyCode[];
   conversationId?: string;
+  canAddExpenses?: boolean;
 }
 
 const getTripCurrencyStorageKey = (tripId: string) => `trip-travel-currencies:${tripId}`;
@@ -287,7 +288,7 @@ const writeCachedTripCurrencies = (tripId: string, currencies: CurrencyCode[]) =
   }
 };
 
-export function TripExpenses({ tripId, members: providedMembers, tripName = "Trip", allowedCurrencies, conversationId }: TripExpensesProps) {
+export function TripExpenses({ tripId, members: providedMembers, tripName = "Trip", allowedCurrencies, conversationId, canAddExpenses = true }: TripExpensesProps) {
   const isMobile = useIsMobile();
   const [subTab, setSubTab] = useState("breakdown");
   const [sortOrder, setSortOrder] = useState<"latest" | "oldest">("latest");
@@ -1697,30 +1698,34 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
         description: `${newExpense.title} - ${currencySymbol} ${newExpense.amount.toFixed(2)} saved successfully`,
       });
 
-      try {
-        await supabase.functions.invoke('send-expense-added', {
-          body: { expenseId: createdExpense.id }
-        });
-      } catch (e) {
-        console.warn('Failed to send expense added emails', e);
-      }
+      const expenseUpdatesEnabled = await isTripNotificationEnabled(tripId, 'expense_updates');
 
-      // Send system message to chat if conversationId is available
-      if (conversationId && payer) {
+      if (expenseUpdatesEnabled) {
         try {
-          const formattedSystemAmount = newExpense.amount.toLocaleString("en-US", {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2,
-          });
-          const expenseDetail = `${newExpense.title} - ${currencySymbol} ${formattedSystemAmount}`;
-          await sendSystemMessage({
-            conversationId,
-            action: "expense_added",
-            senderName: payer.name,
-            details: expenseDetail,
+          await supabase.functions.invoke('send-expense-added', {
+            body: { expenseId: createdExpense.id }
           });
         } catch (e) {
-          console.warn('Failed to send expense system message:', e);
+          console.warn('Failed to send expense added emails', e);
+        }
+
+        // Keep expense system messages aligned with the trip setting.
+        if (conversationId && payer) {
+          try {
+            const formattedSystemAmount = newExpense.amount.toLocaleString("en-US", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            });
+            const expenseDetail = `${newExpense.title} - ${currencySymbol} ${formattedSystemAmount}`;
+            await sendSystemMessage({
+              conversationId,
+              action: "expense_added",
+              senderName: payer.name,
+              details: expenseDetail,
+            });
+          } catch (e) {
+            console.warn('Failed to send expense system message:', e);
+          }
         }
       }
 
@@ -1861,12 +1866,14 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
         description: `${updatedExpense.title} has been updated`,
       });
 
-      try {
-        await supabase.functions.invoke('send-expense-updated', {
-          body: { expenseId: id }
-        });
-      } catch (e) {
-        console.warn('Failed to send expense updated emails', e);
+      if (await isTripNotificationEnabled(tripId, 'expense_updates')) {
+        try {
+          await supabase.functions.invoke('send-expense-updated', {
+            body: { expenseId: id }
+          });
+        } catch (e) {
+          console.warn('Failed to send expense updated emails', e);
+        }
       }
     } catch (error) {
       console.error('Error updating expense:', error);
@@ -1895,12 +1902,14 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
         description: `${deletingExpense.title} has been removed`,
       });
 
-      try {
-        await supabase.functions.invoke('send-expense-deleted', {
-          body: { expenseId: deletingExpense.id }
-        });
-      } catch (e) {
-        console.warn('Failed to send expense deleted emails', e);
+      if (await isTripNotificationEnabled(tripId, 'expense_updates')) {
+        try {
+          await supabase.functions.invoke('send-expense-deleted', {
+            body: { expenseId: deletingExpense.id }
+          });
+        } catch (e) {
+          console.warn('Failed to send expense deleted emails', e);
+        }
       }
     } catch (error) {
       console.error('Error deleting expense:', error);
@@ -2808,7 +2817,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
       </div>
 
       {/* Fixed Bottom Action Container - Only on Breakdown and Expenses tabs */}
-      {(subTab === "breakdown" || subTab === "expenses") && (
+      {canAddExpenses && (subTab === "breakdown" || subTab === "expenses") && (
         <div className="fixed bottom-above-nav lg:bottom-0 left-0 lg:left-60 right-0 z-40 bg-background/95 backdrop-blur-sm border-t border-border/50">
           <div className="container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto px-4 py-3 lg:py-4">
             <Button 

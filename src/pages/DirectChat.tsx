@@ -8,6 +8,7 @@ import { supabase } from "@/lib/supabase";
 import { UserQuickActionsModal } from "@/components/chat/UserQuickActionsModal";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
+import { getLoadErrorFeedback } from "@/lib/requestErrors";
 
 const getDefaultAvatar = (userId: string) => {
   return `https://api.dicebear.com/7.x/notionists/svg?seed=${userId}`;
@@ -53,6 +54,8 @@ export default function DirectChat() {
         setOtherUser(profile || { id: other, full_name: '' });
       } catch (err) {
         console.error('[DirectChat] Error fetching conversation:', err);
+        const feedback = getLoadErrorFeedback('chat', err);
+        toast.error(feedback.title, { description: feedback.description });
         navigate('/chat');
       } finally {
         setChatIsLoading(false);

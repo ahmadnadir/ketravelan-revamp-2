@@ -68,6 +68,7 @@ import { TripSchema } from "@/components/seo/TripSchema";
 import { BreadcrumbSchema } from "@/components/seo/BreadcrumbSchema";
 import { OrganizationSchema } from "@/components/seo/OrganizationSchema";
 import { FAQSchema } from "@/components/seo/FAQSchema";
+import { getLoadErrorFeedback } from "@/lib/requestErrors";
 
 const iconMap: Record<string, any> = {
   car: Car,
@@ -381,9 +382,10 @@ export default function TripDetails() {
   useEffect(() => {
     if (error) {
       console.error('Error loading trip:', error);
+      const feedback = getLoadErrorFeedback('trip details', error);
       toast({
-        title: "Error",
-        description: "Failed to load trip details",
+        title: feedback.title,
+        description: feedback.description,
         variant: "destructive",
       });
     }

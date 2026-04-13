@@ -46,17 +46,15 @@ export function DesktopSidebar() {
 
   const getDefaultAvatar = (userId: string, gender: string) => {
     if (gender === "male")
-      return `https://api.dicebear.com/7.x/notionists/svg?seed=${userId}-female`;
+      return `https://api.dicebear.com/7.x/notionists/svg?seed=${encodeURIComponent(`${userId}-female`)}&backgroundType=solid&backgroundColor=ffffff`;
     if (gender === "female")
-      return `https://api.dicebear.com/7.x/notionists/svg?seed=${userId}-male`;
-    return `https://api.dicebear.com/7.x/notionists/svg?seed=${userId}`;
+      return `https://api.dicebear.com/7.x/notionists/svg?seed=${encodeURIComponent(`${userId}-male`)}&backgroundType=solid&backgroundColor=ffffff`;
+    return `https://api.dicebear.com/7.x/notionists/svg?seed=${encodeURIComponent(userId)}&backgroundType=solid&backgroundColor=ffffff`;
   };
 
   const gender = profile?.gender || "";
   const defaultAvatar = user ? getDefaultAvatar(user.id, gender) : "";
-  const isDefaultDicebear = profile?.avatar_url?.includes("dicebear.com");
-  const avatarUrl =
-    !profile?.avatar_url || isDefaultDicebear ? defaultAvatar : profile.avatar_url;
+  const avatarUrl = profile?.avatar_url || defaultAvatar;
 
   const handleSignOut = async () => {
     try {

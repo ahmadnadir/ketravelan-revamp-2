@@ -16,6 +16,7 @@ import { fetchStoryBySlug, toggleStoryReaction, deleteStory, createStoryComment,
 import { toast } from "@/hooks/use-toast";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { buildPublicUrl } from "@/lib/publicUrl";
+import { getLoadErrorFeedback } from "@/lib/requestErrors";
 
 const TikTok = ({ className }: { className?: string }) => (
   <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -119,9 +120,10 @@ export default function StoryDetail() {
         const data = await fetchStoryBySlug(slug, user?.id);
         if (isMounted) setStory(data);
       } catch (error) {
+        const feedback = getLoadErrorFeedback('story', error);
         toast({
-          title: "Failed to load story",
-          description: error instanceof Error ? error.message : "Please try again.",
+          title: feedback.title,
+          description: feedback.description,
           variant: "destructive",
         });
       } finally {

@@ -60,11 +60,11 @@ export function MenuDrawer({ open, onOpenChange }: MenuDrawerProps) {
   const getDefaultAvatar = (userId: string, gender: string) => {
     const timestamp = Date.now(); // Cache buster
     if (gender === "male") {
-      return `https://api.dicebear.com/7.x/notionists/svg?seed=${userId}-female&t=${timestamp}`;
+      return `https://api.dicebear.com/7.x/notionists/svg?seed=${encodeURIComponent(`${userId}-female`)}&backgroundType=solid&backgroundColor=ffffff&t=${timestamp}`;
     } else if (gender === "female") {
-      return `https://api.dicebear.com/7.x/notionists/svg?seed=${userId}-male&t=${timestamp}`;
+      return `https://api.dicebear.com/7.x/notionists/svg?seed=${encodeURIComponent(`${userId}-male`)}&backgroundType=solid&backgroundColor=ffffff&t=${timestamp}`;
     }
-    return `https://api.dicebear.com/7.x/notionists/svg?seed=${userId}&t=${timestamp}`;
+    return `https://api.dicebear.com/7.x/notionists/svg?seed=${encodeURIComponent(userId)}&backgroundType=solid&backgroundColor=ffffff&t=${timestamp}`;
   };
 
   const gender = profile?.gender || "";
@@ -72,9 +72,7 @@ export function MenuDrawer({ open, onOpenChange }: MenuDrawerProps) {
     ? getDefaultAvatar(user.id, gender)
     : "https://api.dicebear.com/7.x/avataaars/svg?seed=guest";
   
-  // Always regenerate avatar if it's a dicebear URL, to match current gender
-  const isDefaultDicebear = profile?.avatar_url?.includes('dicebear.com');
-  const avatarUrl = (!profile?.avatar_url || isDefaultDicebear) ? defaultAvatar : profile.avatar_url;
+  const avatarUrl = profile?.avatar_url || defaultAvatar;
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>

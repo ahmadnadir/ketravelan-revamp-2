@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { MessageCircle, Users, Search, X, MoreVertical } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -17,6 +17,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
 import { useConversations } from "@/hooks/useConversations";
 import { deleteDirectConversation } from "@/lib/conversations";
+import { getLoadErrorFeedback } from "@/lib/requestErrors";
+import { markConversationReadOptimistically } from "@/lib/chatReadService";
 
 // Helper to generate fallback avatar
 const getDefaultAvatar = (userId: string) => {
@@ -103,15 +105,17 @@ export default function Chat() {
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; type: "trip" | "direct"; name: string } | null>(null);
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  const deletedTripNotifiedConversationsRef = useRef<Set<string>>(new Set());
 
   // Fetch conversations with React Query
   const { data: participants = [], isLoading: loading, error } = useConversations(user?.id);
 
-  // Handle errors
-  if (error) {
+  useEffect(() => {
+    if (!error) return;
     console.error('Failed to load chats:', error);
-    toast.error("Failed to load chats");
-  }
+    const feedback = getLoadErrorFeedback('chats', error);
+    toast.error(feedback.title, { description: feedback.description });
+  }, [error]);
 
   // Map participants to chat items
   const chats = useMemo(() => {
@@ -120,9 +124,34 @@ export default function Chat() {
       return [];
     }
     return participants
-      .filter((p: any) => p && p.conversation) // Filter out invalid entries
+      .filter((p: any) => {
+        const conv = p?.conversation;
+        if (!conv) return false;
+        // Safety guard: hide orphaned trip chats when trip was deleted.
+        if (conv.conversation_type === 'trip_group' && !conv.trip) return false;
+        return true;
+      })
       .map((p: any) => mapConversationToChatItem(p, user?.id));
   }, [participants, user?.id]);
+
+  useEffect(() => {
+    if (!participants || !Array.isArray(participants)) return;
+
+    const deletedTripParticipants = participants.filter((p: any) => {
+      const conv = p?.conversation;
+      return conv && conv.conversation_type === "trip_group" && !conv.trip;
+    });
+
+    deletedTripParticipants.forEach((p: any) => {
+      const conv = p?.conversation;
+      if (!conv?.id) return;
+      if (deletedTripNotifiedConversationsRef.current.has(conv.id)) return;
+
+      deletedTripNotifiedConversationsRef.current.add(conv.id);
+      const tripName = conv.name?.trim() || "This trip";
+      toast.info(`${tripName} has been deleted and the group chat for ${tripName} has been removed.`);
+    });
+  }, [participants]);
 
   // Subscribe to new messages for real-time updates
   useEffect(() => {
@@ -196,15 +225,11 @@ export default function Chat() {
   };
 
   const handleMarkAsRead = useCallback((chatId: string) => {
-    // Optimistically update UI
-    queryClient.setQueryData(['conversations', user?.id], (old: any[]) => 
-      old?.map((p: any) => 
-        p?.conversation?.id === chatId 
-          ? { ...p, last_read_at: new Date().toISOString() } 
-          : p
-      ) || []
-    );
-    toast.success("Marked as read (UI only)");
+    markConversationReadOptimistically({
+      queryClient,
+      userId: user?.id,
+      conversationId: chatId,
+    });
   }, [queryClient, user]);
 
   return (
@@ -265,6 +290,11 @@ export default function Chat() {
                         ? `/trip/${chat.id}/hub?tab=chat`
                         : `/chat/${chat.id}`
                     }
+                    onClick={() => {
+                      if (chat.unread > 0) {
+                        handleMarkAsRead(chat.conversationId);
+                      }
+                    }}
                     className="flex items-center gap-4 flex-1 min-w-0"
                   >
                       <div className="relative shrink-0">

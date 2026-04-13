@@ -13,6 +13,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { buildPublicUrl } from "@/lib/publicUrl";
 import { createDiscussionReply, deleteDiscussionReply, fetchDiscussionById, fetchDiscussionReplies, toggleAcceptDiscussionReply, updateDiscussionReply, incrementDiscussionViews, toggleDiscussionReplyVote, toggleDiscussionReaction } from "@/lib/community";
+import { getLoadErrorFeedback } from "@/lib/requestErrors";
 import { toast } from "@/hooks/use-toast";
 import {
   DropdownMenu,
@@ -303,9 +304,10 @@ export default function DiscussionDetail() {
           console.error("Error updating view count:", err);
         });
       } catch (error) {
+        const feedback = getLoadErrorFeedback('discussion', error);
         toast({
-          title: "Failed to load discussion",
-          description: error instanceof Error ? error.message : "Please try again.",
+          title: feedback.title,
+          description: feedback.description,
           variant: "destructive",
         });
       } finally {

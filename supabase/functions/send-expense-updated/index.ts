@@ -58,6 +58,11 @@ function escapeHtml(v: string) {
     .replaceAll("'", "&#39;");
 }
 
+function isTripNotificationEnabled(tripSettings: any, key: "new_members_join" | "expense_updates" | "chat_activity", fallback: boolean) {
+  const rawValue = tripSettings?.notifications?.[key];
+  return typeof rawValue === "boolean" ? rawValue : fallback;
+}
+
 async function sendResendRawEmail(opts: { to: string; subject: string; html: string; text?: string }) {
   const payload: Record<string, unknown> = {
     from: RESEND_FROM,
@@ -185,9 +190,18 @@ serve(async (req: Request) => {
 
     const { data: trip } = await admin
       .from("trips")
-      .select("id, title, slug, cover_image")
+      .select("id, title, slug, cover_image, trip_settings")
       .eq("id", expense.trip_id)
       .maybeSingle();
+
+    if (!trip) throw new Error("Trip not found");
+
+    if (!isTripNotificationEnabled(trip.trip_settings, "expense_updates", true)) {
+      return new Response(JSON.stringify({ ok: true, skipped: true, reason: "Trip setting disabled expense notifications" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json", ...corsHeaders },
+      });
+    }
 
     const { data: participants } = await admin
       .from("expense_participants")
@@ -213,9 +227,9 @@ serve(async (req: Request) => {
 
     const profileMap = new Map((profiles || []).map((p: any) => [p.id, p]));
 
-    const tripUrl = `${SITE_ORIGIN}/trip/${trip?.slug || trip?.id}?tab=expenses`;
+    const tripUrl = `${SITE_ORIGIN}/trip/${trip.slug || trip.id}?tab=expenses`;
     const subject = `Expense updated  ${expense.description}`;
-    const messageHtml = `Heads up  <strong>${escapeHtml(expense.description)}</strong> in <strong>${escapeHtml(trip?.title || "your trip")}</strong> was updated. Check the latest details inside.`;
+    const messageHtml = `Heads up  <strong>${escapeHtml(expense.description)}</strong> in <strong>${escapeHtml(trip.title || "your trip")}</strong> was updated. Check the latest details inside.`;
 
     for (const userId of recipientIds) {
       const profile = profileMap.get(userId);
@@ -229,11 +243,11 @@ serve(async (req: Request) => {
         messageHtml,
         ctaUrl: tripUrl,
         ctaLabel: "View Expense",
-        coverImage: trip?.cover_image,
+        coverImage: trip.cover_image,
         preheader: "Expense updated",
       });
 
-      const text = `${subject}\nTrip: ${trip?.title}\nExpense: ${expense.description}\nView: ${tripUrl}`;
+      const text = `${subject}\nTrip: ${trip.title}\nExpense: ${expense.description}\nView: ${tripUrl}`;
       if (!body.dryRun) {
         await sendResendRawEmail({ to: email, subject, html, text });
       }

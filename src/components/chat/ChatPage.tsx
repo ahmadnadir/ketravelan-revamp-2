@@ -8,9 +8,10 @@ import { cn } from "@/lib/utils";
 import { ChatComposer, type TripMember } from "@/components/chat/ChatComposer";
 import type { ChatAttachment } from "@/lib/conversations";
 import { MessageAttachments } from "@/components/chat/MessageAttachments";
-import { fetchConversationMessages, subscribeToMessages, sendMessage, updateLastRead } from "@/lib/conversations";
+import { fetchConversationMessages, subscribeToMessages, sendMessage } from "@/lib/conversations";
 import { parseMessageForDisplay } from "@/lib/chatMentions";
 import { supabase } from "@/lib/supabase";
+import { markConversationReadOptimistically } from "@/lib/chatReadService";
 
 export interface ChatPageMessage {
   id: string;
@@ -80,6 +81,9 @@ export function ChatPage({
   const queryClient = useQueryClient();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const unsubscribeRef = useRef<(() => void) | null>(null);
+  const pollInFlightRef = useRef(false);
+  const latestSnapshotRef = useRef<string>('');
+  const lastRealtimeAtRef = useRef(0);
   const mentionUserIdByUsername = useMemo(() => {
     const map = new Map<string, string>();
     tripMembers.forEach((member) => {
@@ -122,6 +126,22 @@ export function ChatPage({
     );
   };
 
+  const getSnapshot = (messages: ChatPageMessage[]) => {
+    const last = messages[messages.length - 1];
+    return `${messages.length}:${last?.id || 'none'}:${last?.created_at || 'none'}`;
+  };
+
+  const applyServerMessages = (incomingRaw: unknown[]) => {
+    const normalizedMsgs = normalizeMessages(incomingRaw);
+    const nextSnapshot = getSnapshot(normalizedMsgs);
+    if (nextSnapshot === latestSnapshotRef.current) return false;
+
+    latestSnapshotRef.current = nextSnapshot;
+    setConfirmedMessages((prev) => mergeById(prev, normalizedMsgs));
+    queryClient.setQueryData(['messages', conversationId], normalizedMsgs);
+    return true;
+  };
+
   // Track scroll position to show/hide scroll-to-bottom button
   useEffect(() => {
     const container = scrollContainerRef?.current;
@@ -153,6 +173,7 @@ export function ChatPage({
         const cached = queryClient.getQueryData<ChatPageMessage[]>(['messages', conversationId]);
         if (cached && cached.length > 0) {
           setConfirmedMessages(cached);
+          latestSnapshotRef.current = getSnapshot(cached);
           setIsLoading(false);
         } else {
           setIsLoading(true);
@@ -161,6 +182,7 @@ export function ChatPage({
         // Start subscription immediately in parallel — don't await
         subscribeToMessages(conversationId, (newMsg: ChatPageMessage) => {
           if (!isMounted) return;
+          lastRealtimeAtRef.current = Date.now();
 
           const normalizedIncoming: ChatPageMessage = {
             ...newMsg,
@@ -179,6 +201,7 @@ export function ChatPage({
 
           setConfirmedMessages((prev) => {
             const merged = mergeById(prev, [normalizedIncoming]);
+            latestSnapshotRef.current = getSnapshot(merged);
             queryClient.setQueryData(['messages', conversationId], merged);
             return merged;
           });
@@ -192,10 +215,7 @@ export function ChatPage({
         // Fetch fresh messages
         const msgs = await fetchConversationMessages(conversationId);
         if (!isMounted) return;
-
-        const normalizedMsgs = normalizeMessages(msgs as unknown[]);
-        setConfirmedMessages(normalizedMsgs);
-        queryClient.setQueryData(['messages', conversationId], normalizedMsgs);
+        applyServerMessages(msgs as unknown[]);
       } catch (err) {
         console.error('Error setting up chat:', err);
       } finally {
@@ -213,24 +233,35 @@ export function ChatPage({
     };
   }, [conversationId]);
 
-  // Mark conversation as read — fully fire-and-forget, no query invalidation on open
+  // Mark conversation as read optimistically so unread badges disappear instantly.
   useEffect(() => {
-    if (!conversationId) return;
-    updateLastRead(conversationId).catch(() => {});
-  }, [conversationId]);
+    if (!conversationId || !currentUserId) return;
+
+    markConversationReadOptimistically({
+      queryClient,
+      userId: currentUserId,
+      conversationId,
+    });
+  }, [conversationId, currentUserId, queryClient]);
 
   useEffect(() => {
     if (!conversationId) return;
 
     const interval = setInterval(async () => {
+      if (pollInFlightRef.current) return;
+      // Skip polling when realtime has been active recently.
+      if (Date.now() - lastRealtimeAtRef.current < 20000) return;
+
       try {
+        pollInFlightRef.current = true;
         const msgs = await fetchConversationMessages(conversationId);
-        const normalizedMsgs = normalizeMessages(msgs as unknown[]);
-        setConfirmedMessages((prev) => mergeById(prev, normalizedMsgs));
+        applyServerMessages(msgs as unknown[]);
       } catch (err) {
         console.error('Polling messages failed:', err);
+      } finally {
+        pollInFlightRef.current = false;
       }
-    }, 10000);
+    }, 25000);
 
     return () => clearInterval(interval);
   }, [conversationId]);
