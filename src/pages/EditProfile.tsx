@@ -320,7 +320,7 @@ export default function EditProfile() {
     setProfileImage(avatarUrl);
     setDicebearModalOpen(false);
     toast({
-      title: "DiceBear avatar selected",
+      title: "Avatar selected",
       description: "Remember to save changes.",
     });
   };
@@ -583,11 +583,11 @@ export default function EditProfile() {
                   Use name initials
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={openDicebearPicker}>
-                  Choose from DiceBear
+                  Choose Avatar
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={handleRemoveAvatar} className="text-destructive focus:text-destructive">
                   <Trash2 className="h-3.5 w-3.5 mr-2" />
-                  Remove avatar
+                  Remove Avatar
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -868,7 +868,7 @@ export default function EditProfile() {
       <Dialog open={dicebearModalOpen} onOpenChange={setDicebearModalOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Choose a DiceBear avatar</DialogTitle>
+            <DialogTitle>Choose an Avatar</DialogTitle>
           </DialogHeader>
 
           <div className="grid grid-cols-4 gap-3 pt-2">
@@ -881,7 +881,7 @@ export default function EditProfile() {
               >
                 <img
                   src={avatarUrl}
-                  alt="DiceBear avatar option"
+                  alt="Avatar option"
                   className="h-full w-full rounded-full bg-white object-cover"
                 />
               </button>

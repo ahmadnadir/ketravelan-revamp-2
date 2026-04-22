@@ -9,7 +9,7 @@ interface BeforeInstallPromptEvent extends Event {
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
 }
 
-const PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=dev.ketravelan.app";
+const PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=com.ketravelan.app";
 const APP_STORE_URL = "https://apps.apple.com/us/search?term=Ketravelan";
 
 export default function Install() {

@@ -33,7 +33,7 @@ export default function MainPage() {
     if (loading) return;
 
     getVisitedFlag().then((hasVisitedBefore) => {
-      if (!hasVisitedBefore && !isAuthenticated && isNativePlatform()) {
+      if (!hasVisitedBefore && !isAuthenticated) {
         navigate("/welcome", { replace: true });
       } else if (!hasVisitedBefore && isAuthenticated) {
         // Logged-in user on fresh install  mark as visited, skip welcome

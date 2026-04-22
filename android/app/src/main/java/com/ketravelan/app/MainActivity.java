@@ -1,4 +1,4 @@
-package dev.ketravelan.app;
+package com.ketravelan.app;
 
 import com.getcapacitor.BridgeActivity;
 

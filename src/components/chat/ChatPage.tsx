@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef, useMemo } from "react";
-import { ChevronLeft, Check, Clock, ChevronDown } from "lucide-react";
+import { useState, useEffect, useRef, useMemo, type ReactNode } from "react";
+import { ChevronLeft, Check, Clock, ArrowDown, ChevronDown, Pencil, Trash2, Undo2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -8,10 +8,18 @@ import { cn } from "@/lib/utils";
 import { ChatComposer, type TripMember } from "@/components/chat/ChatComposer";
 import type { ChatAttachment } from "@/lib/conversations";
 import { MessageAttachments } from "@/components/chat/MessageAttachments";
-import { fetchConversationMessages, subscribeToMessages, sendMessage } from "@/lib/conversations";
+import { fetchConversationMessages, subscribeToMessages, sendMessage, editOwnMessage, unsendOwnMessage, deleteOwnMessage } from "@/lib/conversations";
 import { parseMessageForDisplay } from "@/lib/chatMentions";
 import { supabase } from "@/lib/supabase";
 import { markConversationReadOptimistically } from "@/lib/chatReadService";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { toast } from "sonner";
+import { Textarea } from "@/components/ui/textarea";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Label } from "@/components/ui/label";
+import { REPORT_REASON_OPTIONS, submitReport, blockUserViaApi, type ReportReasonValue } from "@/lib/moderation";
 
 export interface ChatPageMessage {
   id: string;
@@ -22,16 +30,20 @@ export interface ChatPageMessage {
   client_id?: string;
   status?: 'sending' | 'sent' | 'failed';
   attachments?: ChatAttachment[];
+  is_edited?: boolean;
+  edited_at?: string | null;
   type?: 'user' | 'system';
   systemData?: { action: string; details?: string };
 }
 
 interface ChatPageProps {
   conversationId: string;
+  ensureConversationId?: () => Promise<string>;
   headerTitle?: string;
   headerSubtitle?: string;
   headerImageUrl?: string;
   headerImageFallback?: string;
+  headerActions?: ReactNode;
   onHeaderClick?: () => void;
   showBackButton?: boolean;
   onBackClick?: () => void;
@@ -40,15 +52,20 @@ interface ChatPageProps {
   showSenderInfo?: boolean;
   tripMembers?: TripMember[];
   tripId?: string;
+  canSend?: boolean;
+  blockedMessage?: string;
+  messageReportType?: 'TRIP_CHAT' | 'DIRECT_CHAT';
   scrollContainerRef?: React.RefObject<HTMLElement | null>;
 }
 
 export function ChatPage({
   conversationId,
+  ensureConversationId,
   headerTitle = "Chat",
   headerSubtitle,
   headerImageUrl,
   headerImageFallback,
+  headerActions,
   onHeaderClick,
   showBackButton = true,
   onBackClick,
@@ -57,8 +74,27 @@ export function ChatPage({
   showSenderInfo = true,
   tripMembers = [],
   tripId,
+  canSend = true,
+  blockedMessage,
+  messageReportType,
   scrollContainerRef,
 }: ChatPageProps) {
+  const MESSAGE_ACTION_WINDOW_MS = 60 * 1000;
+  const LONG_PRESS_MS = 450;
+
+  const canUseMessageActions = (message: ChatPageMessage): boolean => {
+    if (message.sender_id !== currentUserId) return false;
+    if (message.type === 'system') return false;
+    if (message.status === 'sending') return false;
+    const createdAt = new Date(message.created_at).getTime();
+    if (!Number.isFinite(createdAt)) return false;
+    return Date.now() - createdAt <= MESSAGE_ACTION_WINDOW_MS;
+  };
+
+  const isUnsentMessage = (message: ChatPageMessage): boolean => {
+    return message.content === 'This message was unsent';
+  };
+
   const formatSystemMessageContent = (content: string): string => {
     return content.replace(/\b(RM|[A-Z]{3})\s+(\d[\d,]*(?:\.\d+)?)/g, (_, code: string, rawAmount: string) => {
       const parsed = Number(rawAmount.replace(/,/g, ""));
@@ -78,12 +114,24 @@ export function ChatPage({
   const [pendingMessages, setPendingMessages] = useState<ChatPageMessage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
+  const [actionMenu, setActionMenu] = useState<{ messageId: string; x: number; y: number } | null>(null);
+  const [hoveredMessageId, setHoveredMessageId] = useState<string | null>(null);
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editingValue, setEditingValue] = useState('');
+  const [confirmAction, setConfirmAction] = useState<{ type: 'unsend' | 'delete'; messageId: string } | null>(null);
+  const [reportTarget, setReportTarget] = useState<{ messageId: string; reportedUserId: string } | null>(null);
+  const [reportReason, setReportReason] = useState<ReportReasonValue>('spam');
+  const [reportDescription, setReportDescription] = useState('');
+  const [confirmReport, setConfirmReport] = useState(false);
+  const [isSubmittingAction, setIsSubmittingAction] = useState(false);
+  const [activeConversationId, setActiveConversationId] = useState(conversationId);
   const queryClient = useQueryClient();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const unsubscribeRef = useRef<(() => void) | null>(null);
   const pollInFlightRef = useRef(false);
   const latestSnapshotRef = useRef<string>('');
   const lastRealtimeAtRef = useRef(0);
+  const longPressTimerRef = useRef<number | null>(null);
   const mentionUserIdByUsername = useMemo(() => {
     const map = new Map<string, string>();
     tripMembers.forEach((member) => {
@@ -94,8 +142,16 @@ export function ChatPage({
     return map;
   }, [tripMembers]);
 
+  useEffect(() => {
+    setActiveConversationId(conversationId);
+  }, [conversationId]);
+
   // Combine messages for display (confirmed + pending)
   const allMessages = useMemo(() => [...confirmedMessages, ...pendingMessages], [confirmedMessages, pendingMessages]);
+  const actionMessage = useMemo(
+    () => (actionMenu ? allMessages.find((msg) => msg.id === actionMenu.messageId) || null : null),
+    [actionMenu, allMessages],
+  );
 
   // Memoize avatar URLs per user to prevent re-generation and blinking
   const avatarCache = useRef<Map<string, string>>(new Map());
@@ -138,7 +194,7 @@ export function ChatPage({
 
     latestSnapshotRef.current = nextSnapshot;
     setConfirmedMessages((prev) => mergeById(prev, normalizedMsgs));
-    queryClient.setQueryData(['messages', conversationId], normalizedMsgs);
+    queryClient.setQueryData(['messages', activeConversationId], normalizedMsgs);
     return true;
   };
 
@@ -154,6 +210,18 @@ export function ChatPage({
     return () => container.removeEventListener('scroll', onScroll);
   }, [scrollContainerRef, isLoading]);
 
+  useEffect(() => {
+    const closeMenu = () => setActionMenu(null);
+    window.addEventListener('click', closeMenu);
+    window.addEventListener('scroll', closeMenu, true);
+    window.addEventListener('resize', closeMenu);
+    return () => {
+      window.removeEventListener('click', closeMenu);
+      window.removeEventListener('scroll', closeMenu, true);
+      window.removeEventListener('resize', closeMenu);
+    };
+  }, []);
+
   // Scroll to bottom helper
   const scrollToBottom = (instant = false) => {
     requestAnimationFrame(() => {
@@ -163,14 +231,20 @@ export function ChatPage({
 
   // Initialize: fetch messages and setup realtime subscription
   useEffect(() => {
-    if (!conversationId) return;
+    if (!activeConversationId) {
+      setIsLoading(false);
+      setConfirmedMessages([]);
+      setPendingMessages([]);
+      latestSnapshotRef.current = '';
+      return;
+    }
 
     let isMounted = true;
 
     const setupChat = async () => {
       try {
         // Cache-then-network: show cached messages instantly, skip skeleton on revisit
-        const cached = queryClient.getQueryData<ChatPageMessage[]>(['messages', conversationId]);
+        const cached = queryClient.getQueryData<ChatPageMessage[]>(['messages', activeConversationId]);
         if (cached && cached.length > 0) {
           setConfirmedMessages(cached);
           latestSnapshotRef.current = getSnapshot(cached);
@@ -180,7 +254,7 @@ export function ChatPage({
         }
 
         // Start subscription immediately in parallel — don't await
-        subscribeToMessages(conversationId, (newMsg: ChatPageMessage) => {
+        subscribeToMessages(activeConversationId, (newMsg: ChatPageMessage) => {
           if (!isMounted) return;
           lastRealtimeAtRef.current = Date.now();
 
@@ -202,7 +276,7 @@ export function ChatPage({
           setConfirmedMessages((prev) => {
             const merged = mergeById(prev, [normalizedIncoming]);
             latestSnapshotRef.current = getSnapshot(merged);
-            queryClient.setQueryData(['messages', conversationId], merged);
+            queryClient.setQueryData(['messages', activeConversationId], merged);
             return merged;
           });
 
@@ -213,7 +287,7 @@ export function ChatPage({
         });
 
         // Fetch fresh messages
-        const msgs = await fetchConversationMessages(conversationId);
+        const msgs = await fetchConversationMessages(activeConversationId);
         if (!isMounted) return;
         applyServerMessages(msgs as unknown[]);
       } catch (err) {
@@ -231,21 +305,21 @@ export function ChatPage({
         unsubscribeRef.current();
       }
     };
-  }, [conversationId]);
+  }, [activeConversationId]);
 
   // Mark conversation as read optimistically so unread badges disappear instantly.
   useEffect(() => {
-    if (!conversationId || !currentUserId) return;
+    if (!activeConversationId || !currentUserId) return;
 
     markConversationReadOptimistically({
       queryClient,
       userId: currentUserId,
-      conversationId,
+      conversationId: activeConversationId,
     });
-  }, [conversationId, currentUserId, queryClient]);
+  }, [activeConversationId, currentUserId, queryClient]);
 
   useEffect(() => {
-    if (!conversationId) return;
+    if (!activeConversationId) return;
 
     const interval = setInterval(async () => {
       if (pollInFlightRef.current) return;
@@ -254,7 +328,7 @@ export function ChatPage({
 
       try {
         pollInFlightRef.current = true;
-        const msgs = await fetchConversationMessages(conversationId);
+        const msgs = await fetchConversationMessages(activeConversationId);
         applyServerMessages(msgs as unknown[]);
       } catch (err) {
         console.error('Polling messages failed:', err);
@@ -264,7 +338,7 @@ export function ChatPage({
     }, 25000);
 
     return () => clearInterval(interval);
-  }, [conversationId]);
+  }, [activeConversationId]);
 
   // Auto-scroll when messages change
   useEffect(() => {
@@ -282,9 +356,322 @@ export function ChatPage({
     }
   }, [pendingMessages.length]);
 
+  const clearLongPress = () => {
+    if (longPressTimerRef.current) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  const openActionMenu = (messageId: string, x: number, y: number) => {
+    setActionMenu({
+      messageId,
+      x: Math.max(12, Math.min(window.innerWidth - 180, x)),
+      y: Math.max(12, Math.min(window.innerHeight - 180, y)),
+    });
+  };
+
+  const handleMessageContextMenu = (event: React.MouseEvent, message: ChatPageMessage) => {
+    const canOpen = canUseMessageActions(message) || (!canUseMessageActions(message) && message.sender_id !== currentUserId && Boolean(messageReportType));
+    if (!canOpen) return;
+    event.preventDefault();
+    event.stopPropagation();
+    openActionMenu(message.id, event.clientX, event.clientY);
+  };
+
+  const openActionMenuNearElement = (messageId: string, anchor: HTMLElement) => {
+    const rect = anchor.getBoundingClientRect();
+    openActionMenu(messageId, rect.right - 8, rect.bottom + 8);
+  };
+
+  const sortConversationsByLatest = (items: any[]) => {
+    return [...items].sort((a: any, b: any) => {
+      const aTime = a.lastMessage?.created_at
+        ? new Date(a.lastMessage.created_at).getTime()
+        : new Date(a.created_at ?? a.conversation?.created_at ?? 0).getTime();
+      const bTime = b.lastMessage?.created_at
+        ? new Date(b.lastMessage.created_at).getTime()
+        : new Date(b.created_at ?? b.conversation?.created_at ?? 0).getTime();
+      return bTime - aTime;
+    });
+  };
+
+  const updateConversationListPreview = (message: ChatPageMessage, targetConversationId?: string) => {
+    const conversationIdToUpdate = targetConversationId || activeConversationId;
+    if (!currentUserId || !conversationIdToUpdate) return;
+
+    queryClient.setQueryData(['conversations', currentUserId], (oldData: any[] | undefined) => {
+      if (!Array.isArray(oldData) || oldData.length === 0) return oldData;
+
+      let foundConversation = false;
+      const nextData = oldData.map((participant: any) => {
+        if (participant?.conversation?.id !== conversationIdToUpdate) return participant;
+
+        foundConversation = true;
+        return {
+          ...participant,
+          lastMessage: {
+            id: message.id,
+            sender_id: message.sender_id,
+            content: message.content,
+            attachments: message.attachments || [],
+            created_at: message.created_at,
+            type: message.type || 'user',
+            sender: message.sender || participant.lastMessage?.sender || { id: message.sender_id },
+          },
+          unreadCount: 0,
+        };
+      });
+
+      if (!foundConversation) return oldData;
+      return sortConversationsByLatest(nextData);
+    });
+  };
+
+  const refreshConversationListInBackground = () => {
+    if (!currentUserId) return;
+
+    void queryClient.refetchQueries({
+      queryKey: ['conversations', currentUserId],
+      type: 'all',
+    });
+  };
+
+  const refreshMessagesInBackground = () => {
+    if (!activeConversationId) return;
+
+    void queryClient.refetchQueries({
+      queryKey: ['messages', activeConversationId],
+      type: 'all',
+    });
+  };
+
+  const updateMessageThreadCache = (updater: (messages: ChatPageMessage[]) => ChatPageMessage[]) => {
+    if (!activeConversationId) return;
+
+    queryClient.setQueryData(['messages', activeConversationId], (oldData: ChatPageMessage[] | undefined) => {
+      if (!Array.isArray(oldData)) return oldData;
+      return updater(oldData);
+    });
+  };
+
+  const removeConversationListPreviewForMessage = (messageId: string) => {
+    if (!currentUserId || !activeConversationId) return;
+
+    queryClient.setQueryData(['conversations', currentUserId], (oldData: any[] | undefined) => {
+      if (!Array.isArray(oldData) || oldData.length === 0) return oldData;
+
+      return oldData.map((participant: any) => {
+        if (participant?.conversation?.id !== activeConversationId) return participant;
+        if (participant?.lastMessage?.id !== messageId) return participant;
+
+        return {
+          ...participant,
+          lastMessage: null,
+        };
+      });
+    });
+  };
+
+  const handleMessageTouchStart = (event: React.TouchEvent, message: ChatPageMessage) => {
+    const canOpen = canUseMessageActions(message) || (!canUseMessageActions(message) && message.sender_id !== currentUserId && Boolean(messageReportType));
+    if (!canOpen) return;
+    const touch = event.touches[0];
+    if (!touch) return;
+
+    clearLongPress();
+    longPressTimerRef.current = window.setTimeout(() => {
+      openActionMenu(message.id, touch.clientX, touch.clientY);
+    }, LONG_PRESS_MS);
+  };
+
+  const submitReportAction = async () => {
+    if (!reportTarget || !messageReportType) return;
+    setIsSubmittingAction(true);
+    try {
+      await submitReport({
+        reportType: messageReportType,
+        targetId: reportTarget.messageId,
+        reportedUserId: reportTarget.reportedUserId,
+        reason: reportReason,
+        description: reportDescription,
+      });
+      toast.success('Thank you. This report has been submitted.');
+      setConfirmReport(false);
+      setReportTarget(null);
+      setReportReason('spam');
+      setReportDescription('');
+    } catch (error) {
+      console.error('Failed to report message:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to submit report');
+    } finally {
+      setIsSubmittingAction(false);
+    }
+  };
+
+  const blockUserFromMessage = async (targetUserId: string) => {
+    setIsSubmittingAction(true);
+    try {
+      await blockUserViaApi(targetUserId);
+      toast.success('User blocked');
+      setActionMenu(null);
+    } catch (error) {
+      console.error('Failed to block user:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to block user');
+    } finally {
+      setIsSubmittingAction(false);
+    }
+  };
+
+  const beginEditMessage = (message: ChatPageMessage | null) => {
+    if (!message) return;
+    if (!canUseMessageActions(message)) {
+      toast.error('You can only edit within 1 minute');
+      return;
+    }
+    if (Array.isArray(message.attachments) && message.attachments.length > 0) {
+      toast.error('Editing attachment messages is not supported');
+      return;
+    }
+    if (isUnsentMessage(message)) {
+      toast.error('You cannot edit an unsent message');
+      return;
+    }
+
+    setEditingMessageId(message.id);
+    setEditingValue(message.content);
+    setActionMenu(null);
+  };
+
+  const submitEditMessage = async () => {
+    if (!editingMessageId) return;
+    const nextContent = editingValue.trim();
+    if (!nextContent) {
+      toast.error('Message cannot be empty');
+      return;
+    }
+
+    const existingMessage = allMessages.find((message) => message.id === editingMessageId);
+
+    setIsSubmittingAction(true);
+    try {
+      const updated = await editOwnMessage(editingMessageId, nextContent);
+      const nextEditedAt = updated?.edited_at || new Date().toISOString();
+      const nextMessagesUpdater = (messages: ChatPageMessage[]) =>
+        messages.map((msg) =>
+          msg.id === editingMessageId
+            ? {
+                ...msg,
+                content: updated?.content || nextContent,
+                is_edited: true,
+                edited_at: nextEditedAt,
+              }
+            : msg,
+        );
+
+      setConfirmedMessages(nextMessagesUpdater);
+      updateMessageThreadCache(nextMessagesUpdater);
+      updateConversationListPreview({
+        id: editingMessageId,
+        content: updated?.content || nextContent,
+        sender_id: existingMessage?.sender_id || currentUserId || '',
+        sender: existingMessage?.sender,
+        created_at: existingMessage?.created_at || new Date().toISOString(),
+        attachments: existingMessage?.attachments || [],
+        is_edited: true,
+        edited_at: nextEditedAt,
+      });
+      refreshMessagesInBackground();
+      refreshConversationListInBackground();
+      setEditingMessageId(null);
+      setEditingValue('');
+      toast.success('Message edited');
+    } catch (error) {
+      console.error('Failed to edit message:', error);
+      toast.error(error instanceof Error ? error.message : 'Unable to edit message');
+    } finally {
+      setIsSubmittingAction(false);
+    }
+  };
+
+  const runConfirmAction = async () => {
+    if (!confirmAction) return;
+
+    setIsSubmittingAction(true);
+    try {
+      if (confirmAction.type === 'unsend') {
+        const existingMessage = allMessages.find((message) => message.id === confirmAction.messageId);
+        const updated = await unsendOwnMessage(confirmAction.messageId);
+        const nextMessagesUpdater = (messages: ChatPageMessage[]) =>
+          messages.map((msg) =>
+            msg.id === confirmAction.messageId
+              ? {
+                  ...msg,
+                  content: updated?.content || 'This message was unsent',
+                  attachments: [],
+                  is_edited: false,
+                  edited_at: null,
+                }
+              : msg,
+          );
+
+        setConfirmedMessages(nextMessagesUpdater);
+        updateMessageThreadCache(nextMessagesUpdater);
+        updateConversationListPreview({
+          id: confirmAction.messageId,
+          content: updated?.content || 'This message was unsent',
+          sender_id: existingMessage?.sender_id || currentUserId || '',
+          sender: existingMessage?.sender,
+          created_at: existingMessage?.created_at || new Date().toISOString(),
+          attachments: [],
+          is_edited: false,
+          edited_at: null,
+        });
+        refreshMessagesInBackground();
+        refreshConversationListInBackground();
+        toast.success('Message unsent');
+      } else {
+        await deleteOwnMessage(confirmAction.messageId);
+        setConfirmedMessages((prev) => prev.filter((msg) => msg.id !== confirmAction.messageId));
+        setPendingMessages((prev) => prev.filter((msg) => msg.id !== confirmAction.messageId));
+        updateMessageThreadCache((messages) => messages.filter((msg) => msg.id !== confirmAction.messageId));
+        removeConversationListPreviewForMessage(confirmAction.messageId);
+        refreshMessagesInBackground();
+        refreshConversationListInBackground();
+        toast.success('Message deleted');
+      }
+    } catch (error) {
+      console.error('Message action failed:', error);
+      toast.error(error instanceof Error ? error.message : 'Action failed');
+    } finally {
+      setIsSubmittingAction(false);
+      setConfirmAction(null);
+    }
+  };
+
   // Handle sending messages
   const handleSend = async (message: string, atts?: ChatAttachment[], mentionedUserIds?: string[]) => {
     if (!currentUserId) return;
+
+    let targetConversationId = activeConversationId;
+    if (!targetConversationId) {
+      if (!ensureConversationId) {
+        toast.error('Unable to start chat. Please try again.');
+        return;
+      }
+      try {
+        targetConversationId = await ensureConversationId();
+        if (!targetConversationId) {
+          toast.error('Unable to start chat. Please try again.');
+          return;
+        }
+        setActiveConversationId(targetConversationId);
+      } catch (err) {
+        console.error('Failed to create conversation:', err);
+        toast.error(err instanceof Error ? err.message : 'Unable to start chat');
+        return;
+      }
+    }
 
     // Generate a client_id for optimistic UI
     const clientId = window.crypto?.randomUUID ? window.crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now();
@@ -304,10 +691,11 @@ export function ChatPage({
 
     // Add to pending immediately
     setPendingMessages((prev) => [...prev, optimisticMessage]);
+    updateConversationListPreview(optimisticMessage, targetConversationId);
 
     // Send in background - subscription will move it from pending to confirmed
     try {
-      const saved = await sendMessage(conversationId, message, clientId, atts || []);
+      const saved = await sendMessage(targetConversationId, message, clientId, atts || []);
       const normalizedSaved: ChatPageMessage = {
         ...(saved as ChatPageMessage),
         sender: Array.isArray(saved?.sender) ? (saved.sender as unknown[])[0] as ChatPageMessage["sender"] : saved?.sender,
@@ -316,6 +704,12 @@ export function ChatPage({
 
       setPendingMessages((prev) => prev.filter(m => m.client_id !== clientId && m.id !== tempId));
       setConfirmedMessages((prev) => mergeById(prev, [normalizedSaved]));
+      queryClient.setQueryData(['messages', targetConversationId], (oldData: ChatPageMessage[] | undefined) => {
+        if (!Array.isArray(oldData)) return [normalizedSaved];
+        return mergeById(oldData, [normalizedSaved]);
+      });
+      updateConversationListPreview(normalizedSaved, targetConversationId);
+      refreshConversationListInBackground();
 
       // Send mention notifications if there are mentioned users and trip context
       if (mentionedUserIds && mentionedUserIds.length > 0 && tripId && normalizedSaved.id) {
@@ -344,6 +738,7 @@ export function ChatPage({
       setPendingMessages((prev) =>
         prev.map(m => m.id === tempId ? { ...m, status: "failed" } : m)
       );
+      refreshConversationListInBackground();
     }
   };
 
@@ -389,6 +784,7 @@ export function ChatPage({
               </>
             )}
           </button>
+          {headerActions}
         </div>
       </div>
     </header>
@@ -397,7 +793,12 @@ export function ChatPage({
   // Footer component
   const footerContent = (
     <div className="bg-background/95 backdrop-blur-sm border-t border-border/50 w-full">
-      <ChatComposer onSend={handleSend} tripMembers={tripMembers} />
+      <ChatComposer
+        onSend={handleSend}
+        tripMembers={tripMembers}
+        disabled={!canSend}
+        placeholder={canSend ? "Type a message..." : (blockedMessage || "Messaging is disabled for this user")}
+      />
     </div>
   );
 
@@ -454,6 +855,7 @@ export function ChatPage({
       {allMessages.map((msg) => {
         const isOwn = msg.sender_id === currentUserId;
         const isSystem = msg.type === 'system';
+        const canOpenMenuForMessage = canUseMessageActions(msg) || (msg.sender_id !== currentUserId && Boolean(messageReportType));
         const timeLabel = msg.created_at
           ? new Date(String(msg.created_at)).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
           : "";
@@ -477,6 +879,8 @@ export function ChatPage({
           <div
             key={String(msg.id)}
             className={cn("flex gap-2 py-1.0", isOwn ? "justify-end" : "justify-start")}
+            onMouseEnter={() => setHoveredMessageId(String(msg.id))}
+            onMouseLeave={() => setHoveredMessageId((current) => (current === String(msg.id) ? null : current))}
           >
             {/* Avatar for other users' messages (left side) */}
             {!isOwn && showSenderInfo && (
@@ -491,72 +895,306 @@ export function ChatPage({
               </Avatar>
             )}
             
-            <div
-              className={cn("flex flex-col gap-0.5", isOwn ? "items-end" : "items-start")}
-              style={{ maxWidth: isOwn ? "75%" : "75%" }}
-            >
-              {/* Sender name - always show for group chats */}
-              {!isOwn && showSenderInfo && (
-                <span className="text-xs font-medium text-foreground">{senderName}</span>
-              )}
-              
-              <div
-                className={cn(
-                  "relative px-4 py-2 rounded-2xl border shadow-sm",
-                  isOwn
-                    ? "bg-black text-white border-black rounded-br-sm"
-                    : "bg-white text-foreground border-border rounded-bl-sm"
+            <div className="flex items-start gap-1.5" style={{ maxWidth: isOwn ? "75%" : "75%" }}>
+              <div className={cn("flex flex-col gap-0.5", isOwn ? "items-end" : "items-start")}>
+                {!isOwn && showSenderInfo && (
+                  <span className="text-xs font-medium text-foreground">{senderName}</span>
                 )}
-                style={{ wordBreak: "break-word", overflowWrap: "anywhere" }}
-              >
-                <div className="text-sm sm:text-base leading-snug whitespace-pre-wrap">
-                  {(() => {
-                    const parts = parseMessageForDisplay(msg.content);
-                    return parts.map((part, idx) => 
-                      part.type === 'mention' ? (() => {
-                        const mentionUserId = part.username
-                          ? mentionUserIdByUsername.get(part.username.toLowerCase())
-                          : undefined;
-                        const mentionClassName = cn(
-                          "font-semibold text-emerald-400",
-                          mentionUserId ? "hover:underline" : ""
-                        );
-                        return (
-                          mentionUserId ? (
+
+                <div
+                  className={cn(
+                    "relative px-4 py-2 rounded-2xl border shadow-sm",
+                    isOwn
+                      ? "bg-black text-white border-black rounded-br-sm"
+                      : "bg-white text-foreground border-border rounded-bl-sm"
+                  )}
+                  style={{ wordBreak: "break-word", overflowWrap: "anywhere" }}
+                  onContextMenu={(event) => handleMessageContextMenu(event, msg)}
+                  onTouchStart={(event) => handleMessageTouchStart(event, msg)}
+                  onTouchMove={clearLongPress}
+                  onTouchEnd={clearLongPress}
+                  onTouchCancel={clearLongPress}
+                >
+                  {canOpenMenuForMessage && (
+                    <button
+                      type="button"
+                      aria-label="Message actions"
+                      className={cn(
+                        "absolute right-1.5 top-1.5 hidden h-5 w-5 items-center justify-center rounded-full transition md:flex",
+                        hoveredMessageId === String(msg.id) ? "opacity-100" : "opacity-0 pointer-events-none",
+                        isOwn
+                          ? "text-white/75 hover:bg-white/15 hover:text-white"
+                          : "text-muted-foreground hover:bg-black/10 hover:text-foreground"
+                      )}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        openActionMenuNearElement(String(msg.id), event.currentTarget);
+                      }}
+                    >
+                      <ChevronDown className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+
+                  <div className={cn(
+                    "pr-5 text-sm sm:text-base leading-snug whitespace-pre-wrap",
+                    isUnsentMessage(msg) && "italic opacity-80"
+                  )}>
+                    {(() => {
+                      const parts = parseMessageForDisplay(msg.content);
+                      return parts.map((part, idx) =>
+                        part.type === 'mention' ? (() => {
+                          const mentionUserId = part.username
+                            ? mentionUserIdByUsername.get(part.username.toLowerCase())
+                            : undefined;
+                          const mentionClassName = cn(
+                            "font-semibold text-emerald-400",
+                            mentionUserId ? "hover:underline" : ""
+                          );
+                          return mentionUserId ? (
                             <Link key={idx} to={`/user/${mentionUserId}`} className="cursor-pointer">
                               <span className={mentionClassName}>{part.value}</span>
                             </Link>
                           ) : (
                             <span key={idx} className={mentionClassName}>{part.value}</span>
-                          )
-                        );
-                      })() : (
-                        <span key={idx}>{part.value}</span>
-                      )
-                    );
-                  })()}
+                          );
+                        })() : (
+                          <span key={idx}>{part.value}</span>
+                        )
+                      );
+                    })()}
+                  </div>
+                  {Array.isArray(msg.attachments) && msg.attachments.length > 0 && (
+                    <MessageAttachments attachments={msg.attachments} isOwn={isOwn} />
+                  )}
                 </div>
-                {Array.isArray(msg.attachments) && msg.attachments.length > 0 && (
-                  <MessageAttachments attachments={msg.attachments} isOwn={isOwn} />
-                )}
+                <div className={cn(
+                  "flex items-center gap-1 text-[10px] sm:text-[11px] px-2 mt-0.5",
+                  isOwn ? "justify-end text-muted-foreground/80" : "text-muted-foreground/80"
+                )}>
+                  {msg.is_edited && !isUnsentMessage(msg) && <span>Edited</span>}
+                  <span>{timeLabel}</span>
+                  {isOwn && (
+                    <>
+                      {msg.status === "sending" && <Clock className="h-3 w-3" />}
+                      {(msg.status === "sent" || !msg.status) && <Check className="h-3 w-3" />}
+                      {msg.status === "failed" && <span className="text-red-500">!</span>}
+                    </>
+                  )}
+                </div>
               </div>
-              <div className={cn(
-                "flex items-center gap-1 text-[10px] sm:text-[11px] px-2 mt-0.5",
-                isOwn ? "justify-end text-muted-foreground/80" : "text-muted-foreground/80"
-              )}>
-                <span>{timeLabel}</span>
-                {isOwn && (
-                  <>
-                    {msg.status === "sending" && <Clock className="h-3 w-3" />}
-                    {(msg.status === "sent" || !msg.status) && <Check className="h-3 w-3" />}
-                    {msg.status === "failed" && <span className="text-red-500">!</span>}
-                  </>
-                )}
-              </div>
+
             </div>
           </div>
         );
       })}
+
+      {actionMenu && actionMessage && (
+        <div
+          className="fixed z-[70] min-w-[164px] rounded-xl border border-border bg-popover p-1.5 shadow-2xl"
+          style={{ left: actionMenu.x, top: actionMenu.y }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          {canUseMessageActions(actionMessage) ? (
+            <>
+              {!isUnsentMessage(actionMessage) && (
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-accent"
+                  onClick={() => beginEditMessage(actionMessage)}
+                >
+                  <Pencil className="h-4 w-4" />
+                  Edit
+                </button>
+              )}
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-accent"
+                onClick={() => {
+                  setConfirmAction({ type: 'unsend', messageId: actionMessage.id });
+                  setActionMenu(null);
+                }}
+              >
+                <Undo2 className="h-4 w-4" />
+                Unsend
+              </button>
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-destructive hover:bg-accent"
+                onClick={() => {
+                  setConfirmAction({ type: 'delete', messageId: actionMessage.id });
+                  setActionMenu(null);
+                }}
+              >
+                <Trash2 className="h-4 w-4" />
+                Delete
+              </button>
+            </>
+          ) : (
+            actionMessage.sender_id !== currentUserId && messageReportType && (
+              <>
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-accent"
+                  onClick={() => {
+                    setReportTarget({
+                      messageId: String(actionMessage.id),
+                      reportedUserId: String(actionMessage.sender_id),
+                    });
+                    setActionMenu(null);
+                  }}
+                >
+                  Report Message
+                </button>
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-destructive hover:bg-accent"
+                  onClick={() => void blockUserFromMessage(String(actionMessage.sender_id))}
+                  disabled={isSubmittingAction}
+                >
+                  Block User
+                </button>
+              </>
+            )
+          )}
+        </div>
+      )}
+
+      <Dialog
+        open={Boolean(editingMessageId)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditingMessageId(null);
+            setEditingValue('');
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit message</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Input
+              value={editingValue}
+              onChange={(event) => setEditingValue(event.target.value)}
+              placeholder="Update your message"
+              autoFocus
+              maxLength={2000}
+            />
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setEditingMessageId(null);
+                  setEditingValue('');
+                }}
+                disabled={isSubmittingAction}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                onClick={() => void submitEditMessage()}
+                disabled={isSubmittingAction || !editingValue.trim()}
+              >
+                Save
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(reportTarget)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setReportTarget(null);
+            setReportReason('spam');
+            setReportDescription('');
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Report Message</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <RadioGroup value={reportReason} onValueChange={(value) => setReportReason(value as ReportReasonValue)}>
+              {REPORT_REASON_OPTIONS.map((option) => (
+                <div key={option.value} className="flex items-center gap-2">
+                  <RadioGroupItem id={`reason-${option.value}`} value={option.value} />
+                  <Label htmlFor={`reason-${option.value}`}>{option.label}</Label>
+                </div>
+              ))}
+            </RadioGroup>
+            <Textarea
+              value={reportDescription}
+              onChange={(event) => setReportDescription(event.target.value)}
+              placeholder="Add details (optional)"
+              rows={3}
+            />
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setReportTarget(null);
+                  setReportReason('spam');
+                  setReportDescription('');
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                onClick={() => setConfirmReport(true)}
+                disabled={isSubmittingAction}
+              >
+                Continue
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={confirmReport} onOpenChange={setConfirmReport}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you sure you want to report this content?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This report will be submitted to moderators for review.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isSubmittingAction}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void submitReportAction()} disabled={isSubmittingAction}>
+              Submit Report
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={Boolean(confirmAction)} onOpenChange={(open) => !open && setConfirmAction(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {confirmAction?.type === 'unsend' ? 'Unsend this message?' : 'Delete this message?'}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {confirmAction?.type === 'unsend'
+                ? 'This will replace it with an unsent notice for everyone in this chat.'
+                : 'This will remove the message from this chat for everyone.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isSubmittingAction}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void runConfirmAction()} disabled={isSubmittingAction}>
+              Confirm
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 
@@ -570,10 +1208,10 @@ export function ChatPage({
       <button
         type="button"
         onClick={() => scrollToBottom()}
-        className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+5.5rem)] right-4 z-50 flex h-8 w-8 items-center justify-center rounded-full bg-background border border-border shadow-lg hover:bg-muted transition-colors"
+        className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+5.2rem)] right-4 z-50 flex h-10 w-10 items-center justify-center rounded-full bg-[#25D366] text-white shadow-[0_8px_22px_rgba(0,0,0,0.28)] ring-2 ring-white/70 hover:brightness-95 active:scale-95 transition"
         aria-label="Scroll to bottom"
       >
-        <ChevronDown className="h-5 w-5 text-foreground" />
+        <ArrowDown className="h-5 w-5" />
       </button>
     ) : null,
   };

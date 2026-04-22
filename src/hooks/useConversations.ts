@@ -11,13 +11,13 @@ export function useConversations(
     queryKey: ['conversations', userId],
     queryFn: fetchConversationsWithLastMessages,
     enabled: !!userId,
-    staleTime: 1000 * 20,       // Keep list stable a bit longer on mobile networks
+    staleTime: 1000 * 5,        // Fresh for 5s (was 20s) — faster updates on chat list
     gcTime: 1000 * 60 * 5,
     refetchOnWindowFocus: false,
     refetchInterval: () => {
       if (typeof navigator !== 'undefined' && !navigator.onLine) return false;
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return 30000;
-      return 15000;
+      return 8000;              // Refetch every 8s when visible (was 15s) — quicker fallback if subscription misses
     },
     refetchIntervalInBackground: false,
     ...options,

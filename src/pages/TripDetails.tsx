@@ -1,6 +1,6 @@
 import { buildPublicUrl, buildTripShareUrl, getPublicBaseUrl } from "@/lib/publicUrl";
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   ChevronLeft,
@@ -40,6 +40,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+import { ModerationMenu } from "@/components/moderation/ModerationMenu";
 import {
   Dialog,
   DialogContent,
@@ -55,7 +56,6 @@ import { tripCategories } from "@/data/categories";
 import { cn } from "@/lib/utils";
 import { createJoinRequest, fetchJoinRequests, createTripInvite, cancelTrip, deleteDraftTrip } from "@/lib/trips";
 import { useAuth } from "@/contexts/AuthContext";
-import { createDirectConversation } from "@/lib/conversations";
 import { useTripDetails, useJoinRequestStatus } from "@/hooks/useTrips";
 import { useQueryClient } from "@tanstack/react-query";
 import { TripDetailsSkeleton } from "@/components/skeletons/TripDetailsSkeleton";
@@ -480,13 +480,100 @@ export default function TripDetails() {
   // Photo lightbox state
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
+  const [galleryAnimating, setGalleryAnimating] = useState(false);
+  const [galleryDirection, setGalleryDirection] = useState<1 | -1>(1);
+  const [lightboxAnimating, setLightboxAnimating] = useState(false);
+  const [lightboxDirection, setLightboxDirection] = useState<1 | -1>(1);
   
   // Booking calendar state
   const [showCalendar, setShowCalendar] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const swipeStartXRef = useRef<number | null>(null);
+  const swipeStartYRef = useRef<number | null>(null);
+  const SWIPE_THRESHOLD_PX = 42;
+  const SWIPE_MAX_VERTICAL_DRIFT_PX = 56;
 
-  const nextImage = () => setCurrentImage((prev) => (prev + 1) % images.length);
-  const prevImage = () => setCurrentImage((prev) => (prev - 1 + images.length) % images.length);
+  const nextImage = () => {
+    if (images.length <= 1) return;
+    setGalleryDirection(1);
+    setGalleryAnimating(true);
+    setCurrentImage((prev) => (prev + 1) % images.length);
+  };
+
+  const prevImage = () => {
+    if (images.length <= 1) return;
+    setGalleryDirection(-1);
+    setGalleryAnimating(true);
+    setCurrentImage((prev) => (prev - 1 + images.length) % images.length);
+  };
+
+  const goToImage = (index: number) => {
+    if (images.length <= 1 || index === currentImage) return;
+    setGalleryDirection(index > currentImage ? 1 : -1);
+    setGalleryAnimating(true);
+    setCurrentImage(index);
+  };
+
+  const nextLightboxImage = () => {
+    if (images.length <= 1) return;
+    setLightboxDirection(1);
+    setLightboxAnimating(true);
+    setLightboxIndex((prev) => (prev + 1) % images.length);
+  };
+
+  const prevLightboxImage = () => {
+    if (images.length <= 1) return;
+    setLightboxDirection(-1);
+    setLightboxAnimating(true);
+    setLightboxIndex((prev) => (prev - 1 + images.length) % images.length);
+  };
+
+  useEffect(() => {
+    if (!galleryAnimating) return;
+    const timeout = window.setTimeout(() => setGalleryAnimating(false), 220);
+    return () => window.clearTimeout(timeout);
+  }, [galleryAnimating, currentImage]);
+
+  useEffect(() => {
+    if (!lightboxAnimating) return;
+    const timeout = window.setTimeout(() => setLightboxAnimating(false), 220);
+    return () => window.clearTimeout(timeout);
+  }, [lightboxAnimating, lightboxIndex]);
+
+  const handleSwipeStart = (event: React.TouchEvent) => {
+    const touch = event.touches[0];
+    if (!touch) return;
+    swipeStartXRef.current = touch.clientX;
+    swipeStartYRef.current = touch.clientY;
+  };
+
+  const handleSwipeEnd = (
+    event: React.TouchEvent,
+    onSwipeLeft: () => void,
+    onSwipeRight: () => void,
+  ) => {
+    const startX = swipeStartXRef.current;
+    const startY = swipeStartYRef.current;
+    const touch = event.changedTouches[0];
+
+    swipeStartXRef.current = null;
+    swipeStartYRef.current = null;
+
+    if (startX == null || startY == null || !touch) return;
+
+    const deltaX = touch.clientX - startX;
+    const deltaY = touch.clientY - startY;
+
+    if (Math.abs(deltaY) > SWIPE_MAX_VERTICAL_DRIFT_PX) return;
+    if (Math.abs(deltaX) < SWIPE_THRESHOLD_PX) return;
+
+    if (deltaX < 0) {
+      onSwipeLeft();
+      return;
+    }
+
+    onSwipeRight();
+  };
 
   const tripUrl = buildPublicUrl(`/trip/${id}`);
   const shareTripId = dbTrip?.id || String(id || "");
@@ -726,18 +813,7 @@ export default function TripDetails() {
 
   // Handler to start or open a direct conversation
   const handleMessageMember = async (memberId: string) => {
-    try {
-      const convo = await createDirectConversation(memberId);
-      if (convo && convo.id) {
-        navigate(`/chat/${convo.id}`);
-      }
-    } catch (err) {
-      toast({
-        title: "Error",
-        description: "Could not start conversation.",
-        variant: "destructive",
-      });
-    }
+    navigate(`/chat/new/${memberId}`);
   };
 
   const handleSendInvite = async () => {
@@ -924,7 +1000,11 @@ export default function TripDetails() {
       {/* Photo Lightbox Modal */}
       <Dialog open={lightboxOpen} onOpenChange={setLightboxOpen}>
         <DialogContent className="max-w-4xl w-[95vw] h-[90vh] p-0 overflow-hidden bg-black/95">
-          <div className="relative w-full h-full flex items-center justify-center">
+          <div
+            className="relative w-full h-full flex items-center justify-center"
+            onTouchStart={handleSwipeStart}
+            onTouchEnd={(event) => handleSwipeEnd(event, nextLightboxImage, prevLightboxImage)}
+          >
             <button
               onClick={() => setLightboxOpen(false)}
               className="absolute top-4 right-4 z-50 h-10 w-10 rounded-full bg-white/10 backdrop-blur-sm flex items-center justify-center hover:bg-white/20 transition-colors"
@@ -935,13 +1015,13 @@ export default function TripDetails() {
             {images.length > 1 && (
               <>
                 <button
-                  onClick={() => setLightboxIndex((prev) => (prev - 1 + images.length) % images.length)}
+                  onClick={prevLightboxImage}
                   className="absolute left-4 h-12 w-12 rounded-full bg-white/10 backdrop-blur-sm flex items-center justify-center hover:bg-white/20 transition-colors"
                 >
                   <ChevronLeft className="h-6 w-6 text-white" />
                 </button>
                 <button
-                  onClick={() => setLightboxIndex((prev) => (prev + 1) % images.length)}
+                  onClick={nextLightboxImage}
                   className="absolute right-4 h-12 w-12 rounded-full bg-white/10 backdrop-blur-sm flex items-center justify-center hover:bg-white/20 transition-colors"
                 >
                   <ChevronRight className="h-6 w-6 text-white" />
@@ -952,7 +1032,12 @@ export default function TripDetails() {
             <img
               src={images[lightboxIndex]}
               alt={`Gallery image ${lightboxIndex + 1}`}
-              className="max-w-full max-h-full object-contain"
+              className={cn(
+                "max-w-full max-h-full object-contain transition-all duration-300 ease-out",
+                lightboxAnimating
+                  ? (lightboxDirection === 1 ? "opacity-0 translate-x-6" : "opacity-0 -translate-x-6")
+                  : "opacity-100 translate-x-0"
+              )}
             />
             
             <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-white text-sm bg-black/50 px-3 py-1 rounded-full">
@@ -1168,11 +1253,18 @@ export default function TripDetails() {
               setLightboxIndex(currentImage);
               setLightboxOpen(true);
             }}
+            onTouchStart={handleSwipeStart}
+            onTouchEnd={(event) => handleSwipeEnd(event, nextImage, prevImage)}
           >
             <img
               src={images[currentImage]}
               alt={tripData.title}
-              className="h-full w-full object-cover transition-transform group-hover:scale-105"
+              className={cn(
+                "h-full w-full object-cover transition-all duration-300 ease-out group-hover:scale-105",
+                galleryAnimating
+                  ? (galleryDirection === 1 ? "opacity-0 translate-x-4" : "opacity-0 -translate-x-4")
+                  : "opacity-100 translate-x-0"
+              )}
             />
             <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
               <div className="opacity-0 group-hover:opacity-100 transition-opacity bg-white/90 backdrop-blur-sm rounded-full p-3">
@@ -1210,6 +1302,24 @@ export default function TripDetails() {
                   }`} 
                 />
               </button>
+              {isDbTrip && !isOrganizer && dbTrip?.creator_id && (
+                <ModerationMenu
+                  reportType="TRIP"
+                  targetId={String(dbTrip.id)}
+                  reportedUserId={String(dbTrip.creator_id)}
+                  targetLabel="Trip"
+                  reportLabel="Report Trip"
+                  trigger={
+                    <button
+                      type="button"
+                      className="h-9 w-9 sm:h-10 sm:w-10 rounded-full bg-card/80 backdrop-blur-sm flex items-center justify-center transition-transform active:scale-95 text-foreground"
+                      aria-label="Trip actions"
+                    >
+                      <MoreVertical className="h-5 w-5 sm:h-5 sm:w-5 text-foreground" strokeWidth={2.5} />
+                    </button>
+                  }
+                />
+              )}
               {isDbTrip && isOrganizer && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -1217,7 +1327,7 @@ export default function TripDetails() {
                       className="h-9 w-9 sm:h-10 sm:w-10 rounded-full bg-card/80 backdrop-blur-sm flex items-center justify-center transition-transform active:scale-95"
                       aria-label="Trip actions"
                     >
-                      <MoreVertical className="h-4 w-4 sm:h-5 sm:w-5 text-foreground" />
+                      <MoreVertical className="h-6 w-6 sm:h-7 sm:w-7 text-foreground scale-125" strokeWidth={3} />
                     </button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="min-w-[12rem]">
@@ -1259,7 +1369,7 @@ export default function TripDetails() {
                 {images.map((img, index) => (
                   <button
                     key={index}
-                    onClick={() => setCurrentImage(index)}
+                    onClick={() => goToImage(index)}
                     className={`h-10 w-14 sm:h-12 sm:w-16 rounded-lg overflow-hidden border-2 shrink-0 ${
                       index === currentImage ? "border-white" : "border-transparent"
                     }`}
@@ -1935,7 +2045,7 @@ export default function TripDetails() {
                   const messageParam = initialMessage.trim() 
                     ? `?message=${encodeURIComponent(initialMessage.trim())}` 
                     : "";
-                  navigate(`/chat/${organizer.id}${messageParam}`);
+                  navigate(`/chat/new/${organizer.id}${messageParam}`);
                   setInitialMessage("");
                 }}
                 disabled={!initialMessage.trim()}

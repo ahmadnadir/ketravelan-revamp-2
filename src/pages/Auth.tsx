@@ -6,23 +6,35 @@ import { ArrowLeft, Mail, Lock, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { getAuthRedirectUrl } from "@/lib/authRedirect";
+import { consumeAuthError, normalizeOAuthErrorMessage } from "@/lib/authFlow";
 
 export default function Auth() {
   const isMobile = useIsMobile();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { signInWithGoogle, signInWithEmail, signUpWithEmail, isAuthenticated, loading, profile } = useAuth();
+  const { signInWithGoogle, signInWithApple, signInWithEmail, signUpWithEmail, isAuthenticated, loading, profile } = useAuth();
 
   const isProfileComplete = useCallback((profileToCheck: typeof profile) => {
     if (!profileToCheck) return false;
     if (profileToCheck.onboarding_completed) return true;
-    const hasName = Boolean((profileToCheck.full_name || "").trim() || (profileToCheck.username || "").trim());
-    const hasLocation = Boolean((profileToCheck.country || "").trim() || (profileToCheck.location || "").trim());
+    const fullName = typeof profileToCheck.full_name === "string" ? profileToCheck.full_name : "";
+    const username = typeof profileToCheck.username === "string" ? profileToCheck.username : "";
+    const country = typeof profileToCheck.country === "string" ? profileToCheck.country : "";
+    const location = typeof profileToCheck.location === "string" ? profileToCheck.location : "";
+    const hasName = Boolean(fullName.trim() || username.trim());
+    const hasLocation = Boolean(country.trim() || location.trim());
     return hasName && hasLocation;
   }, []);
 
@@ -38,6 +50,28 @@ export default function Auth() {
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [canResend, setCanResend] = useState(false);
   const [resendLoading, setResendLoading] = useState(false);
+  const [showOAuthConflictDialog, setShowOAuthConflictDialog] = useState(false);
+  const [oAuthConflictProvider, setOAuthConflictProvider] = useState<"Apple" | "Google">("Apple");
+
+  const isOAuthCollisionError = (message: string) => {
+    const normalized = message.toLowerCase();
+    return [
+      "already attached",
+      "already linked",
+      "identity is already linked",
+      "identity_already_exists",
+      "account exists",
+      "already registered",
+      "email already",
+      "sign up not completed",
+      "sign in not completed",
+    ].some((token) => normalized.includes(token));
+  };
+
+  const showOAuthConflictModal = (provider: "Apple" | "Google") => {
+    setOAuthConflictProvider(provider);
+    setShowOAuthConflictDialog(true);
+  };
 
   useEffect(() => {
     if (!loading && isAuthenticated) {
@@ -56,11 +90,57 @@ export default function Auth() {
     }
   }, [isAuthenticated, loading, profile, navigate, isProfileComplete]);
 
+  useEffect(() => {
+    const pendingError = consumeAuthError();
+    const queryError = searchParams.get("error_description") || searchParams.get("error");
+    const provider = queryError?.toLowerCase().includes("apple") ? "apple" : "google";
+    const message = pendingError || normalizeOAuthErrorMessage(queryError, provider as never);
+
+    if (pendingError || queryError) {
+      if (isOAuthCollisionError(message)) {
+        showOAuthConflictModal(provider === "apple" ? "Apple" : "Google");
+        return;
+      }
+      toast({
+        title: "Sign-in failed",
+        description: message,
+        variant: "destructive",
+      });
+    }
+  }, [searchParams]);
+
 
 
   // Synchronous ref guard — prevents concurrent calls from rapid double-taps
   // (React state updates are async so isSubmitting alone is not enough).
   const googleSignInInProgress = useRef(false);
+  const appleSignInInProgress = useRef(false);
+
+  const handleAppleSignIn = async () => {
+    if (appleSignInInProgress.current) return;
+    appleSignInInProgress.current = true;
+    try {
+      setIsSubmitting(true);
+      await signInWithApple();
+    } catch (error: unknown) {
+      // User cancelled is not an error we need to surface
+      const msg = error instanceof Error ? error.message : "";
+      if (!msg.toLowerCase().includes("cancel") && !msg.toLowerCase().includes("dismiss")) {
+        if (isOAuthCollisionError(msg)) {
+          showOAuthConflictModal("Apple");
+          return;
+        }
+        toast({
+          title: "Error",
+          description: normalizeOAuthErrorMessage(msg, "apple") || "Failed to sign in with Apple",
+          variant: "destructive",
+        });
+      }
+    } finally {
+      setIsSubmitting(false);
+      appleSignInInProgress.current = false;
+    }
+  };
 
   const handleGoogleSignIn = async () => {
     if (googleSignInInProgress.current) return;
@@ -69,9 +149,14 @@ export default function Auth() {
       setIsSubmitting(true);
       await signInWithGoogle();
     } catch (error: unknown) {
+      const message = normalizeOAuthErrorMessage(error instanceof Error ? error.message : null, "google");
+      if (isOAuthCollisionError(message)) {
+        showOAuthConflictModal("Google");
+        return;
+      }
       toast({
         title: "Error",
-        description: error instanceof Error ? error.message : "Failed to sign in with Google",
+        description: message,
         variant: "destructive",
       });
     } finally {
@@ -284,6 +369,19 @@ export default function Auth() {
         <Button
           type="button"
           variant="outline"
+          className="w-full h-12 text-base font-medium rounded-xl mb-3"
+          onClick={handleAppleSignIn}
+          disabled={isSubmitting}
+        >
+          <svg className="mr-2 h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/>
+          </svg>
+          Continue with Apple
+        </Button>
+
+        <Button
+          type="button"
+          variant="outline"
           className="w-full h-12 text-base font-medium rounded-xl mb-6"
           onClick={handleGoogleSignIn}
           disabled={isSubmitting}
@@ -448,6 +546,22 @@ export default function Auth() {
           </p>
         </div>
       </div>
+
+      <Dialog open={showOAuthConflictDialog} onOpenChange={setShowOAuthConflictDialog}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>{oAuthConflictProvider} account already linked</DialogTitle>
+            <DialogDescription>
+              This {oAuthConflictProvider} account is already connected to another user. Sign in with your existing method first, then connect {oAuthConflictProvider} from Settings &gt; Connected Accounts.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end">
+            <Button type="button" onClick={() => setShowOAuthConflictDialog(false)}>
+              OK
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -31,7 +31,7 @@ import { TextBlock } from "./blocks/TextBlock";
 import { ImageBlock } from "./blocks/ImageBlock";
 import { LocationBlock } from "./blocks/LocationBlock";
 import { SocialLinkBlock } from "./blocks/SocialLinkBlock";
-import { uploadImageFromDataUrl } from "@/lib/imageStorage";
+import { normalizeImageDataUrl, optimizeImageDataUrl, uploadImageFromDataUrl } from "@/lib/imageStorage";
 import { toast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -381,14 +381,30 @@ export function StoryBuilder({
             <input
               ref={coverInputRef}
               type="file"
-              accept="image/*"
+              accept="image/*,.heic,.heif"
               onChange={(e) => {
                 const file = e.target.files?.[0];
                 if (file) {
                   const reader = new FileReader();
-                  reader.onload = (event) => {
-                    const url = event.target?.result as string;
-                    saveDraft({ coverImage: url });
+                  reader.onload = async (event) => {
+                    try {
+                      const url = event.target?.result as string;
+                      const normalizedUrl = await normalizeImageDataUrl(url);
+                      const optimizedUrl = await optimizeImageDataUrl(normalizedUrl, {
+                        maxDimension: 1920,
+                        maxBytes: 1_500_000,
+                        qualityStart: 0.82,
+                        qualityMin: 0.58,
+                      });
+                      saveDraft({ coverImage: optimizedUrl });
+                    } catch (error) {
+                      console.error("Failed to process cover image:", error);
+                      toast({
+                        title: "Unsupported image",
+                        description: "Could not process this image. Try another file or convert it to JPG.",
+                        variant: "destructive",
+                      });
+                    }
                   };
                   reader.readAsDataURL(file);
                 }
@@ -473,7 +489,7 @@ export function StoryBuilder({
               ref={galleryInputRef}
               type="file"
               multiple
-              accept="image/*"
+              accept="image/*,.heic,.heif"
               onChange={handleGallerySelect}
               disabled={uploadingCover}
               className="hidden"

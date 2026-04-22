@@ -2,6 +2,7 @@ import { supabase } from "@/lib/supabase";
 import { countries, Discussion, Story, StoryType, DiscussionTopic, StoryVisibility, StoryBlock, SocialLink } from "@/data/communityMockData";
 import type { StoryDraft } from "@/hooks/useStoryDraft";
 import { getTravelStyleByIdOrLabel } from "@/data/travelStyles";
+import { filterItemsByBlockedRelationship } from "@/lib/moderation";
 
 const FALLBACK_FLAG = "🌍";
 const FALLBACK_AVATAR = "";
@@ -65,6 +66,7 @@ type DiscussionReplyRow = {
   parent_reply_id?: string | null;
   vote_count_up?: number | null;
   vote_count_down?: number | null;
+  user_vote?: "up" | "down" | null;
   created_at: string;
   author?: ProfileRow | ProfileRow[] | null;
 };
@@ -291,9 +293,40 @@ const mapDiscussionReply = (row: DiscussionReplyRow) => {
     parentReplyId: row.parent_reply_id ?? null,
     upvotes: row.vote_count_up ?? 0,
     downvotes: row.vote_count_down ?? 0,
-    userVote: null,
+    userVote: row.user_vote ?? null,
   };
 };
+
+async function fetchDiscussionReplyUserVotes(
+  userId: string | null | undefined,
+  replyIds: string[]
+) {
+  if (!userId || replyIds.length === 0) {
+    return new Map<string, "up" | "down">();
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from("discussion_votes")
+      .select("reply_id, vote_type")
+      .eq("user_id", userId)
+      .in("reply_id", replyIds);
+
+    if (error) throw error;
+
+    const voteMap = new Map<string, "up" | "down">();
+    (data || []).forEach((row) => {
+      if (row.vote_type === "up" || row.vote_type === "down") {
+        voteMap.set(row.reply_id, row.vote_type);
+      }
+    });
+
+    return voteMap;
+  } catch (error) {
+    console.warn("Unable to fetch discussion reply user votes:", error);
+    return new Map<string, "up" | "down">();
+  }
+}
 
 export async function fetchStories(userId?: string | null) {
   const { data, error } = await supabase
@@ -331,8 +364,13 @@ export async function fetchStories(userId?: string | null) {
 
   if (error) throw error;
 
-  const reactions = await fetchStoryReactions(userId, data || []);
-  return (data || []).map((row) => mapStoryRow(row as StoryRow, reactions));
+  const filteredRows = await filterItemsByBlockedRelationship(data || [], (row: any) => {
+    const author = Array.isArray(row.author) ? row.author[0] : row.author;
+    return author?.id;
+  });
+
+  const reactions = await fetchStoryReactions(userId, filteredRows || []);
+  return (filteredRows || []).map((row) => mapStoryRow(row as StoryRow, reactions));
 }
 
 export async function fetchStoryBySlug(slug: string, userId?: string | null) {
@@ -369,6 +407,12 @@ export async function fetchStoryBySlug(slug: string, userId?: string | null) {
   if (error) throw error;
   if (!data) return null;
 
+  const visibleStories = await filterItemsByBlockedRelationship([data], (row: any) => {
+    const author = Array.isArray(row.author) ? row.author[0] : row.author;
+    return author?.id;
+  });
+  if (visibleStories.length === 0) return null;
+
   const reactions = await fetchStoryReactions(userId, [data]);
   const story = mapStoryRow(data as StoryRow, reactions);
   
@@ -384,6 +428,8 @@ export async function fetchStoryComments(storyId: string) {
       `
       id,
       body,
+      depth,
+      parent_comment_id,
       created_at,
       like_count,
       author:profiles!story_comments_author_id_fkey(id, full_name, username, avatar_url)
@@ -395,13 +441,20 @@ export async function fetchStoryComments(storyId: string) {
     .order("created_at", { ascending: true });
 
   if (error) throw error;
-  
-  return (data || []).map((comment) => ({
+
+  const filteredComments = await filterItemsByBlockedRelationship(data || [], (comment: any) => {
+    const author = Array.isArray(comment.author) ? comment.author[0] : comment.author;
+    return author?.id;
+  });
+
+  return (filteredComments || []).map((comment) => ({
     id: comment.id,
     body: comment.body,
     author: buildAuthor(normalizeProfile(comment.author)),
     createdAt: new Date(comment.created_at),
     likes: comment.like_count || 0,
+    parentCommentId: comment.parent_comment_id ?? null,
+    depth: comment.depth ?? 0,
   }));
 }
 
@@ -474,7 +527,11 @@ export async function fetchDiscussions(userId?: string | null) {
     .order("last_activity_at", { ascending: false });
 
   if (error) throw error;
-  const discussions = (data || []) as DiscussionRow[];
+  const filteredRows = await filterItemsByBlockedRelationship(data || [], (row: any) => {
+    const author = Array.isArray(row.author) ? row.author[0] : row.author;
+    return author?.id;
+  });
+  const discussions = (filteredRows || []) as DiscussionRow[];
   if (discussions.length === 0) return [];
 
   const discussionIds = discussions.map((row) => row.id);
@@ -520,6 +577,13 @@ export async function fetchDiscussionById(id: string, userId?: string | null) {
 
   if (error) throw error;
   if (!data) return null;
+
+  const visibleDiscussions = await filterItemsByBlockedRelationship([data], (row: any) => {
+    const author = Array.isArray(row.author) ? row.author[0] : row.author;
+    return author?.id;
+  });
+  if (visibleDiscussions.length === 0) return null;
+
   const { data: acceptedRows, error: acceptedError } = await supabase
     .from("discussion_replies")
     .select("discussion_id")
@@ -537,7 +601,7 @@ export async function fetchDiscussionById(id: string, userId?: string | null) {
   return mapDiscussionRow(data as DiscussionRow, hasAccepted, reactions);
 }
 
-export async function fetchDiscussionReplies(discussionId: string) {
+export async function fetchDiscussionReplies(discussionId: string, userId?: string | null) {
   try {
     // Try to fetch with vote counts (columns might not exist yet)
     const { data, error } = await supabase
@@ -580,10 +644,41 @@ export async function fetchDiscussionReplies(discussionId: string) {
         .order("created_at", { ascending: true });
 
       if (fallbackError) throw fallbackError;
-      return (fallbackData || []).map((row) => mapDiscussionReply(row as DiscussionReplyRow));
+
+      const voteMap = await fetchDiscussionReplyUserVotes(
+        userId,
+        (fallbackData || []).map((row) => row.id)
+      );
+
+      const filteredFallback = await filterItemsByBlockedRelationship(fallbackData || [], (row: any) => {
+        const author = Array.isArray(row.author) ? row.author[0] : row.author;
+        return author?.id;
+      });
+
+      return (filteredFallback || []).map((row) =>
+        mapDiscussionReply({
+          ...(row as DiscussionReplyRow),
+          user_vote: voteMap.get(row.id) ?? null,
+        })
+      );
     }
 
-    return (data || []).map((row) => mapDiscussionReply(row as DiscussionReplyRow));
+    const voteMap = await fetchDiscussionReplyUserVotes(
+      userId,
+      (data || []).map((row) => row.id)
+    );
+
+    const filteredRows = await filterItemsByBlockedRelationship(data || [], (row: any) => {
+      const author = Array.isArray(row.author) ? row.author[0] : row.author;
+      return author?.id;
+    });
+
+    return (filteredRows || []).map((row) =>
+      mapDiscussionReply({
+        ...(row as DiscussionReplyRow),
+        user_vote: voteMap.get(row.id) ?? null,
+      })
+    );
   } catch (err) {
     console.error("Error fetching discussion replies:", err);
     throw err;
@@ -859,6 +954,29 @@ export async function deleteDiscussionReply(replyId: string) {
   if (error) throw error;
 }
 
+export async function deleteDiscussion(discussionId: string) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  const { data: discussion, error: discussionError } = await supabase
+    .from("discussions")
+    .select("author_id")
+    .eq("id", discussionId)
+    .maybeSingle();
+
+  if (discussionError) throw discussionError;
+  if (!discussion) throw new Error("Discussion not found");
+  if (discussion.author_id !== user.id) throw new Error("You can only delete your own discussions");
+
+  const { error } = await supabase
+    .from("discussions")
+    .update({ deleted_at: new Date().toISOString() })
+    .eq("id", discussionId)
+    .eq("author_id", user.id);
+
+  if (error) throw error;
+}
+
 const deriveStoryType = (draft: StoryDraft): StoryType => {
   const storyTypes = deriveStoryTypes(draft);
   return storyTypes[0] || "trip-recap";
@@ -1071,9 +1189,23 @@ export async function updateStory(storyId: string, updates: Partial<Story>) {
   if (error) throw error;
 }
 
-export async function createStoryComment(storyId: string, body: string) {
+export async function createStoryComment(storyId: string, body: string, parentCommentId?: string) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
+
+  let depth = 0;
+  if (parentCommentId) {
+    const { data: parentComment, error: parentError } = await supabase
+      .from("story_comments")
+      .select("depth")
+      .eq("id", parentCommentId)
+      .single();
+
+    if (parentError) throw parentError;
+    if (parentComment) {
+      depth = (parentComment.depth ?? 0) + 1;
+    }
+  }
 
   const { data, error } = await supabase
     .from("story_comments")
@@ -1081,11 +1213,14 @@ export async function createStoryComment(storyId: string, body: string) {
       story_id: storyId,
       author_id: user.id,
       body: body.trim(),
-      depth: 0,
+      parent_comment_id: parentCommentId || null,
+      depth,
     })
     .select(`
       id,
       body,
+      depth,
+      parent_comment_id,
       created_at,
       author:profiles!story_comments_author_id_fkey(id, full_name, username, avatar_url)
     `)
@@ -1206,13 +1341,14 @@ export async function deleteStoryComment(commentId: string, storyId: string) {
 }
 
 export async function toggleDiscussionReplyVote(replyId: string, voteType: "up" | "down") {
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
 
-  // Get current vote counts and check for existing votes
   const { data: reply, error: fetchError } = await supabase
     .from("discussion_replies")
-    .select("vote_count_up, vote_count_down, author_id")
+    .select("author_id")
     .eq("id", replyId)
     .maybeSingle();
 
@@ -1220,78 +1356,61 @@ export async function toggleDiscussionReplyVote(replyId: string, voteType: "up" 
   if (!reply) throw new Error("Reply not found");
   if (reply.author_id === user.id) throw new Error("You cannot vote on your own reply");
 
-  let newUpvotes = Math.max(0, reply.vote_count_up ?? 0);
-  let newDownvotes = Math.max(0, reply.vote_count_down ?? 0);
+  const { data: existingVote, error: voteFetchError } = await supabase
+    .from("discussion_votes")
+    .select("vote_type")
+    .eq("reply_id", replyId)
+    .eq("user_id", user.id)
+    .maybeSingle();
 
-  // Try to check for existing vote in discussion_votes table
-  let existingVoteType: "up" | "down" | null = null;
-  try {
-    const { data: existingVote } = await supabase
+  if (voteFetchError) throw voteFetchError;
+
+  const existingVoteType = existingVote?.vote_type === "up" || existingVote?.vote_type === "down"
+    ? existingVote.vote_type
+    : null;
+
+  let nextUserVote: "up" | "down" | null = voteType;
+
+  if (existingVoteType === voteType) {
+    const { error: deleteError } = await supabase
       .from("discussion_votes")
-      .select("vote_type")
+      .delete()
       .eq("reply_id", replyId)
-      .eq("user_id", user.id)
-      .maybeSingle();
+      .eq("user_id", user.id);
 
-    if (existingVote) {
-      existingVoteType = existingVote.vote_type;
-      
-      // Remove the existing vote
-      if (existingVote.vote_type === "up") {
-        newUpvotes = Math.max(0, newUpvotes - 1);
-      } else {
-        newDownvotes = Math.max(0, newDownvotes - 1);
-      }
-    }
-  } catch (e) {
-    // discussion_votes table might not exist yet, continue without it
-    console.log("discussion_votes table not ready, continuing with simple vote increment");
+    if (deleteError) throw deleteError;
+    nextUserVote = null;
+  } else if (existingVoteType) {
+    const { error: updateVoteError } = await supabase
+      .from("discussion_votes")
+      .update({ vote_type: voteType })
+      .eq("reply_id", replyId)
+      .eq("user_id", user.id);
+
+    if (updateVoteError) throw updateVoteError;
+  } else {
+    const { error: insertError } = await supabase
+      .from("discussion_votes")
+      .insert({
+        reply_id: replyId,
+        user_id: user.id,
+        vote_type: voteType,
+      });
+
+    if (insertError) throw insertError;
   }
 
-  // Add new vote only if it's different from existing
-  if (existingVoteType !== voteType) {
-    if (voteType === "up") {
-      newUpvotes += 1;
-    } else {
-      newDownvotes += 1;
-    }
-  }
-
-  // Update vote counts
-  const { error: updateError } = await supabase
+  const { data: refreshedReply, error: refreshError } = await supabase
     .from("discussion_replies")
-    .update({
-      vote_count_up: Math.max(0, newUpvotes),
-      vote_count_down: Math.max(0, newDownvotes),
-    })
-    .eq("id", replyId);
+    .select("vote_count_up, vote_count_down")
+    .eq("id", replyId)
+    .single();
 
-  if (updateError) throw updateError;
+  if (refreshError) throw refreshError;
 
-  // Try to save vote in discussion_votes table
-  try {
-    if (existingVoteType === voteType) {
-      // Remove vote if toggling same type
-      const { error: deleteError } = await supabase
-        .from("discussion_votes")
-        .delete()
-        .eq("reply_id", replyId)
-        .eq("user_id", user.id);
-      if (deleteError) console.error("Failed to delete vote:", deleteError);
-    } else {
-      // Insert or update vote
-      const { error: voteError } = await supabase
-        .from("discussion_votes")
-        .upsert({
-          reply_id: replyId,
-          user_id: user.id,
-          vote_type: voteType,
-        });
-      if (voteError) console.error("Failed to save vote:", voteError);
-    }
-  } catch (e) {
-    console.log("discussion_votes table not ready, vote counts updated only");
-  }
-
-  return { upvotes: Math.max(0, newUpvotes), downvotes: Math.max(0, newDownvotes) };
+  return {
+    upvotes: Math.max(0, refreshedReply.vote_count_up ?? 0),
+    downvotes: Math.max(0, refreshedReply.vote_count_down ?? 0),
+    userVote: nextUserVote,
+  };
 }

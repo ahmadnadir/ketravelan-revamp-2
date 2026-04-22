@@ -31,7 +31,13 @@ export interface Notification {
     | 'receipt_submitted'
     | 'receipt_approved'
     | 'receipt_rejected'
-    | 'trip_settlement_required';
+    | 'trip_settlement_required'
+    | 'story_like'
+    | 'story_comment'
+    | 'discussion_like'
+    | 'discussion_reply'
+    | 'discussion_reply_to_you'
+    | 'discussion_answer_accepted';
   title: string;
   message: string | null;
   read: boolean;
@@ -107,6 +113,28 @@ export async function fetchUnreadCount(): Promise<number> {
 }
 
 /**
+ * Get TOTAL unread notification count including both system and chat notifications
+ * This is what displays in the UI badge (header, bottom nav, sidebar)
+ */
+export async function fetchTotalUnreadCount(): Promise<number> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return 0;
+
+  const { count, error } = await supabase
+    .from('notifications')
+    .select('*', { count: 'exact', head: true })
+    .eq('user_id', user.id)
+    .eq('read', false);
+
+  if (error) {
+    console.error('Error fetching total unread count:', error);
+    return 0;
+  }
+
+  return count || 0;
+}
+
+/**
  * Get unread chat message notification count for the current user
  */
 export async function fetchUnreadChatNotificationCount(): Promise<number> {
@@ -149,6 +177,38 @@ export async function markNotificationsAsRead(notificationIds: string[]) {
   });
 
   if (error) throw error;
+}
+
+/**
+ * Mark all chat notifications for a conversation as read
+ * Called when user opens a chat to remove badge count
+ */
+export async function markChatNotificationsAsReadForConversation(conversationId: string) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return;
+
+  // Find all unread chat notifications for this conversation
+  const { data: notifications, error: fetchError } = await supabase
+    .from('notifications')
+    .select('id')
+    .eq('user_id', user.id)
+    .eq('read', false)
+    .in('type', ['new_message', 'message'])
+    .filter('metadata->conversation_id', 'eq', `"${conversationId}"`);
+
+  if (fetchError) {
+    console.warn('Error fetching chat notifications for conversation:', fetchError);
+    return;
+  }
+
+  if (!notifications || notifications.length === 0) return;
+
+  // Mark them as read
+  try {
+    await markNotificationsAsRead(notifications.map(n => n.id));
+  } catch (err) {
+    console.warn('Error marking chat notifications as read:', err);
+  }
 }
 
 /**
@@ -235,7 +295,11 @@ export function subscribeToNotifications(
  */
 export async function syncBadgeWithUnreadCount(): Promise<number> {
   try {
-    const count = await fetchUnreadCount();
+    const [generalCount, chatCount] = await Promise.all([
+      fetchUnreadCount(),
+      fetchUnreadChatNotificationCount(),
+    ]);
+    const count = generalCount + chatCount;
     // Dynamic import keeps badge.ts out of the critical path on web/Android.
     const { setBadgeCount } = await import("@/lib/badge");
     await setBadgeCount(count);

@@ -3,7 +3,7 @@ import type { CapacitorConfig } from "@capacitor/cli";
 const useDevServer = String(process.env.CAP_USE_SERVER || "").toLowerCase() === "true";
 
 const config: CapacitorConfig = {
-  appId: "dev.ketravelan.app",
+  appId: "com.ketravelan.app",
   appName: "Ketravelan",
   webDir: "dist",
   // Dev server for Android emulator live reload (toggle via CAP_USE_SERVER=true)

@@ -1,5 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { supabase } from './supabase';
+import { isMessagingBlockedBetweenUsers } from '@/lib/blockUser';
+import { getBlockedRelationshipUserIds } from '@/lib/moderation';
 
 // Module-level profile cache shared across all fetches and subscriptions.
 // Populated eagerly from conversations list so chat never needs a fresh profile fetch.
@@ -27,6 +29,14 @@ export type ChatAttachment = {
   lng?: number;
   address?: string;
 };
+
+const MESSAGE_ACTION_WINDOW_MS = 60 * 1000;
+
+function isWithinMessageActionWindow(createdAt: string): boolean {
+  const created = new Date(createdAt).getTime();
+  if (!Number.isFinite(created)) return false;
+  return Date.now() - created <= MESSAGE_ACTION_WINDOW_MS;
+}
 
 // Fetch conversation by its ID (primary key)
 export async function fetchConversationById(conversationId: string) {
@@ -161,6 +171,7 @@ export async function createTripConversation(tripId: string) {
 }
 
 export async function fetchConversationMessages(conversationId: string, limit = 50) {
+  const { data: { user } } = await supabase.auth.getUser();
   const { data, error } = await supabase
     .from('messages')
     .select(`
@@ -181,7 +192,10 @@ export async function fetchConversationMessages(conversationId: string, limit = 
     .limit(limit);
 
   if (error) throw error;
-  const result = data?.reverse() || [];
+  const blockedUserIds = new Set(user ? await getBlockedRelationshipUserIds() : []);
+  const result = (data || [])
+    .filter((message: any) => !message.sender_id || !blockedUserIds.has(message.sender_id))
+    .reverse();
   // Populate module-level profile cache from inline sender data
   result.forEach((msg: any) => {
     const s = Array.isArray(msg.sender) ? msg.sender[0] : msg.sender;
@@ -193,6 +207,25 @@ export async function fetchConversationMessages(conversationId: string, limit = 
 export async function sendMessage(conversationId: string, content: string, clientId?: string, attachments?: ChatAttachment[]) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
+
+  // Enforce block behavior for direct chats: if either side blocked, stop sending.
+  const { data: convo, error: convoErr } = await supabase
+    .from('conversations')
+    .select('conversation_type, user1_id, user2_id')
+    .eq('id', conversationId)
+    .maybeSingle();
+
+  if (convoErr) throw convoErr;
+
+  if (convo?.conversation_type === 'direct') {
+    const otherUserId = convo.user1_id === user.id ? convo.user2_id : convo.user1_id;
+    if (otherUserId) {
+      const blocked = await isMessagingBlockedBetweenUsers(user.id, otherUserId);
+      if (blocked) {
+        throw new Error('You cannot send messages to this user.');
+      }
+    }
+  }
 
   const { data, error } = await supabase
     .from('messages')
@@ -212,6 +245,99 @@ export async function sendMessage(conversationId: string, content: string, clien
 
   if (error) throw error;
   return data;
+}
+
+export async function editOwnMessage(messageId: string, newContent: string) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not authenticated');
+
+  const { data: existing, error: readError } = await supabase
+    .from('messages')
+    .select('id, sender_id, created_at')
+    .eq('id', messageId)
+    .maybeSingle();
+
+  if (readError) throw readError;
+  if (!existing) throw new Error('Message not found');
+  if (existing.sender_id !== user.id) throw new Error('You can only edit your own message');
+  if (!isWithinMessageActionWindow(existing.created_at)) {
+    throw new Error('Message actions are only available within 1 minute');
+  }
+
+  const { data, error } = await supabase
+    .from('messages')
+    .update({
+      content: newContent,
+      is_edited: true,
+      edited_at: new Date().toISOString(),
+    })
+    .eq('id', messageId)
+    .eq('sender_id', user.id)
+    .select('id, content, is_edited, edited_at')
+    .maybeSingle();
+
+  if (error) throw error;
+  return data;
+}
+
+export async function unsendOwnMessage(messageId: string) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not authenticated');
+
+  const { data: existing, error: readError } = await supabase
+    .from('messages')
+    .select('id, sender_id, created_at')
+    .eq('id', messageId)
+    .maybeSingle();
+
+  if (readError) throw readError;
+  if (!existing) throw new Error('Message not found');
+  if (existing.sender_id !== user.id) throw new Error('You can only unsend your own message');
+  if (!isWithinMessageActionWindow(existing.created_at)) {
+    throw new Error('Message actions are only available within 1 minute');
+  }
+
+  const { data, error } = await supabase
+    .from('messages')
+    .update({
+      content: 'This message was unsent',
+      attachments: [],
+      is_edited: false,
+      edited_at: null,
+    })
+    .eq('id', messageId)
+    .eq('sender_id', user.id)
+    .select('id, content, attachments, is_edited, edited_at')
+    .maybeSingle();
+
+  if (error) throw error;
+  return data;
+}
+
+export async function deleteOwnMessage(messageId: string) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not authenticated');
+
+  const { data: existing, error: readError } = await supabase
+    .from('messages')
+    .select('id, sender_id, created_at')
+    .eq('id', messageId)
+    .maybeSingle();
+
+  if (readError) throw readError;
+  if (!existing) throw new Error('Message not found');
+  if (existing.sender_id !== user.id) throw new Error('You can only delete your own message');
+  if (!isWithinMessageActionWindow(existing.created_at)) {
+    throw new Error('Message actions are only available within 1 minute');
+  }
+
+  const { error } = await supabase
+    .from('messages')
+    .delete()
+    .eq('id', messageId)
+    .eq('sender_id', user.id);
+
+  if (error) throw error;
 }
 
 export async function updateLastRead(conversationId: string) {
@@ -264,6 +390,7 @@ export async function deleteDirectConversation(conversationId: string) {
 }
 
 export async function subscribeToMessages(conversationId: string, callback: (message: any) => void) {
+  const { data: { user } } = await supabase.auth.getUser();
   const channel = supabase
     .channel(`messages:${conversationId}`)
     .on(
@@ -276,6 +403,12 @@ export async function subscribeToMessages(conversationId: string, callback: (mes
       },
       async (payload) => {
         const raw = payload.new as any;
+        if (user && raw.sender_id) {
+          const blockedUserIds = new Set(await getBlockedRelationshipUserIds());
+          if (blockedUserIds.has(raw.sender_id)) {
+            return;
+          }
+        }
 
         // Use cached profile or fetch once, then cache
         let sender = profileCache.get(raw.sender_id) ?? null;

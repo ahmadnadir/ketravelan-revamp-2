@@ -127,6 +127,10 @@ entrypoint = "./functions/send-expense-overdue-reminder/index.ts"
 enabled = true
 verify_jwt = false
 entrypoint = "./functions/send-chat-push/index.ts"
+[functions.delete-account]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/delete-account/index.ts"
 [functions.send-chat-mention]
 enabled = true
 verify_jwt = false

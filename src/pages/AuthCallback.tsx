@@ -2,9 +2,20 @@ import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
 import { Loader2 } from "lucide-react";
+import { toast } from "@/hooks/use-toast";
+import {
+  clearPendingAuthIntent,
+  consumeAuthError,
+  getPendingAuthIntent,
+  normalizeOAuthErrorMessage,
+} from "@/lib/authFlow";
 
 export default function AuthCallback() {
   const navigate = useNavigate();
+
+  const isPkceVerifierMissingError = (message: string | null | undefined) => {
+    return (message || "").toLowerCase().includes("pkce code verifier not found");
+  };
 
   const isProfileComplete = (profile: {
     onboarding_completed?: boolean | null;
@@ -22,12 +33,73 @@ export default function AuthCallback() {
 
   useEffect(() => {
     const handleCallback = async () => {
+      const pendingIntent = getPendingAuthIntent();
+      const routeOnError = pendingIntent?.kind === "link" ? pendingIntent.returnTo || "/settings" : "/auth";
+
       try {
+        const queryError = new URL(window.location.href).searchParams.get("error_description")
+          || new URL(window.location.href).searchParams.get("error");
+        const pendingError = consumeAuthError();
+        const authError = pendingError || normalizeOAuthErrorMessage(queryError, pendingIntent?.provider);
+
+        if (pendingError || queryError) {
+          // On some OAuth flows, a stale/duplicate PKCE callback can surface this error
+          // even though a valid session is already established. Treat that case as success.
+          if (isPkceVerifierMissingError(authError)) {
+            const { data: existingSessionData } = await supabase.auth.getSession();
+            if (existingSessionData.session) {
+              // Continue normally to session/profile routing below.
+            } else {
+              clearPendingAuthIntent();
+              toast({
+                title: pendingIntent?.kind === "link" ? "Account connection failed" : "Sign-in failed",
+                description: authError,
+                variant: "destructive",
+              });
+              navigate(routeOnError, { replace: true });
+              return;
+            }
+          } else {
+            clearPendingAuthIntent();
+            toast({
+              title: pendingIntent?.kind === "link" ? "Account connection failed" : "Sign-in failed",
+              description: authError,
+              variant: "destructive",
+            });
+            navigate(routeOnError, { replace: true });
+            return;
+          }
+        }
+
         // Exchange authorization code/magic link for a session if present
         try {
           const code = new URL(window.location.href).searchParams.get('code');
           if (code) {
-            await supabase.auth.exchangeCodeForSession(code);
+            const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+            if (exchangeError) {
+              if (isPkceVerifierMissingError(exchangeError.message)) {
+                const { data: existingSessionData } = await supabase.auth.getSession();
+                if (!existingSessionData.session) {
+                  clearPendingAuthIntent();
+                  toast({
+                    title: pendingIntent?.kind === "link" ? "Account connection failed" : "Sign-in failed",
+                    description: normalizeOAuthErrorMessage(exchangeError.message, pendingIntent?.provider),
+                    variant: "destructive",
+                  });
+                  navigate(routeOnError, { replace: true });
+                  return;
+                }
+              } else {
+                clearPendingAuthIntent();
+                toast({
+                  title: pendingIntent?.kind === "link" ? "Account connection failed" : "Sign-in failed",
+                  description: normalizeOAuthErrorMessage(exchangeError.message, pendingIntent?.provider),
+                  variant: "destructive",
+                });
+                navigate(routeOnError, { replace: true });
+                return;
+              }
+            }
           }
         } catch (e) {
           // It's okay if there's no code in URL; proceed to check session
@@ -48,7 +120,8 @@ export default function AuthCallback() {
         const { data, error } = await supabase.auth.getSession();
         if (error) {
           console.error("Auth callback error:", error);
-          navigate("/auth?error=callback_failed");
+          clearPendingAuthIntent();
+          navigate(`${routeOnError}?error=callback_failed`, { replace: true });
           return;
         }
         // If this is a recovery flow, redirect to reset-password immediately
@@ -57,6 +130,16 @@ export default function AuthCallback() {
           return;
         }
         if (data.session) {
+          if (pendingIntent?.kind === "link") {
+            clearPendingAuthIntent();
+            toast({
+              title: "Account connected",
+              description: `${pendingIntent.provider === "apple" ? "Apple" : "Google"} is now linked to your account.`,
+            });
+            navigate(pendingIntent.returnTo || "/settings", { replace: true });
+            return;
+          }
+
           // Fetch user profile to check onboarding and verification
           const userId = data.session.user.id;
           const { data: profile, error: profileError } = await supabase
@@ -66,20 +149,24 @@ export default function AuthCallback() {
             .maybeSingle();
           if (profileError) {
             console.error("Profile fetch error:", profileError);
-            navigate("/auth?error=profile_failed");
+            clearPendingAuthIntent();
+            navigate("/auth?error=profile_failed", { replace: true });
             return;
           }
+          clearPendingAuthIntent();
           if (isProfileComplete(profile)) {
-            navigate("/explore");
+            navigate("/explore", { replace: true });
           } else {
-            navigate("/onboarding");
+            navigate("/onboarding", { replace: true });
           }
         } else {
-          navigate("/auth");
+          clearPendingAuthIntent();
+          navigate(routeOnError, { replace: true });
         }
       } catch (error) {
         console.error("Unexpected error during auth callback:", error);
-        navigate("/auth?error=unexpected_error");
+        clearPendingAuthIntent();
+        navigate("/auth?error=unexpected_error", { replace: true });
       }
     };
     handleCallback();

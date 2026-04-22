@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Bell, MessageCircle, UserPlus, DollarSign, Calendar, Users, X, type LucideIcon } from "lucide-react";
+import { Bell, MessageCircle, UserPlus, DollarSign, Calendar, Users, X, Heart, CheckCircle2, type LucideIcon } from "lucide-react";
 import {
   Sheet,
   SheetContent,
@@ -104,6 +104,12 @@ const iconMap: Record<Notification['type'], LucideIcon> = {
   receipt_approved: DollarSign,
   receipt_rejected: DollarSign,
   trip_settlement_required: DollarSign,
+  story_like: Heart,
+  story_comment: MessageCircle,
+  discussion_like: Heart,
+  discussion_reply: MessageCircle,
+  discussion_reply_to_you: MessageCircle,
+  discussion_answer_accepted: CheckCircle2,
 };
 
 interface NotificationsSheetProps {
@@ -184,13 +190,43 @@ export function NotificationsSheet({ open, onOpenChange }: NotificationsSheetPro
     
     // Determine the URL to navigate to
     let urlToNavigate: string | null = null;
+    const metadata = (notification.metadata || {}) as Record<string, unknown>;
+    const isExpenseNotification =
+      notification.type === 'new_expense' ||
+      notification.type === 'expense' ||
+      notification.type === 'expense_paid' ||
+      notification.type === 'expense_reminder';
 
-    if (notification.action_url) {
+    // For expense/payment notifications, always route to Trip Hub > Expenses.
+    const relatedTripId =
+      (typeof metadata.trip_id === 'string' && metadata.trip_id) ||
+      ((notification as unknown as { related_trip_id?: string | null }).related_trip_id ?? null);
+
+    if (isExpenseNotification && relatedTripId) {
+      urlToNavigate = `/trip/${relatedTripId}/hub?tab=expenses`;
+      persistLog('Forced expense notification route to trip hub expenses', { urlToNavigate, relatedTripId });
+    }
+
+    if (!urlToNavigate && notification.action_url) {
+      const rawActionUrl = notification.action_url;
+
+      if (isExpenseNotification) {
+        const tripMatch = rawActionUrl.match(/\/trips?\/([^/?#]+)/i);
+        if (tripMatch?.[1]) {
+          urlToNavigate = `/trip/${tripMatch[1]}/hub?tab=expenses`;
+          persistLog('Rewrote expense action_url to trip hub expenses', {
+            originalActionUrl: rawActionUrl,
+            urlToNavigate,
+          });
+        }
+      }
+
+      if (!urlToNavigate) {
       urlToNavigate = notification.action_url;
       persistLog('Using action_url from notification', { urlToNavigate });
-    } else if (notification.metadata) {
+      }
+    } else if (!urlToNavigate && notification.metadata) {
       // Fallback: reconstruct URL from metadata if action_url is missing
-      const metadata = notification.metadata as Record<string, unknown>;
       if (metadata.conversation_id) {
         urlToNavigate = `/chat/${metadata.conversation_id}`;
         persistLog('Reconstructed URL from metadata (conversation)', { urlToNavigate });
@@ -202,6 +238,15 @@ export function NotificationsSheet({ open, onOpenChange }: NotificationsSheetPro
         }
         urlToNavigate = `/trip/${metadata.trip_id}/hub?tab=${tab}`;
         persistLog('Reconstructed URL from metadata (trip)', { urlToNavigate, tab });
+      } else if (metadata.discussion_id) {
+        urlToNavigate = `/community/discussions/${metadata.discussion_id}${metadata.reply_id ? `?reply=${metadata.reply_id}` : ''}`;
+        persistLog('Reconstructed URL from metadata (discussion)', { urlToNavigate });
+      } else if (metadata.story_slug) {
+        urlToNavigate = `/community/stories/${metadata.story_slug}`;
+        persistLog('Reconstructed URL from metadata (story slug)', { urlToNavigate });
+      } else if (metadata.story_id) {
+        urlToNavigate = `/community?tab=stories`;
+        persistLog('Reconstructed URL fallback from metadata (story id)', { urlToNavigate });
       }
     }
 

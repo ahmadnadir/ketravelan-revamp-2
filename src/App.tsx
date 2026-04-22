@@ -43,6 +43,8 @@ import DiscussionDetail from "./pages/DiscussionDetail";
 import CreateStory from "./pages/CreateStory";
 import Feedback from "./pages/Feedback";
 import Settings from "./pages/Settings";
+import BlockedUsers from "./pages/BlockedUsers";
+import ModerationReports from "./pages/ModerationReports";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
 import TermsOfService from "./pages/TermsOfService";
 import Contact from "./pages/Contact";
@@ -50,10 +52,13 @@ import About from "./pages/About";
 import HelpCenter from "./pages/HelpCenter";
 import HelpArticleDetail from "./pages/HelpArticleDetail";
 import { classifyRequestError } from "@/lib/requestErrors";
+import { getPendingAuthIntent, normalizeOAuthErrorMessage, persistAuthError } from "@/lib/authFlow";
 
 import { PageTransition } from "./components/layout/PageTransition";
 import { OfflineBanner } from "./components/layout/OfflineBanner";
 import { NetworkStatusProvider } from "./contexts/NetworkStatusContext";
+import { AppInitializer } from "./components/AppInitializer";
+import { TermsAcceptanceModal } from "./components/modals/TermsAcceptanceModal";
 import React, { Suspense, useEffect, useRef, useState } from "react";
 
 const VerificationPending = React.lazy(() => import("./pages/VerificationPending"));
@@ -115,6 +120,7 @@ function AuthDeepLinkHandler() {
     }
 
     const handleUrl = async (url: string) => {
+      const pendingIntent = getPendingAuthIntent();
       const normalizedUrl = url.toLowerCase();
       const isSupportedAuthCallback =
         normalizedUrl.startsWith("ketravelan://login-callback") ||
@@ -148,6 +154,19 @@ function AuthDeepLinkHandler() {
 
       console.log("[AuthDeepLink] Received URL:", url);
       console.log("[AuthDeepLink] code present:", hasCode);
+
+      let callbackError = "";
+      try {
+        const parsedUrl = new URL(url);
+        callbackError = parsedUrl.searchParams.get("error_description") || parsedUrl.searchParams.get("error") || "";
+      } catch {
+        callbackError = "";
+      }
+
+      if (callbackError) {
+        persistAuthError(normalizeOAuthErrorMessage(callbackError, pendingIntent?.provider));
+      }
+
       try {
         const prefKeys = await Preferences.keys();
         const prefKeysUnknown = prefKeys as { keys?: string[] | string };
@@ -183,6 +202,7 @@ function AuthDeepLinkHandler() {
           const exchangeResult = await supabase.auth.exchangeCodeForSession(authCode);
           if (exchangeResult.error) {
             console.warn("[AuthDeepLink] exchangeCodeForSession error:", exchangeResult.error);
+            persistAuthError(normalizeOAuthErrorMessage(exchangeResult.error.message, pendingIntent?.provider));
           } else {
             console.log("[AuthDeepLink] exchangeCodeForSession success:", JSON.stringify({
               hasSession: !!exchangeResult.data.session,
@@ -324,6 +344,8 @@ const App = () => (
           <SafeAreaLayout>
             <OfflineBanner />
             <IOSStatusBarInitializer />
+            <AppInitializer />
+            <TermsAcceptanceModal />
             <ScrollToTop />
           <AuthDeepLinkHandler />
             <RecoveryBootstrap />
@@ -350,6 +372,7 @@ const App = () => (
                 }
               />
               <Route path="/chat" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
+              <Route path="/chat/new/:userId" element={<ProtectedRoute><DirectChat /></ProtectedRoute>} />
               <Route path="/community" element={<Community />} />
               <Route path="/community/stories/:slug" element={<StoryDetail />} />
               <Route path="/community/discussions/:id" element={<DiscussionDetail />} />
@@ -369,6 +392,8 @@ const App = () => (
               <Route path="/onboarding" element={<Onboarding />} />
               <Route path="/feedback" element={<ProtectedRoute><Feedback /></ProtectedRoute>} />
               <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+              <Route path="/settings/blocked-users" element={<ProtectedRoute><BlockedUsers /></ProtectedRoute>} />
+              <Route path="/settings/moderation-reports" element={<ProtectedRoute><ModerationReports /></ProtectedRoute>} />
               <Route path="/privacy-policy" element={<PrivacyPolicy />} />
               <Route path="/terms-of-service" element={<TermsOfService />} />
               <Route path="/contact" element={<Contact />} />

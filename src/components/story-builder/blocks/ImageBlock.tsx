@@ -55,7 +55,7 @@ export function ImageBlock({ block, onUpdate }: ImageBlockProps) {
       <input
         ref={inputRef}
         type="file"
-        accept="image/*"
+        accept="image/*,.heic,.heif"
         onChange={handleImageSelect}
         className="hidden"
       />

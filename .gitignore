@@ -23,3 +23,11 @@ dist-ssr
 *.sln
 *.sw?
 .env
+android/keystore.properties
+
+# Signing keys and certificates (never commit)
+android/app/*.jks
+android/app/*.keystore
+android/app/*.p8
+android/app/*.cer
+AuthKey_*.p8

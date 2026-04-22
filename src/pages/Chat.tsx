@@ -19,6 +19,7 @@ import { useConversations } from "@/hooks/useConversations";
 import { deleteDirectConversation } from "@/lib/conversations";
 import { getLoadErrorFeedback } from "@/lib/requestErrors";
 import { markConversationReadOptimistically } from "@/lib/chatReadService";
+import { getBlockedUsers } from "@/lib/blockUser";
 
 // Helper to generate fallback avatar
 const getDefaultAvatar = (userId: string) => {
@@ -106,6 +107,7 @@ export default function Chat() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const deletedTripNotifiedConversationsRef = useRef<Set<string>>(new Set());
+  const [blockedUserIds, setBlockedUserIds] = useState<Set<string>>(new Set());
 
   // Fetch conversations with React Query
   const { data: participants = [], isLoading: loading, error } = useConversations(user?.id);
@@ -116,6 +118,32 @@ export default function Chat() {
     const feedback = getLoadErrorFeedback('chats', error);
     toast.error(feedback.title, { description: feedback.description });
   }, [error]);
+
+  useEffect(() => {
+    let mounted = true;
+    if (!user?.id) {
+      setBlockedUserIds(new Set());
+      return;
+    }
+
+    const loadBlockedUsers = async () => {
+      const ids = await getBlockedUsers();
+      if (mounted) {
+        setBlockedUserIds(new Set(ids));
+      }
+    };
+
+    void loadBlockedUsers();
+    const onFocus = () => {
+      void loadBlockedUsers();
+    };
+    window.addEventListener('focus', onFocus);
+
+    return () => {
+      mounted = false;
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [user?.id]);
 
   // Map participants to chat items
   const chats = useMemo(() => {
@@ -129,10 +157,17 @@ export default function Chat() {
         if (!conv) return false;
         // Safety guard: hide orphaned trip chats when trip was deleted.
         if (conv.conversation_type === 'trip_group' && !conv.trip) return false;
+
+        // Hide direct conversations for users I have blocked.
+        if (conv.conversation_type === 'direct' && user?.id) {
+          const otherUserId = conv.user1?.id === user.id ? conv.user2?.id : conv.user1?.id;
+          if (otherUserId && blockedUserIds.has(otherUserId)) return false;
+        }
+
         return true;
       })
       .map((p: any) => mapConversationToChatItem(p, user?.id));
-  }, [participants, user?.id]);
+  }, [participants, user?.id, blockedUserIds]);
 
   useEffect(() => {
     if (!participants || !Array.isArray(participants)) return;
@@ -153,15 +188,81 @@ export default function Chat() {
     });
   }, [participants]);
 
-  // Subscribe to new messages for real-time updates
+  // Subscribe to new messages for real-time updates with optimistic UI updates
   useEffect(() => {
     if (!user) return;
 
     const channel = supabase
       .channel('chat-list')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, () => {
-        // Invalidate and refetch conversations
-        queryClient.invalidateQueries({ queryKey: ['conversations', user.id] });
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, async (payload) => {
+        // OPTIMISTIC: Update the chat list immediately with the new message
+        // instead of waiting for a full refetch. This makes the UI feel instant (like WhatsApp).
+        const newMsg = payload.new as any;
+        
+        // Try to fetch sender profile if not available
+        let senderProfile = null;
+        if (newMsg.sender_id) {
+          try {
+            const { data } = await supabase
+              .from('profiles')
+              .select('id, full_name, username, avatar_url')
+              .eq('id', newMsg.sender_id)
+              .maybeSingle();
+            senderProfile = data;
+          } catch (err) {
+            console.warn('[chat-list] Failed to fetch sender profile:', err);
+          }
+        }
+        
+        queryClient.setQueryData(['conversations', user.id], (oldData: any[] | undefined) => {
+          if (!Array.isArray(oldData)) {
+            // If data not in cache, invalidate to refetch
+            setTimeout(() => {
+              queryClient.invalidateQueries({ queryKey: ['conversations', user.id] });
+            }, 100);
+            return oldData;
+          }
+
+          // Find the conversation this message belongs to and update it
+          const updated = oldData
+            .map((participant: any) => {
+              if (participant?.conversation?.id !== newMsg.conversation_id) return participant;
+
+              // Update last message with sender profile if available
+              return {
+                ...participant,
+                lastMessage: {
+                  id: newMsg.id,
+                  sender_id: newMsg.sender_id,
+                  content: newMsg.content,
+                  attachments: newMsg.attachments,
+                  created_at: newMsg.created_at,
+                  type: newMsg.type,
+                  sender: senderProfile || participant.lastMessage?.sender || { id: newMsg.sender_id },
+                },
+              };
+            })
+            .sort((a: any, b: any) => {
+              // Re-sort: conversations with latest messages float to top
+              const aTime = a.lastMessage?.created_at
+                ? new Date(a.lastMessage.created_at).getTime()
+                : new Date(a.created_at ?? 0).getTime();
+              const bTime = b.lastMessage?.created_at
+                ? new Date(b.lastMessage.created_at).getTime()
+                : new Date(b.created_at ?? 0).getTime();
+              return bTime - aTime;
+            });
+          
+          return updated;
+        });
+        
+        // After optimistic update, refetch full data after 300ms to ensure everything is synced
+        // This handles edge cases where the optimistic update was incomplete
+        setTimeout(() => {
+          queryClient.refetchQueries({ 
+            queryKey: ['conversations', user.id],
+          });
+        }, 300);
       })
       .subscribe();
 

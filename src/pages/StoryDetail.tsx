@@ -1,5 +1,5 @@
-import { useParams, Link, useNavigate } from "react-router-dom";
-import { ArrowLeft, Heart, Bookmark, Share2, MapPin, Clock, Send, Pencil, Trash2, Instagram, Youtube, Facebook, Twitter, Link2 } from "lucide-react";
+import { useParams, Link, useNavigate, useLocation } from "react-router-dom";
+import { ArrowLeft, Heart, Bookmark, Share2, MapPin, Clock, Send, Pencil, Trash2, Check, Instagram, Youtube, Facebook, Twitter, Link2 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -10,13 +10,14 @@ import { storyTypeLabels, storyTypeEmojis, Story } from "@/data/communityMockDat
 import { getTravelStyleEmoji, getTravelStyleLabel } from "@/data/travelStyles";
 import { SEOHead } from "@/components/seo/SEOHead";
 import { formatDistanceToNow } from "date-fns";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchStoryBySlug, toggleStoryReaction, deleteStory, createStoryComment, updateStoryComment, deleteStoryComment } from "@/lib/community";
 import { toast } from "@/hooks/use-toast";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { buildPublicUrl } from "@/lib/publicUrl";
 import { getLoadErrorFeedback } from "@/lib/requestErrors";
+import { ModerationMenu } from "@/components/moderation/ModerationMenu";
 
 const TikTok = ({ className }: { className?: string }) => (
   <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -66,6 +67,7 @@ const processContentForPreview = (htmlContent: string): string => {
 export default function StoryDetail() {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const { user } = useAuth();
   const [story, setStory] = useState<Story | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -74,8 +76,33 @@ export default function StoryDetail() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [commentText, setCommentText] = useState("");
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
-  const [editCommentText, setEditCommentText] = useState("");
   const [deletingCommentId, setDeletingCommentId] = useState<string | null>(null);
+  const [replyingToCommentId, setReplyingToCommentId] = useState<string | null>(null);
+  const [replyingToAuthor, setReplyingToAuthor] = useState<string | null>(null);
+  const [highlightedCommentId, setHighlightedCommentId] = useState<string | null>(null);
+  const [scrolledCommentId, setScrolledCommentId] = useState<string | null>(null);
+  const commentRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const desktopCommentInputRef = useRef<HTMLInputElement | null>(null);
+  const mobileCommentInputRef = useRef<HTMLInputElement | null>(null);
+
+  const focusCommentComposer = () => {
+    if (typeof window === "undefined") return;
+
+    window.setTimeout(() => {
+      const isMobile = window.matchMedia("(max-width: 639px)").matches;
+      const input = isMobile ? mobileCommentInputRef.current : desktopCommentInputRef.current;
+      if (!input) return;
+
+      input.focus();
+      const cursorPos = input.value.length;
+      input.setSelectionRange(cursorPos, cursorPos);
+    }, 0);
+  };
+
+  const targetCommentId = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    return params.get("comment");
+  }, [location.search]);
 
   const normalizeSocialUrl = (platform: string, rawUrl: string) => {
     const value = String(rawUrl || "").trim();
@@ -111,6 +138,35 @@ export default function StoryDetail() {
 
   const isOwner = user && story && story.author.id === user.id;
 
+  const getNestedComments = () => {
+    const comments = story?.commentsList || [];
+    if (comments.length === 0) return [];
+
+    const commentsByParent = new Map<string, typeof comments>();
+    comments.forEach((comment) => {
+      if (comment.parentCommentId) {
+        const current = commentsByParent.get(comment.parentCommentId) || [];
+        current.push(comment);
+        commentsByParent.set(comment.parentCommentId, current);
+      }
+    });
+
+    const topLevel = comments
+      .filter((comment) => !comment.parentCommentId)
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+
+    const flatten: typeof comments = [];
+    const appendWithReplies = (comment: typeof comments[number]) => {
+      flatten.push(comment);
+      const children = (commentsByParent.get(comment.id) || [])
+        .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+      children.forEach(appendWithReplies);
+    };
+
+    topLevel.forEach(appendWithReplies);
+    return flatten;
+  };
+
   useEffect(() => {
     if (!slug) return;
     let isMounted = true;
@@ -136,6 +192,33 @@ export default function StoryDetail() {
       isMounted = false;
     };
   }, [slug, user?.id]);
+
+  useEffect(() => {
+    setScrolledCommentId(null);
+    setHighlightedCommentId(null);
+  }, [targetCommentId]);
+
+  useEffect(() => {
+    if (!targetCommentId || !story?.commentsList?.length || scrolledCommentId === targetCommentId) return;
+
+    const targetExists = story.commentsList.some((comment) => comment.id === targetCommentId);
+    if (!targetExists) return;
+
+    const timer = window.setTimeout(() => {
+      const element = commentRefs.current[targetCommentId];
+      if (!element) return;
+
+      element.scrollIntoView({ behavior: "smooth", block: "center" });
+      setHighlightedCommentId(targetCommentId);
+      setScrolledCommentId(targetCommentId);
+
+      window.setTimeout(() => {
+        setHighlightedCommentId((current) => (current === targetCommentId ? null : current));
+      }, 1800);
+    }, 120);
+
+    return () => window.clearTimeout(timer);
+  }, [targetCommentId, story?.commentsList, scrolledCommentId]);
 
   if (isLoading) {
     return (
@@ -331,7 +414,8 @@ export default function StoryDetail() {
   };
 
   const handleSubmitComment = async () => {
-    if (!commentText.trim() || !story) return;
+    const trimmedText = commentText.trim();
+    if (!trimmedText || !story) return;
     if (!user) {
       toast({
         title: "Sign in required",
@@ -342,19 +426,31 @@ export default function StoryDetail() {
     }
 
     try {
-      await createStoryComment(story.id, commentText);
-      toast({ 
-        title: "Comment posted!",
-        description: "Your comment has been added."
-      });
+      if (editingCommentId) {
+        await updateStoryComment(editingCommentId, trimmedText);
+        toast({
+          title: "Comment updated",
+          description: "Your changes have been saved."
+        });
+      } else {
+        await createStoryComment(story.id, trimmedText, replyingToCommentId || undefined);
+        toast({
+          title: replyingToCommentId ? "Reply posted!" : "Comment posted!",
+          description: replyingToCommentId ? "Your reply has been added." : "Your comment has been added."
+        });
+      }
+
       setCommentText("");
+      setEditingCommentId(null);
+      setReplyingToCommentId(null);
+      setReplyingToAuthor(null);
       
       // Refresh story to get updated comment count
       const updatedStory = await fetchStoryBySlug(slug!, user?.id);
       setStory(updatedStory);
     } catch (error) {
       toast({
-        title: "Failed to post comment",
+        title: editingCommentId ? "Failed to update comment" : "Failed to post comment",
         description: error instanceof Error ? error.message : "Please try again.",
         variant: "destructive",
       });
@@ -363,36 +459,15 @@ export default function StoryDetail() {
 
   const handleEditComment = (commentId: string, currentBody: string) => {
     setEditingCommentId(commentId);
-    setEditCommentText(currentBody);
+    setReplyingToCommentId(null);
+    setReplyingToAuthor(null);
+    setCommentText(currentBody);
+    focusCommentComposer();
   };
 
   const handleCancelEdit = () => {
     setEditingCommentId(null);
-    setEditCommentText("");
-  };
-
-  const handleSaveEdit = async (commentId: string) => {
-    if (!editCommentText.trim()) return;
-
-    try {
-      await updateStoryComment(commentId, editCommentText);
-      toast({
-        title: "Comment updated",
-        description: "Your changes have been saved."
-      });
-      setEditingCommentId(null);
-      setEditCommentText("");
-
-      // Refresh story to get updated comments
-      const updatedStory = await fetchStoryBySlug(slug!, user?.id);
-      setStory(updatedStory);
-    } catch (error) {
-      toast({
-        title: "Failed to update comment",
-        description: error instanceof Error ? error.message : "Please try again.",
-        variant: "destructive",
-      });
-    }
+    setCommentText("");
   };
 
   const handleDeleteComment = async (commentId: string) => {
@@ -418,6 +493,19 @@ export default function StoryDetail() {
     } finally {
       setDeletingCommentId(null);
     }
+  };
+
+  const handleReplyToComment = (commentId: string, authorName: string) => {
+    setEditingCommentId(null);
+    setCommentText("");
+    setReplyingToCommentId(commentId);
+    setReplyingToAuthor(authorName);
+    focusCommentComposer();
+  };
+
+  const cancelReplyToComment = () => {
+    setReplyingToCommentId(null);
+    setReplyingToAuthor(null);
   };
 
   return (
@@ -466,6 +554,15 @@ export default function StoryDetail() {
                 <Trash2 className="h-5 w-5" />
               </button>
             </>
+          )}
+          {!isOwner && story && (
+            <ModerationMenu
+              reportType="STORY"
+              targetId={story.id}
+              reportedUserId={story.author.id}
+              targetLabel="Story"
+              reportLabel="Report Story"
+            />
           )}
           <button 
             onClick={handleShare}
@@ -618,49 +715,24 @@ export default function StoryDetail() {
         {/* Comments Section */}
         <div className="space-y-5 sm:space-y-4">
           <h3 className="font-semibold text-lg">Comments ({story?.commentsList?.length || 0})</h3>
-          
-          {/* Comment Input */}
-          {user ? (
-            <div className="flex gap-2 mb-8 sm:mb-6">
-              <Input
-                type="text"
-                placeholder="Write a comment..."
-                value={commentText}
-                onChange={(e) => setCommentText(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSubmitComment();
-                  }
-                }}
-                className="flex-1"
-              />
-              <Button 
-                size="icon" 
-                className="rounded-lg"
-                onClick={handleSubmitComment}
-                disabled={!commentText.trim()}
-              >
-                <Send className="h-4 w-4" />
-              </Button>
-            </div>
-          ) : (
-            <div className="bg-secondary/50 rounded-lg p-4 sm:p-3 mb-8 sm:mb-6 text-center">
-              <p className="text-sm text-muted-foreground">
-                <Link to="/auth" className="text-primary hover:underline">Sign in</Link> to leave a comment
-              </p>
-            </div>
-          )}
 
-          {/* Comments List */}
-          <div className="space-y-7 sm:space-y-6">
+          {/* Comments List - hidden on mobile to show above navbar */}
+          <div className="space-y-7 sm:space-y-6 pb-0 sm:pb-8">
             {story?.commentsList && story.commentsList.length > 0 ? (
-              story.commentsList.map((comment) => {
+              getNestedComments().map((comment) => {
                 const isCommentOwner = user && comment.author.id === user.id;
                 const isEditing = editingCommentId === comment.id;
+                const commentDepth = comment.depth ?? 0;
 
                 return (
-                  <div key={comment.id} className="flex gap-3">
+                  <div
+                    key={comment.id}
+                    ref={(element) => {
+                      commentRefs.current[comment.id] = element;
+                    }}
+                    className={`flex gap-3 ${highlightedCommentId === comment.id ? "rounded-lg bg-primary/10 ring-1 ring-primary/40 px-2 py-2 -mx-2" : ""}`}
+                    style={{ marginLeft: `${Math.min(commentDepth, 4) * 24}px` }}
+                  >
                     <Avatar className="h-9 w-9 flex-shrink-0">
                       <AvatarImage src={comment.author.avatar} />
                       <AvatarFallback>{comment.author.name[0]}</AvatarFallback>
@@ -693,41 +765,25 @@ export default function StoryDetail() {
                           </div>
                         )}
                       </div>
-                      {isEditing ? (
-                        <div className="flex gap-2 mt-2">
-                          <Input
-                            value={editCommentText}
-                            onChange={(e) => setEditCommentText(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter" && !e.shiftKey) {
-                                e.preventDefault();
-                                handleSaveEdit(comment.id);
-                              } else if (e.key === "Escape") {
-                                handleCancelEdit();
-                              }
-                            }}
-                            className="flex-1"
-                            autoFocus
-                          />
-                          <Button
-                            size="sm"
-                            onClick={() => handleSaveEdit(comment.id)}
-                            disabled={!editCommentText.trim()}
-                          >
-                            Save
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={handleCancelEdit}
-                          >
-                            Cancel
-                          </Button>
+                      <p className="text-sm text-foreground leading-relaxed">
+                        {comment.body}
+                      </p>
+
+                      {isEditing && (
+                        <div className="mt-1 text-xs text-primary font-medium">
+                          Editing in comment field below
                         </div>
-                      ) : (
-                        <p className="text-sm text-foreground leading-relaxed">
-                          {comment.body}
-                        </p>
+                      )}
+
+                      {!isEditing && user && (
+                        <div className="mt-2">
+                          <button
+                            onClick={() => handleReplyToComment(comment.id, comment.author.name)}
+                            className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                          >
+                            Reply
+                          </button>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -740,6 +796,127 @@ export default function StoryDetail() {
             )}
           </div>
         </div>
+      </div>
+
+      {/* Comment CTA - Fixed/Sticky above mobile navbar */}
+      {user ? (
+        <div className="hidden sm:block pt-2 space-y-2">
+          <div className="w-full px-5 sm:px-6 lg:px-8">
+            {editingCommentId && (
+              <div className="text-xs text-muted-foreground px-2 pb-1 flex items-center gap-2">
+                <span>Editing your comment</span>
+                <button onClick={handleCancelEdit} className="text-primary hover:underline">Cancel</button>
+              </div>
+            )}
+            {!editingCommentId && replyingToCommentId && (
+              <div className="text-xs text-muted-foreground px-2 pb-1">
+                Replying to <span className="font-medium text-foreground">{replyingToAuthor}</span>
+                <button onClick={cancelReplyToComment} className="ml-2 text-primary hover:underline">
+                  Cancel
+                </button>
+              </div>
+            )}
+            <div className="flex gap-2">
+              <Input
+                ref={desktopCommentInputRef}
+                type="text"
+                placeholder={editingCommentId ? "Edit your comment..." : replyingToCommentId ? `Reply to ${replyingToAuthor}...` : "Write a comment..."}
+                value={commentText}
+                onChange={(e) => setCommentText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSubmitComment();
+                  }
+                }}
+                className="flex-1"
+              />
+              <Button
+                size={editingCommentId ? "sm" : "icon"}
+                className={editingCommentId ? "rounded-lg px-4" : "rounded-lg"}
+                onClick={handleSubmitComment}
+                disabled={!commentText.trim()}
+              >
+                {editingCommentId ? (
+                  <>
+                    <Check className="h-4 w-4 mr-1" />
+                    Update
+                  </>
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="hidden sm:block bg-secondary/50 rounded-lg p-4 sm:p-3 text-center mx-5 sm:mx-6 lg:mx-8">
+          <p className="text-sm text-muted-foreground">
+            <Link to="/auth" className="text-primary hover:underline">Sign in</Link> to leave a comment
+          </p>
+        </div>
+      )}
+
+      {/* Mobile Comment CTA - Above navbar */}
+      <div 
+        className="sm:hidden fixed left-0 right-0 z-40 bg-background border-t border-black/[0.07] px-3 py-2"
+        style={{
+          bottom: 'calc(var(--keyboard-height, 0px) + var(--tabbar-height) + env(safe-area-inset-bottom, 0px))',
+        }}
+      >
+        {user ? (
+          <div className="space-y-1">
+            {editingCommentId && (
+              <div className="text-xs text-muted-foreground flex items-center gap-2">
+                <span>Editing your comment</span>
+                <button onClick={handleCancelEdit} className="text-primary hover:underline">Cancel</button>
+              </div>
+            )}
+            {!editingCommentId && replyingToCommentId && (
+              <div className="text-xs text-muted-foreground">
+                Replying to <span className="font-medium text-foreground">{replyingToAuthor}</span>
+                <button onClick={cancelReplyToComment} className="ml-2 text-primary hover:underline">
+                  Cancel
+                </button>
+              </div>
+            )}
+            <div className="flex gap-2 items-center">
+              <Input
+                ref={mobileCommentInputRef}
+                type="text"
+                placeholder={editingCommentId ? "Edit your comment..." : replyingToCommentId ? `Reply to ${replyingToAuthor}...` : "Write a comment..."}
+                value={commentText}
+                onChange={(e) => setCommentText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSubmitComment();
+                  }
+                }}
+                className="flex-1 h-8 text-xs px-3"
+              />
+              <Button
+                size={editingCommentId ? "sm" : "icon"}
+                className={editingCommentId ? "rounded-lg flex-shrink-0 h-8 px-3 text-xs" : "rounded-lg flex-shrink-0 h-8 w-8"}
+                onClick={handleSubmitComment}
+                disabled={!commentText.trim()}
+              >
+                {editingCommentId ? (
+                  <>
+                    <Check className="h-3.5 w-3.5 mr-1" />
+                    Save
+                  </>
+                ) : (
+                  <Send className="h-3.5 w-3.5" />
+                )}
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground text-center">
+            <Link to="/auth" className="text-primary hover:underline">Sign in</Link> to comment
+          </p>
+        )}
       </div>
 
       {/* Delete confirmation dialog */}

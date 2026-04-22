@@ -28,9 +28,10 @@ interface ChatComposerProps {
   placeholder?: string;
   onTypingChange?: (typing: boolean) => void;
   tripMembers?: TripMember[];
+  disabled?: boolean;
 }
 
-export function ChatComposer({ onSend, placeholder = "Type a message...", onTypingChange, tripMembers = [] }: ChatComposerProps) {
+export function ChatComposer({ onSend, placeholder = "Type a message...", onTypingChange, tripMembers = [], disabled = false }: ChatComposerProps) {
   const [message, setMessage] = useState("");
   const [attachmentOpen, setAttachmentOpen] = useState(false);
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
@@ -41,6 +42,7 @@ export function ChatComposer({ onSend, placeholder = "Type a message...", onTypi
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleSend = async () => {
+    if (disabled) return;
     if (!message.trim() && pendingAttachments.length === 0) return;
     setIsProcessing(true);
     // Upload files now (on send)
@@ -296,6 +298,7 @@ export function ChatComposer({ onSend, placeholder = "Type a message...", onTypi
                 size="icon" 
                 className="shrink-0 h-8 w-8 hover:bg-secondary/80"
                 onClick={() => setAttachmentOpen(true)}
+                disabled={disabled}
               >
                 <Paperclip className="h-4 w-4 text-muted-foreground" />
               </Button>
@@ -310,13 +313,14 @@ export function ChatComposer({ onSend, placeholder = "Type a message...", onTypi
                 style={{
                   fontSize: '16px', // Prevent iOS zoom on focus
                 }}
+                disabled={disabled}
               />
               <Button
                 size="icon"
                 className="shrink-0 rounded-full h-8 w-8 hover:opacity-80"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={handleSend}
-                disabled={(!message.trim() && pendingAttachments.length === 0) || isProcessing}
+                disabled={disabled || (!message.trim() && pendingAttachments.length === 0) || isProcessing}
               >
                 {isProcessing ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />

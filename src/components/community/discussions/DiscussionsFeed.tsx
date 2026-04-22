@@ -7,29 +7,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/contexts/AuthContext";
-import { useEffect } from "react";
-import { getCurrentCoords, getCountryFromCoords } from "@/lib/geolocation";
 
 interface DiscussionsFeedProps {
   onAskQuestion?: () => void;
 }
 
 export function DiscussionsFeed({ onAskQuestion }: DiscussionsFeedProps) {
-  const { filteredDiscussions, filters, setDiscussionSearchQuery, setLocationFilter, isDiscussionsLoading } = useCommunity();
+  const { filteredDiscussions, filters, setDiscussionSearchQuery, isDiscussionsLoading } = useCommunity();
   const { isAuthenticated } = useAuth();
-
-  // Auto-detect user location on mount
-  useEffect(() => {
-    (async () => {
-      try {
-        const coords = await getCurrentCoords();
-        const country = await getCountryFromCoords(coords);
-        if (country) setLocationFilter(country);
-      } catch (error) {
-        console.error("Location detection error:", error);
-      }
-    })();
-  }, [setLocationFilter]);
 
   return (
     <div className="flex flex-col">

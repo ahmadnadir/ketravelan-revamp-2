@@ -342,10 +342,46 @@ serve(async (req: Request) => {
       });
     }
 
+    // Respect blocks: do not notify users who blocked the sender.
+    // Primary schema uses user_id -> blocker, blocked_user_id -> blocked user.
+    let blockedRecipientIds = new Set<string>();
+    try {
+      const { data: blockedRows } = await admin
+        .from("blocked_users")
+        .select("user_id")
+        .in("user_id", recipientIds)
+        .eq("blocked_user_id", message.sender_id);
+
+      blockedRecipientIds = new Set((blockedRows || []).map((r: any) => r.user_id));
+    } catch {
+      // Backward-compatible fallback for blocker_user_id naming.
+      try {
+        const { data: blockedRowsFallback } = await admin
+          .from("blocked_users")
+          .select("blocker_user_id")
+          .in("blocker_user_id", recipientIds)
+          .eq("blocked_user_id", message.sender_id);
+
+        blockedRecipientIds = new Set((blockedRowsFallback || []).map((r: any) => r.blocker_user_id));
+      } catch {
+        // If blocked_users schema is unavailable, fail open to avoid breaking chat delivery.
+        blockedRecipientIds = new Set<string>();
+      }
+    }
+
+    const eligibleRecipientIds = recipientIds.filter((id) => !blockedRecipientIds.has(id));
+
+    if (eligibleRecipientIds.length === 0) {
+      return new Response(JSON.stringify({ ok: true, skipped: true, reason: "All recipients blocked sender" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json", ...corsHeaders },
+      });
+    }
+
     const { data: recipientProfiles } = await admin
       .from("profiles")
       .select("id, push_notifications")
-      .in("id", recipientIds);
+      .in("id", eligibleRecipientIds);
 
     const pushEnabledIds = (recipientProfiles || [])
       .filter((p) => p.push_notifications !== false)
@@ -372,9 +408,9 @@ serve(async (req: Request) => {
       ? (isSystemMessage ? (contentText || fallbackBody) : `${senderName}: ${contentText || fallbackBody}`)
       : (contentText || fallbackBody);
 
-    if (recipientIds.length > 0) {
+    if (eligibleRecipientIds.length > 0) {
       await admin.from("notifications").insert(
-        recipientIds.map((userId) => ({
+        eligibleRecipientIds.map((userId) => ({
           user_id: userId,
           type: "new_message",
           title,
@@ -397,15 +433,14 @@ serve(async (req: Request) => {
       });
     }
 
-    // Fetch each recipient's unread notification count (excluding chat types,
-    // matching the frontend fetchUnreadCount behaviour) so we can set aps.badge
-    // to the backend source-of-truth value for every notification sent.
+    // Fetch each recipient's total unread notification count (including chat messages)
+    // so we can set aps.badge to the backend source-of-truth value for every notification sent.
+    // This includes both system notifications and chat messages for WhatsApp-style badge.
     const { data: unreadRows } = await admin
       .from("notifications")
       .select("user_id")
-      .in("user_id", recipientIds)
-      .eq("read", false)
-      .not("type", "in", "(new_message,message)");
+      .in("user_id", eligibleRecipientIds)
+      .eq("read", false);
 
     const unreadCountMap = new Map<string, number>();
     for (const row of unreadRows ?? []) {
@@ -493,7 +528,7 @@ serve(async (req: Request) => {
       sent: success,
       failed,
       total: tokens.length,
-      recipients: recipientIds.length,
+      recipients: eligibleRecipientIds.length,
       push_enabled_recipients: pushEnabledIds.length,
       token_routing: {
         ios: tokens.filter((t) => String((t as { platform?: string }).platform || "").toLowerCase() === "ios").length,

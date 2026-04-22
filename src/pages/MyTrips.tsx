@@ -208,6 +208,7 @@ export default function MyTrips() {
                   status={trip.status}
                   price={typeof trip.price === "number" ? (convertedPrices[trip.id] ?? trip.price) : (trip.price as any)}
                   displayCurrency={getCurrencySymbol(homeCurrency || "MYR")}
+                  creatorId={trip.creator_id ?? trip.creator?.id}
                   slotsLeft={typeof trip.max_participants === 'number' && typeof trip.current_participants === 'number' ? trip.max_participants - trip.current_participants : 0}
                   totalSlots={trip.max_participants || 0}
                   tags={trip.tags || []}

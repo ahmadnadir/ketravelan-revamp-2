@@ -230,6 +230,7 @@ interface SystemPushRequest {
   priority?: "high" | "normal" | "low";
   batchKey?: string;
   batchWindowMinutes?: number;
+  skipInsert?: boolean;
 }
 
 serve(async (req: Request) => {
@@ -312,16 +313,19 @@ serve(async (req: Request) => {
       .select("token, user_id, platform")
       .in("user_id", pushEnabledIds);
 
-    const notificationsToInsert = pushEnabledIds.map((userId) => ({
-      user_id: userId,
-      type: body.type,
-      title: body.title,
-      message: truncate(body.body),
-      action_url: resolvedActionUrl,
-      metadata,
-    }));
+    const skipInsert = body.skipInsert === true;
+    if (!skipInsert) {
+      const notificationsToInsert = pushEnabledIds.map((userId) => ({
+        user_id: userId,
+        type: body.type,
+        title: body.title,
+        message: truncate(body.body),
+        action_url: resolvedActionUrl,
+        metadata,
+      }));
 
-    await admin.from("notifications").insert(notificationsToInsert);
+      await admin.from("notifications").insert(notificationsToInsert);
+    }
 
     // After insertion, fetch each recipient's total unread count so we can
     // set aps.badge to the authoritative value rather than a blind increment.
@@ -433,6 +437,7 @@ serve(async (req: Request) => {
         web: tokens.filter((t) => String((t as { platform?: string }).platform || "").toLowerCase() === "web").length,
       },
       stale_tokens_pruned: staleTokens.length,
+      notifications_inserted: !skipInsert,
       errors,
     };
 

@@ -15,6 +15,9 @@ import {
   Loader2,
   Eye,
   EyeOff,
+  Link2,
+  Trash2,
+  Ban,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
@@ -45,6 +48,7 @@ import { fetchUserPreferences, updateUserPreference } from "@/lib/userPreference
 import { useEffect } from "react";
 import { syncPushNotifications } from "@/lib/pushNotifications";
 import { supabase } from "@/lib/supabase";
+
 
 interface SettingItemProps {
   icon: React.ReactNode;
@@ -79,11 +83,18 @@ const SettingItem = ({ icon, label, description, onClick, trailing, destructive 
 
 export default function Settings() {
   const navigate = useNavigate();
-  const { signOut, user } = useAuth();
+  const { signOut, deleteAccount, user, profile, linkedProviders, linkGoogleIdentity, linkAppleIdentity, identityLinkingAvailable } = useAuth();
   const [showLogoutDialog, setShowLogoutDialog] = useState(false);
   const [showPasswordDialog, setShowPasswordDialog] = useState(false);
+  const [showDeleteAccountDialog, setShowDeleteAccountDialog] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+  const [showLinkConflictDialog, setShowLinkConflictDialog] = useState(false);
+  const [linkConflictProvider, setLinkConflictProvider] = useState<"Google" | "Apple">("Apple");
   const [isLoading, setIsLoading] = useState(true);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [isLinkingGoogle, setIsLinkingGoogle] = useState(false);
+  const [isLinkingApple, setIsLinkingApple] = useState(false);
   
   // Notification settings state
   const [pushNotifications, setPushNotifications] = useState(true);
@@ -101,6 +112,24 @@ export default function Settings() {
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const hasEmailProvider = linkedProviders.includes("email");
+  const hasGoogleProvider = linkedProviders.includes("google");
+  const hasAppleProvider = linkedProviders.includes("apple");
+  const identityLinkingDisabled = !identityLinkingAvailable;
+
+  const isLinkConflictError = (message: string) => {
+    const normalized = message.toLowerCase();
+    return [
+      "already attached",
+      "already linked",
+      "identity_already_exists",
+      "identity is already linked",
+      "account exists",
+      "already registered",
+      "sign up not completed",
+      "sign in not completed",
+    ].some((token) => normalized.includes(token));
+  };
 
   // Load preferences on mount
   useEffect(() => {
@@ -190,6 +219,35 @@ export default function Settings() {
     }
   };
 
+  const handleDeleteAccount = async () => {
+    if (deleteConfirmText.trim().toUpperCase() !== "DELETE") {
+      toast.error("Type DELETE to confirm account deletion");
+      return;
+    }
+
+    try {
+      setIsDeletingAccount(true);
+      const result = await deleteAccount();
+      setShowDeleteAccountDialog(false);
+      setDeleteConfirmText("");
+
+      if (result?.email?.attempted && !result.email.sent) {
+        toast.error(`Your account was deleted, but confirmation email failed: ${result.email.error || "unknown reason"}`);
+      } else if (result?.email?.attempted && result.email.sent) {
+        toast.success("Your account has been deleted. Confirmation email sent.");
+      } else {
+        toast.success("Your account has been deleted");
+      }
+
+      navigate("/", { replace: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to delete account";
+      toast.error(message);
+    } finally {
+      setIsDeletingAccount(false);
+    }
+  };
+
   const handleChangePassword = async () => {
     // Validation
     if (!currentPassword.trim()) {
@@ -249,6 +307,42 @@ export default function Settings() {
       toast.error(message);
     } finally {
       setIsChangingPassword(false);
+    }
+  };
+
+  const handleLinkGoogle = async () => {
+    if (hasGoogleProvider) return;
+    try {
+      setIsLinkingGoogle(true);
+      await linkGoogleIdentity("/settings");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to connect Google";
+      if (isLinkConflictError(message)) {
+        setLinkConflictProvider("Google");
+        setShowLinkConflictDialog(true);
+        return;
+      }
+      toast.error(message);
+    } finally {
+      setIsLinkingGoogle(false);
+    }
+  };
+
+  const handleLinkApple = async () => {
+    if (hasAppleProvider) return;
+    try {
+      setIsLinkingApple(true);
+      await linkAppleIdentity("/settings");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to connect Apple";
+      if (isLinkConflictError(message)) {
+        setLinkConflictProvider("Apple");
+        setShowLinkConflictDialog(true);
+        return;
+      }
+      toast.error(message);
+    } finally {
+      setIsLinkingApple(false);
     }
   };
 
@@ -386,6 +480,12 @@ export default function Settings() {
                 handlePreferenceChange("show_trips_publicly", newValue);
               }}
             />
+            <SettingItem
+              icon={<Ban className="h-5 w-5" />}
+              label="Blocked Users"
+              description="Manage users you have blocked"
+              onClick={() => navigate("/settings/blocked-users")}
+            />
           </div>
         </Card>
 
@@ -417,16 +517,97 @@ export default function Settings() {
         <Card className="overflow-hidden border-border/50">
           <div className="px-4 py-3 border-b border-border/50">
             <div className="flex items-center gap-2">
+              <Link2 className="h-4 w-4 text-primary" />
+              <h2 className="font-semibold text-sm text-foreground">Connected Accounts</h2>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Sign in with your existing method first, then connect other providers here.
+            </p>
+            {identityLinkingDisabled && (
+              <p className="mt-2 text-xs text-amber-700">
+                Manual linking is currently disabled in Supabase Authentication. Enable it in Dashboard &gt; Authentication &gt; Providers.
+              </p>
+            )}
+          </div>
+          <div className="space-y-3 p-4">
+            <div className="flex items-center justify-between rounded-xl border border-border/50 px-3 py-3">
+              <div>
+                <p className="text-sm font-medium text-foreground">Email & Password</p>
+                <p className="text-xs text-muted-foreground">
+                  {hasEmailProvider ? "Connected" : "Not detected on this account"}
+                </p>
+              </div>
+              <span className="text-xs font-medium text-muted-foreground">
+                {hasEmailProvider ? "Connected" : "Unavailable"}
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-border/50 px-3 py-3">
+              <div>
+                <p className="text-sm font-medium text-foreground">Google</p>
+                <p className="text-xs text-muted-foreground">
+                  {hasGoogleProvider ? "Connected" : "Add Google as another sign-in method"}
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant={hasGoogleProvider ? "outline" : "default"}
+                className="min-w-24 rounded-xl"
+                disabled={hasGoogleProvider || isLinkingGoogle || identityLinkingDisabled}
+                onClick={handleLinkGoogle}
+              >
+                {isLinkingGoogle ? <Loader2 className="h-4 w-4 animate-spin" /> : hasGoogleProvider ? "Connected" : identityLinkingDisabled ? "Unavailable" : "Connect"}
+              </Button>
+            </div>
+
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-border/50 px-3 py-3">
+              <div>
+                <p className="text-sm font-medium text-foreground">Apple</p>
+                <p className="text-xs text-muted-foreground">
+                  {hasAppleProvider ? "Connected" : "Add Apple as another sign-in method"}
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant={hasAppleProvider ? "outline" : "default"}
+                className="min-w-24 rounded-xl"
+                disabled={hasAppleProvider || isLinkingApple || identityLinkingDisabled}
+                onClick={handleLinkApple}
+              >
+                {isLinkingApple ? <Loader2 className="h-4 w-4 animate-spin" /> : hasAppleProvider ? "Connected" : identityLinkingDisabled ? "Unavailable" : "Connect"}
+              </Button>
+            </div>
+          </div>
+        </Card>
+
+        <Card className="overflow-hidden border-border/50">
+          <div className="px-4 py-3 border-b border-border/50">
+            <div className="flex items-center gap-2">
               <Lock className="h-4 w-4 text-primary" />
               <h2 className="font-semibold text-sm text-foreground">Account</h2>
             </div>
           </div>
           <div className="divide-y divide-border/50">
+            {profile?.is_admin && (
+              <SettingItem
+                icon={<Shield className="h-5 w-5" />}
+                label="Moderation Reports"
+                description="Review and resolve user-generated content reports"
+                onClick={() => navigate("/settings/moderation-reports")}
+              />
+            )}
             <SettingItem
               icon={<Lock className="h-5 w-5" />}
               label="Change Password"
               description="Update your password"
               onClick={() => setShowPasswordDialog(true)}
+            />
+            <SettingItem
+              icon={<Trash2 className="h-5 w-5" />}
+              label="Delete Account"
+              description="Permanently delete your account and personal data"
+              onClick={() => setShowDeleteAccountDialog(true)}
+              destructive
             />
           </div>
         </Card>
@@ -603,6 +784,74 @@ export default function Settings() {
                 </>
               ) : (
                 "Change Password"
+              )}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showLinkConflictDialog} onOpenChange={setShowLinkConflictDialog}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>{linkConflictProvider} already linked</DialogTitle>
+            <DialogDescription>
+              This {linkConflictProvider} account is already linked to another user. Sign in with the account that already uses {linkConflictProvider}, or disconnect it there before linking here.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end">
+            <Button type="button" onClick={() => setShowLinkConflictDialog(false)}>
+              OK
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={showDeleteAccountDialog}
+        onOpenChange={(open) => {
+          setShowDeleteAccountDialog(open);
+          if (!open) {
+            setDeleteConfirmText("");
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle className="text-destructive">Delete account permanently?</DialogTitle>
+            <DialogDescription>
+              This action permanently deletes your account and cannot be undone. To confirm, type DELETE below.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <Input
+              value={deleteConfirmText}
+              onChange={(e) => setDeleteConfirmText(e.target.value)}
+              placeholder="Type DELETE"
+              disabled={isDeletingAccount}
+            />
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setShowDeleteAccountDialog(false)}
+              disabled={isDeletingAccount}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={handleDeleteAccount}
+              disabled={isDeletingAccount || deleteConfirmText.trim().toUpperCase() !== "DELETE"}
+            >
+              {isDeletingAccount ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                "Delete Account"
               )}
             </Button>
           </div>

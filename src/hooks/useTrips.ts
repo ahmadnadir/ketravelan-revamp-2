@@ -5,6 +5,7 @@ import { fetchUserTrips } from '@/lib/myTrips';
 
 export interface Trip {
   id: string;
+  creator_id?: string;
   title: string;
   destination: string;
   cover_image?: string;

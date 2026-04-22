@@ -3,7 +3,7 @@ import { useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   fetchNotifications,
-  fetchUnreadCount,
+  fetchTotalUnreadCount,
   markNotificationAsRead,
   markAllNotificationsAsRead,
   deleteNotification,
@@ -45,7 +45,7 @@ export function useUnreadNotificationCount(
 ) {
   return useQuery<number, Error>({
     queryKey: ['notifications', 'unread-count'],
-    queryFn: fetchUnreadCount,
+    queryFn: fetchTotalUnreadCount,
     staleTime: 1000 * 20, // Fresh for 20 seconds
     gcTime: 1000 * 60 * 5, // Cache for 5 minutes
     refetchOnWindowFocus: true,

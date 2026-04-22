@@ -86,6 +86,14 @@ keyAlias=ketravelan-key
 keyPassword=your_key_password
 ```
 
+Alternative: set these environment variables instead of a file:
+```bash
+export KETRAVELAN_UPLOAD_STORE_FILE=/Users/username/ketravelan-release.jks
+export KETRAVELAN_UPLOAD_STORE_PASSWORD=your_store_password
+export KETRAVELAN_UPLOAD_KEY_ALIAS=ketravelan-key
+export KETRAVELAN_UPLOAD_KEY_PASSWORD=your_key_password
+```
+
 Add to `android/app/build.gradle`:
 ```gradle
 signingConfigs {
@@ -103,6 +111,8 @@ buildTypes {
     }
 }
 ```
+
+Release builds now fail fast if signing credentials are missing, instead of producing an unsigned bundle.
 
 ### 3. Build Release APK/AAB
 

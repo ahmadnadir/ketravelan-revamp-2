@@ -1,14 +1,49 @@
+import java.util.Properties
+
 apply plugin: 'com.android.application'
 
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = rootProject.file('keystore.properties')
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.withInputStream { stream ->
+        keystoreProperties.load(stream)
+    }
+}
+
+def releaseSigning = [
+    storeFile: keystoreProperties.getProperty('storeFile') ?: System.getenv('KETRAVELAN_UPLOAD_STORE_FILE'),
+    storePassword: keystoreProperties.getProperty('storePassword') ?: System.getenv('KETRAVELAN_UPLOAD_STORE_PASSWORD'),
+    keyAlias: keystoreProperties.getProperty('keyAlias') ?: System.getenv('KETRAVELAN_UPLOAD_KEY_ALIAS'),
+    keyPassword: keystoreProperties.getProperty('keyPassword') ?: System.getenv('KETRAVELAN_UPLOAD_KEY_PASSWORD'),
+]
+
+def hasReleaseSigning = releaseSigning.values().every { value ->
+    value != null && value.toString().trim()
+}
+
+def isReleaseBuildRequested = gradle.startParameter.taskNames.any { taskName ->
+    taskName.toLowerCase().contains('release')
+}
+
 android {
-    namespace = "dev.ketravelan.app"
+    namespace = "com.ketravelan.app"
     compileSdk = rootProject.ext.compileSdkVersion
+    signingConfigs {
+        if (hasReleaseSigning) {
+            release {
+                storeFile file(releaseSigning.storeFile)
+                storePassword releaseSigning.storePassword
+                keyAlias releaseSigning.keyAlias
+                keyPassword releaseSigning.keyPassword
+            }
+        }
+    }
     defaultConfig {
-        applicationId "dev.ketravelan.app"
+        applicationId "com.ketravelan.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode 2
+        versionName "2.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -18,10 +53,19 @@ android {
     }
     buildTypes {
         release {
+            if (hasReleaseSigning) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
+}
+
+if (isReleaseBuildRequested && !hasReleaseSigning) {
+    throw new GradleException(
+        "Release signing is required for release bundles. Configure android/keystore.properties or set KETRAVELAN_UPLOAD_STORE_FILE, KETRAVELAN_UPLOAD_STORE_PASSWORD, KETRAVELAN_UPLOAD_KEY_ALIAS, and KETRAVELAN_UPLOAD_KEY_PASSWORD."
+    )
 }
 
 repositories {

@@ -162,6 +162,7 @@ export default function TripHub() {
     currentUserId: user?.id,
     tripId: displayTrip?.id,
     tripMembers: displayMembers,
+    messageReportType: 'TRIP_CHAT',
     scrollContainerRef,
   });
 

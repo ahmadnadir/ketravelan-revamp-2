@@ -40,7 +40,6 @@ import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase";
 import { getCurrencyInfo, type CurrencyCode } from "@/lib/currencyUtils";
 import { cn } from "@/lib/utils";
-import { createDirectConversation } from "@/lib/conversations";
 import { ImageCropModal } from "@/components/profile/ImageCropModal";
 import { uploadImageFromDataUrl } from "@/lib/imageStorage";
 
@@ -238,8 +237,11 @@ export default function Profile() {
     : [];
   const previousTrips = Array.isArray(visibleTrips)
     ? visibleTrips.filter((trip: any) => {
-        // Treat trips as previous when they are explicitly closed, or their latest known date is in the past.
         const normalizedStatus = String(trip.status || "").toLowerCase();
+        const isPublished = trip?.is_published === true || normalizedStatus === "published";
+        if (!isPublished) return false;
+
+        // Treat trips as previous when they are explicitly closed, or their latest known date is in the past.
         const closedStatuses = ["completed", "cancelled", "canceled", "ended", "archived", "done"];
 
         if (closedStatuses.includes(normalizedStatus)) return true;
@@ -462,22 +464,7 @@ export default function Profile() {
 
   const handleMessage = async () => {
     if (!profile?.id) return;
-    try {
-      const convo = await createDirectConversation(profile.id);
-      if (convo?.id) {
-        // Navigate directly to the conversation ID
-        navigate(`/chat/${convo.id}`);
-      } else {
-        throw new Error("No conversation ID returned");
-      }
-    } catch (err) {
-      console.error("Failed to create conversation:", err);
-      toast({
-        title: "Error",
-        description: "Could not start conversation.",
-        variant: "destructive",
-      });
-    }
+    navigate(`/chat/new/${profile.id}`);
   };
 
   // No footer content - buttons will be at the bottom of scrollable area instead
@@ -1085,7 +1072,7 @@ export default function Profile() {
             onClick={openDicebearPicker}
             disabled={uploadingAvatar}
           >
-            Choose DiceBear
+            Choose Avatar
           </Button>
         </DialogContent>
       </Dialog>
@@ -1093,7 +1080,7 @@ export default function Profile() {
       <Dialog open={dicebearModalOpen} onOpenChange={setDicebearModalOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Choose a DiceBear avatar</DialogTitle>
+            <DialogTitle>Choose an Avatar</DialogTitle>
           </DialogHeader>
 
           <div className="grid grid-cols-4 gap-3 pt-2">

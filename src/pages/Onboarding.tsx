@@ -27,6 +27,7 @@ export default function Onboarding() {
   const navigate = useNavigate();
   const { setHomeCurrency, user, profile } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const completeInProgressRef = useRef(false);
 
   const [currentStep, setCurrentStep] = useState(1);
   
@@ -206,7 +207,10 @@ export default function Onboarding() {
 
   const handleComplete = async (destination: "/explore" | "/create" = "/explore") => {
     if (!user) return;
+    if (completeInProgressRef.current) return;
+    completeInProgressRef.current = true;
     setIsCompleting(true);
+    const wasOnboardingCompleted = profile?.onboarding_completed === true;
     setHomeCurrency(derivedCurrency);
     // Prepare update payload
     const updatePayload: any = {
@@ -239,19 +243,23 @@ export default function Onboarding() {
       .upsert({ id: user.id, ...updatePayload }, { onConflict: "id" });
     if (error) {
       alert("Failed to update profile: " + error.message);
+      completeInProgressRef.current = false;
+      setIsCompleting(false);
       return;
     }
-    // Fire onboarding email via Edge Function (non-blocking)
-    try {
-      await supabase.functions.invoke('send-welcome-email', {
-        body: {
-          email: user.email,
-          userName: name,
-        },
-      });
-    } catch (e) {
-      // Silently ignore email failures
-      console.warn('Failed to send onboarding email', e);
+    // Send welcome email only on first completion, never on repeat onboarding edits.
+    if (!wasOnboardingCompleted) {
+      try {
+        await supabase.functions.invoke('send-welcome-email', {
+          body: {
+            email: user.email,
+            userName: name,
+          },
+        });
+      } catch (e) {
+        // Silently ignore email failures
+        console.warn('Failed to send onboarding email', e);
+      }
     }
     navigate(destination);
     // no need to reset isCompleting due to navigation

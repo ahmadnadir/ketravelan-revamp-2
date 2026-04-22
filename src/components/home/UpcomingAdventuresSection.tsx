@@ -75,6 +75,7 @@ export function UpcomingAdventuresSection() {
             <TripCard
               key={trip.id}
               {...trip}
+              creatorId={trip.creator_id ?? trip.creator?.id}
               className="w-[280px] sm:w-[320px] shrink-0 snap-start"
             />
           ))

@@ -3,7 +3,6 @@ import { useNavigate } from "react-router-dom";
 import { MessageCircle, Check, X, ChevronRight, Shield, LogOut, MoreVertical, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { createDirectConversation } from "@/lib/conversations";
 import { deleteTripPermanently, leaveTripMember } from "@/lib/trips";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
@@ -181,32 +180,38 @@ export function GroupInfoModal({
   );
   const isLastOrganizer = isCurrentUserOrganizer && organizerCount <= 1;
 
+  const sortedMembers = useMemo(() => {
+    return [...members].sort((a, b) => {
+      const aIsOrganizer = Boolean(a.isAdmin || a.role?.toLowerCase() === 'organizer');
+      const bIsOrganizer = Boolean(b.isAdmin || b.role?.toLowerCase() === 'organizer');
+
+      if (aIsOrganizer !== bIsOrganizer) {
+        return aIsOrganizer ? -1 : 1;
+      }
+
+      return a.name.localeCompare(b.name);
+    });
+  }, [members]);
+
   const getLeaveGuardState = async () => {
     const actorId = currentUserId || user?.id;
     if (!trip || !actorId) {
       return { isOrganizer: false, organizerCount: 0, isLastOrganizer: false };
     }
 
-    const [{ data: selfMembership, error: selfError }, { count, error: countError }] = await Promise.all([
-      supabase
-        .from('trip_members')
-        .select('is_admin, role')
-        .eq('trip_id', trip.id)
-        .eq('user_id', actorId)
-        .is('left_at', null)
-        .maybeSingle(),
-      supabase
-        .from('trip_members')
-        .select('*', { count: 'exact', head: true })
-        .eq('trip_id', trip.id)
-        .eq('is_admin', true)
-        .is('left_at', null),
-    ]);
+    const { data: activeMemberships, error: membershipsError } = await supabase
+      .from('trip_members')
+      .select('user_id, is_admin, role')
+      .eq('trip_id', trip.id)
+      .is('left_at', null);
 
-    if (selfError) throw selfError;
-    if (countError) throw countError;
+    if (membershipsError) throw membershipsError;
 
-    const organizerCountFromDb = count || 0;
+    const memberships = activeMemberships || [];
+    const selfMembership = memberships.find((membership) => membership.user_id === actorId);
+    const organizerCountFromDb = memberships.filter(
+      (membership) => membership.is_admin || membership.role?.toLowerCase() === 'organizer',
+    ).length;
     const isSelfOrganizerByMembership = Boolean(
       selfMembership?.is_admin || selfMembership?.role?.toLowerCase() === 'organizer',
     );
@@ -234,28 +239,14 @@ export function GroupInfoModal({
   const handleMessageClick = async (memberId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (isSubmitting) return;
-    try {
-      const convo = await createDirectConversation(memberId);
-      if (convo && convo.id) {
-        onOpenChange(false);
-        navigate(`/chat/${convo.id}`);
-      }
-    } catch (err) {
-      console.error('Error creating conversation:', err);
-    }
+    onOpenChange(false);
+    navigate(`/chat/new/${memberId}`);
   };
 
   const handleMessageFromMenu = async (memberId: string) => {
     if (isSubmitting) return;
-    try {
-      const convo = await createDirectConversation(memberId);
-      if (convo && convo.id) {
-        onOpenChange(false);
-        navigate(`/chat/${convo.id}`);
-      }
-    } catch (err) {
-      console.error('Error creating conversation:', err);
-    }
+    onOpenChange(false);
+    navigate(`/chat/new/${memberId}`);
   };
 
   const handleTitleSave = () => {
@@ -677,7 +668,7 @@ export function GroupInfoModal({
                 </h3>
                 <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain scrollbar-hide [webkit-overflow-scrolling:touch] touch-pan-y">
                   <div id="trip-members-list" className="px-4 space-y-1 pb-6">
-                    {members.map((member) => (
+                    {sortedMembers.map((member) => (
                       <div
                         key={member.id}
                         className="flex items-center gap-3 p-3 rounded-xl hover:bg-accent/50 transition-colors"

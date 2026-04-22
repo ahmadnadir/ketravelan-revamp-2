@@ -161,6 +161,7 @@ export default function Explore() {
       const hasPrice = typeof trip.price === 'number' && !isNaN(trip.price);
       return {
         id: trip.id ?? '',
+        creatorId: trip.creator_id ?? trip.creator?.id ?? undefined,
         title: trip.title ?? 'Untitled',
         destination: trip.destination ?? 'Unknown',
         imageUrl: trip.cover_image || '/placeholder.svg',
@@ -643,6 +644,7 @@ export default function Explore() {
                 endDate={trip.endDate}
                 price={typeof trip.price === 'number' ? (convertedPrices[trip.id] ?? trip.price) : (trip.price as any)}
                 displayCurrency={getCurrencySymbol(selectedCurrency)}
+                creatorId={trip.creatorId}
                 slotsLeft={trip.slotsLeft}
                 totalSlots={trip.totalSlots}
                 tags={trip.tags}

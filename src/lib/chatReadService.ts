@@ -67,6 +67,24 @@ export function markConversationReadOptimistically(params: {
       onError?.(error);
       throw error;
     })
+    .then(async () => {
+      // After marking conversation as read, mark chat notifications as read too
+      // This removes the badge count when user opens a chat
+      try {
+        const { markChatNotificationsAsReadForConversation } = await import("@/lib/notifications");
+        await markChatNotificationsAsReadForConversation(conversationId);
+      } catch (err) {
+        console.warn("[notifications] Failed to mark chat notifications as read", err);
+      }
+      
+      // Sync the badge count with backend - now includes proper notification read status
+      try {
+        const { syncBadgeWithUnreadCount } = await import("@/lib/notifications");
+        await syncBadgeWithUnreadCount();
+      } catch (err) {
+        console.warn("[badge] Failed to sync badge after marking conversation read", err);
+      }
+    })
     .finally(() => {
       inFlightMarkRead.delete(inFlightKey);
     });

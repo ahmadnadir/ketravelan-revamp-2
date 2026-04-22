@@ -2158,7 +2158,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
             <p className="text-sm text-muted-foreground">See where the money went and who's settled.</p>
           </div>
           <div className="flex gap-2">
-            {subTab === "settle" && canSwitchCurrency && (
+            {subTab === "expenses" && canSwitchCurrency && (
               <Button
                 variant="ghost"
                 size="icon"

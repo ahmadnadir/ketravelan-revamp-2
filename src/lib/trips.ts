@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { supabase } from './supabase';
 import type { CurrencyCode } from './currencyUtils';
+import { filterItemsByBlockedRelationship } from '@/lib/moderation';
 
 export type TripNotificationSettingKey = 'new_members_join' | 'expense_updates' | 'chat_activity';
 
@@ -114,7 +115,7 @@ export async function fetchTrips(filters?: TripFilters) {
   const { data, error } = await query;
 
   if (error) throw error;
-  return data;
+  return filterItemsByBlockedRelationship(data || [], (trip: any) => trip.creator_id);
 }
 
 export async function fetchTripDetails(tripIdOrSlug: string) {
@@ -170,6 +171,13 @@ export async function fetchTripDetails(tripIdOrSlug: string) {
   const { data, error } = await query.maybeSingle();
 
   if (error) throw error;
+  if (!data) return null;
+
+  const visible = await filterItemsByBlockedRelationship([data], (trip: any) => trip.creator_id);
+  if (visible.length === 0) {
+    throw new Error('Trip unavailable');
+  }
+
   return data;
 }
 
@@ -986,7 +994,7 @@ export async function leaveTripMember(
     }
 
     // Compatibility fallback when RPC is not visible in schema cache.
-    const [{ data: trip, error: tripError }, { data: membership, error: membershipError }, { count: organizerCount, error: organizerCountError }] = await Promise.all([
+    const [{ data: trip, error: tripError }, { data: activeMemberships, error: membershipsError }] = await Promise.all([
       supabase
         .from('trips')
         .select('status')
@@ -994,28 +1002,25 @@ export async function leaveTripMember(
         .single(),
       supabase
         .from('trip_members')
-        .select('is_admin')
+        .select('user_id, is_admin, role')
         .eq('trip_id', tripId)
-        .eq('user_id', user.id)
-        .is('left_at', null)
-        .maybeSingle(),
-      supabase
-        .from('trip_members')
-        .select('*', { count: 'exact', head: true })
-        .eq('trip_id', tripId)
-        .eq('is_admin', true)
         .is('left_at', null),
     ]);
 
     if (tripError) throw tripError;
-    if (membershipError) throw membershipError;
-    if (organizerCountError) throw organizerCountError;
+    if (membershipsError) throw membershipsError;
+
+    const memberships = activeMemberships || [];
+    const membership = memberships.find((m) => m.user_id === user.id);
     if (!membership) throw new Error('You are not an active member of this trip');
 
-    const organizersBeforeLeave = organizerCount || 0;
+    const organizersBeforeLeave = memberships.filter(
+      (m) => m.is_admin || m.role?.toLowerCase() === 'organizer',
+    ).length;
     let didCancelTrip = false;
     const tripAlreadyCancelled = trip?.status === 'cancelled';
-    const shouldCancelAsLastOrganizer = Boolean(!tripAlreadyCancelled && membership.is_admin && organizersBeforeLeave <= 1);
+    const isOrganizer = Boolean(membership.is_admin || membership.role?.toLowerCase() === 'organizer');
+    const shouldCancelAsLastOrganizer = Boolean(!tripAlreadyCancelled && isOrganizer && organizersBeforeLeave <= 1);
 
     const cancelTripAndDeleteChat = async () => {
       const { error: cancelError } = await supabase

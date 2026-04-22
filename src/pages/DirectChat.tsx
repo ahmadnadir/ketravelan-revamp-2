@@ -1,69 +1,192 @@
-import { useParams, Link, useNavigate } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { ChatPage } from "@/components/chat/ChatPage";
 import { useState, useEffect, useRef } from "react";
-import { deleteDirectConversation, fetchConversationById } from "@/lib/conversations";
+import { createDirectConversation, deleteDirectConversation, fetchConversationById, fetchDirectConversation, profileCache } from "@/lib/conversations";
 import { supabase } from "@/lib/supabase";
 import { UserQuickActionsModal } from "@/components/chat/UserQuickActionsModal";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { getLoadErrorFeedback } from "@/lib/requestErrors";
+import { isMessagingBlockedBetweenUsers } from "@/lib/blockUser";
+import { ModerationMenu } from "@/components/moderation/ModerationMenu";
+import { useQueryClient } from "@tanstack/react-query";
 
 const getDefaultAvatar = (userId: string) => {
   return `https://api.dicebear.com/7.x/notionists/svg?seed=${userId}`;
 };
 
 export default function DirectChat() {
-  const { id: conversationId } = useParams();
+  const { id: routeConversationId, userId: draftUserId } = useParams();
   const { user } = useAuth();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const [otherUser, setOtherUser] = useState<Record<string, unknown> | null>(null);
+  const [conversationId, setConversationId] = useState(routeConversationId || '');
   const [chatIsLoading, setChatIsLoading] = useState(true);
   const [userModalOpen, setUserModalOpen] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [messagingBlocked, setMessagingBlocked] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setConversationId(routeConversationId || '');
+  }, [routeConversationId]);
+
+  const resolveAndSetOtherUser = async (targetUserId: string, isMounted: boolean) => {
+    const cachedProfile = profileCache.get(targetUserId);
+    if (cachedProfile?.id) {
+      if (isMounted) {
+        setOtherUser(cachedProfile);
+        setChatIsLoading(false);
+      }
+      return;
+    }
+
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('id, full_name, username, avatar_url')
+      .eq('id', targetUserId)
+      .maybeSingle();
+
+    if (profile?.id) {
+      profileCache.set(String(profile.id), {
+        id: String(profile.id),
+        username: String(profile.username || ''),
+        full_name: String(profile.full_name || ''),
+        avatar_url: String(profile.avatar_url || ''),
+      });
+    }
+
+    if (isMounted) {
+      setOtherUser(profile || { id: targetUserId, full_name: '' });
+      setChatIsLoading(false);
+    }
+  };
 
   // Fetch conversation and other user info
   useEffect(() => {
-    if (!conversationId) return;
+    if (!user?.id) return;
+
+    let isMounted = true;
+
+    const directConversations = queryClient.getQueryData<any[]>(['conversations', user.id]) || [];
 
     const setupConvo = async () => {
       try {
-        console.log('[DirectChat] Setting up conversation:', { conversationId });
         setChatIsLoading(true);
-        const convo = await fetchConversationById(conversationId);
-        console.log('[DirectChat] Conversation fetched:', { conversationId, found: !!convo, conversation: convo ? { id: convo.id, user1_id: convo.user1_id, user2_id: convo.user2_id } : null });
-        
+
+        // Draft mode: open user profile header first; create direct conversation only on first message send.
+        if (draftUserId) {
+          const existingConvo = await fetchDirectConversation(draftUserId);
+          if (existingConvo?.id) {
+            if (isMounted) {
+              setConversationId(existingConvo.id);
+              navigate(`/chat/${existingConvo.id}`, { replace: true });
+            }
+            return;
+          }
+
+          await resolveAndSetOtherUser(draftUserId, isMounted);
+
+          if (user.id && draftUserId) {
+            void isMessagingBlockedBetweenUsers(user.id, draftUserId)
+              .then((blocked) => {
+                if (isMounted) setMessagingBlocked(blocked);
+              })
+              .catch(() => {
+                if (isMounted) setMessagingBlocked(false);
+              });
+          }
+
+          return;
+        }
+
+        if (!routeConversationId) return;
+
+        const cachedParticipant = directConversations.find((participant: any) => {
+          const conv = participant?.conversation;
+          return conv?.id === routeConversationId && conv?.conversation_type === 'direct';
+        });
+        const cachedConversation = cachedParticipant?.conversation;
+        const cachedOtherUser = cachedConversation
+          ? (cachedConversation.user1_id === user.id ? cachedConversation.user2 : cachedConversation.user1)
+          : null;
+
+        if (cachedOtherUser?.id && isMounted) {
+          setOtherUser(cachedOtherUser);
+          setChatIsLoading(false);
+        }
+
+        console.log('[DirectChat] Setting up conversation:', { conversationId: routeConversationId });
+        const convo = await fetchConversationById(routeConversationId);
+        console.log('[DirectChat] Conversation fetched:', { conversationId: routeConversationId, found: !!convo, conversation: convo ? { id: convo.id, user1_id: convo.user1_id, user2_id: convo.user2_id } : null });
+
         if (!convo) {
           console.warn('[DirectChat] Conversation not found, redirecting to /chat');
           navigate('/chat');
           return;
         }
 
+        if (isMounted) {
+          setConversationId(convo.id);
+        }
+
         // Find the other user
-        const other = convo.user1_id === user?.id ? convo.user2_id : convo.user1_id;
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('id, full_name, username, avatar_url')
-          .eq('id', other)
-          .maybeSingle();
-        console.log('[DirectChat] Other user profile loaded:', { userId: other, found: !!profile });
-        setOtherUser(profile || { id: other, full_name: '' });
+        const other = convo.user1_id === user.id ? convo.user2_id : convo.user1_id;
+        await resolveAndSetOtherUser(String(other), isMounted);
+
+        // Block status should not delay header rendering.
+        if (user.id && other) {
+          void isMessagingBlockedBetweenUsers(user.id, String(other))
+            .then((blocked) => {
+              if (isMounted) setMessagingBlocked(blocked);
+            })
+            .catch((blockErr) => {
+              console.warn('[DirectChat] Failed to resolve block status:', blockErr);
+              if (isMounted) setMessagingBlocked(false);
+            });
+        } else if (isMounted) {
+          setMessagingBlocked(false);
+        }
       } catch (err) {
         console.error('[DirectChat] Error fetching conversation:', err);
         const feedback = getLoadErrorFeedback('chat', err);
         toast.error(feedback.title, { description: feedback.description });
         navigate('/chat');
       } finally {
-        setChatIsLoading(false);
+        if (isMounted) {
+          setChatIsLoading(false);
+        }
       }
     };
 
     setupConvo();
-  }, [conversationId, user?.id, navigate]);
+    return () => {
+      isMounted = false;
+    };
+  }, [routeConversationId, draftUserId, user?.id, navigate, queryClient]);
+
+  const ensureConversationId = async () => {
+    if (conversationId) return conversationId;
+    const targetUserId = String(otherUser?.id || draftUserId || '');
+    if (!targetUserId) {
+      throw new Error('Unable to determine recipient.');
+    }
+
+    const convo = await createDirectConversation(targetUserId);
+    if (!convo?.id) {
+      throw new Error('Unable to start conversation.');
+    }
+
+    setConversationId(convo.id);
+    void queryClient.refetchQueries({ queryKey: ['conversations', user?.id], type: 'all' });
+    navigate(`/chat/${convo.id}`, { replace: true });
+    return convo.id;
+  };
 
   // Use the centralized ChatPage component
   const {
@@ -74,17 +197,31 @@ export default function DirectChat() {
     scrollToBottomButton,
   } = ChatPage({
     conversationId: conversationId || '',
+    ensureConversationId,
     headerTitle: String(otherUser?.full_name || otherUser?.username || 'Chat'),
     headerImageUrl: (otherUser?.avatar_url && String(otherUser.avatar_url).trim()) 
       ? String(otherUser.avatar_url) 
       : getDefaultAvatar(String(otherUser?.id || '')),
     headerImageFallback: String(otherUser?.full_name || otherUser?.username || 'U').charAt(0),
+    headerActions: otherUser?.id ? (
+      <ModerationMenu
+        reportType="USER"
+        targetId={String(otherUser.id)}
+        reportedUserId={String(otherUser.id)}
+        targetLabel="User"
+        reportLabel="Report User"
+        onAfterBlock={() => setMessagingBlocked(true)}
+      />
+    ) : null,
     onHeaderClick: () => setUserModalOpen(true),
     showBackButton: true,
     onBackClick: () => navigate('/chat?tab=direct'),
     isLoadingHeader: chatIsLoading,
     currentUserId: user?.id,
     showSenderInfo: false,
+    canSend: !messagingBlocked,
+    blockedMessage: "You cannot send messages to this user.",
+    messageReportType: 'DIRECT_CHAT',
     scrollContainerRef,
   });
 
@@ -115,6 +252,11 @@ export default function DirectChat() {
       <div className="relative">
         <div className="container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto px-3 sm:px-4 pt-4 sm:pt-6 pb-2 space-y-4">
           {messagesContent}
+          {messagingBlocked && (
+            <p className="text-xs text-muted-foreground text-center -mt-2">
+              Messaging is blocked between you and this user.
+            </p>
+          )}
           <div ref={messagesEndRef} />
         </div>
         {scrollToBottomButton}
@@ -129,10 +271,10 @@ export default function DirectChat() {
             ? String(otherUser.avatar_url)
             : getDefaultAvatar(String(otherUser?.id || '')),
         }}
-        onDeleteChat={() => {
+        onDeleteChat={conversationId ? () => {
           setUserModalOpen(false);
           setShowDeleteConfirm(true);
-        }}
+        } : undefined}
       />
       <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
         <AlertDialogContent>

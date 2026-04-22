@@ -144,8 +144,10 @@ function buildHtmlEmail(opts: {
     '<tr><td align="center" style="padding:24px 20px">',
     '<table role="presentation" width="auto" cellspacing="0" cellpadding="0" align="center">',
     '<tr>',
-    `<td style="vertical-align:middle"><div style="font-size:20px;font-weight:700;color:#020617;margin:0">Welcome to</div></td>`,
-    `<td style="vertical-align:middle;padding-left:4px"><img src="${logoUrlEsc}" alt="${brand}" style="display:block;border:0;outline:none;text-decoration:none;height:28px;width:auto" /></td>`,
+    `<td style="vertical-align:middle"><img src="${logoUrlEsc}" alt="${brand}" style="display:block;border:0;outline:none;text-decoration:none;height:28px;width:auto" /></td>`,
+    '</tr>',
+    '<tr>',
+    `<td align="center" style="padding-top:8px"><div style="font-size:13px;font-weight:500;color:#6b7280;letter-spacing:0.05em;text-transform:uppercase">Email Verification</div></td>`,
     '</tr>',
     '</table>',
     '</td></tr>',
@@ -222,10 +224,10 @@ serve(async (req: Request) => {
 
     // 3) Prepare template variables
     const variables = {
-      subject: "Confirm your email for Ketravelan",
+      subject: "Verify your email for Ketravelan",
       brandTitle: "Ketravelan",
       eyebrow: "Action Required",
-      title: "Confirm your email to start the party 🚀",
+      title: "Verify your email to activate your account",
       message: `You're one click away from joining ${body.name ? body.name + ' at ' : ''}Ketravelan. Verify your email to activate your account and jump into trip planning with your crew.`,
       ctaLabel: "Confirm Email",
       ctaUrl: confirmUrl,
@@ -239,7 +241,7 @@ serve(async (req: Request) => {
       return new Response(JSON.stringify({ ok: true, confirmUrl }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } });
     }
 
-    const subject = body.subject || "Welcome onboard to Ketravelan";
+    const subject = body.subject || "Verify your email for Ketravelan";
     const useTemplate = body.useTemplate !== false; // default true
     if (useTemplate) {
       await sendResendEmail({ to: body.email, subject, variables, templateId: body.templateId });
@@ -253,9 +255,9 @@ serve(async (req: Request) => {
         logoUrl: "https://ketravelan.xyz/ketravelan_logo.png",
       });
       const text = [
-        "Welcome onboard to Ketravelan",
+        "Verify your email for Ketravelan",
         "",
-        "Confirm your email to get started",
+        "Verify your email to activate your account",
         body.name ? `Hi ${body.name},` : undefined,
         "",
         "You’re one click away from joining Ketravelan.",

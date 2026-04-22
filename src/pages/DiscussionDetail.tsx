@@ -1,4 +1,4 @@
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useLocation, useNavigate } from "react-router-dom";
 import { ArrowLeft, MapPin, CheckCircle2, Send, Pencil, Trash2, Share2, MoreVertical, Flag, Copy, Check, MessageCircle, Eye, ArrowUp, ArrowDown, ChevronUp, ChevronDown, Reply as ReplyIcon, Heart, Bookmark } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
@@ -9,10 +9,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Discussion, discussionTopicLabels } from "@/data/communityMockData";
 import { SEOHead } from "@/components/seo/SEOHead";
 import { formatDistanceToNow } from "date-fns";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { buildPublicUrl } from "@/lib/publicUrl";
-import { createDiscussionReply, deleteDiscussionReply, fetchDiscussionById, fetchDiscussionReplies, toggleAcceptDiscussionReply, updateDiscussionReply, incrementDiscussionViews, toggleDiscussionReplyVote, toggleDiscussionReaction } from "@/lib/community";
+import { createDiscussionReply, deleteDiscussion, deleteDiscussionReply, fetchDiscussionById, fetchDiscussionReplies, toggleAcceptDiscussionReply, updateDiscussionReply, incrementDiscussionViews, toggleDiscussionReplyVote, toggleDiscussionReaction } from "@/lib/community";
 import { getLoadErrorFeedback } from "@/lib/requestErrors";
 import { toast } from "@/hooks/use-toast";
 import {
@@ -29,6 +29,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import { ModerationMenu } from "@/components/moderation/ModerationMenu";
 
 type SortBy = "top" | "new" | "oldest";
 
@@ -50,6 +51,8 @@ interface DiscussionReply {
 
 export default function DiscussionDetail() {
   const { id } = useParams<{ id: string }>();
+  const location = useLocation();
+  const navigate = useNavigate();
   const { isAuthenticated, user } = useAuth();
   const [replyText, setReplyText] = useState("");
   const [discussion, setDiscussion] = useState<Discussion | null>(null);
@@ -57,9 +60,7 @@ export default function DiscussionDetail() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [editingReplyId, setEditingReplyId] = useState<string | null>(null);
-  const [editReplyText, setEditReplyText] = useState("");
   const [deletingReplyId, setDeletingReplyId] = useState<string | null>(null);
-  const [savingReplyId, setSavingReplyId] = useState<string | null>(null);
   
   // New states for sorting, sharing, reporting
   const [sortBy, setSortBy] = useState<SortBy>("top");
@@ -73,13 +74,35 @@ export default function DiscussionDetail() {
   const [reportReason, setReportReason] = useState("");
   const [reportDetails, setReportDetails] = useState("");
   const [isSubmittingReport, setIsSubmittingReport] = useState(false);
+  const [isDeletingDiscussion, setIsDeletingDiscussion] = useState(false);
   
   const [replyingToId, setReplyingToId] = useState<string | null>(null);
   const [replyingToAuthor, setReplyingToAuthor] = useState<string | null>(null);
   const [votingReplyId, setVotingReplyId] = useState<string | null>(null);
   const [expandedReplies, setExpandedReplies] = useState<Set<string>>(new Set());
+  const [highlightedReplyId, setHighlightedReplyId] = useState<string | null>(null);
+  const [scrolledReplyId, setScrolledReplyId] = useState<string | null>(null);
+  const replyRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const replyInputRef = useRef<HTMLInputElement | null>(null);
+
+  const focusReplyComposer = () => {
+    if (typeof window === "undefined") return;
+
+    window.setTimeout(() => {
+      const input = replyInputRef.current;
+      if (!input) return;
+      input.focus();
+      const cursorPos = input.value.length;
+      input.setSelectionRange(cursorPos, cursorPos);
+    }, 0);
+  };
   
   const [deleteConfirmDialog, setDeleteConfirmDialog] = useState<{ open: boolean; replyId: string | null }>({ open: false, replyId: null });
+
+  const targetReplyId = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    return params.get("reply");
+  }, [location.search]);
 
   // Function to sort replies based on selected sort option
   const getSortedReplies = () => {
@@ -104,17 +127,31 @@ export default function DiscussionDetail() {
   // Get nested replies structure - returns replies with their children in a flat array for rendering
   const getNestedReplies = () => {
     const sorted = getSortedReplies();
+    const childrenByParent = new Map<string, DiscussionReply[]>();
+    sorted.forEach((reply) => {
+      if (!reply.parentReplyId) return;
+      const existing = childrenByParent.get(reply.parentReplyId) || [];
+      existing.push(reply);
+      childrenByParent.set(reply.parentReplyId, existing);
+    });
+
     // Group child replies with their parents by keeping parent-child order
     const result: DiscussionReply[] = [];
     const topLevelReplies = sorted.filter(r => !r.parentReplyId);
+
+    const appendDescendants = (parentId: string) => {
+      const children = childrenByParent.get(parentId) || [];
+      children.forEach((child) => {
+        result.push(child);
+        appendDescendants(child.id);
+      });
+    };
     
-    // Add top-level replies and their children in order
+    // Add top-level replies and all descendants when expanded
     topLevelReplies.forEach((parent) => {
       result.push(parent);
-      // Find all immediate children and add them (if expanded)
       if (expandedReplies.has(parent.id)) {
-        const children = sorted.filter(r => r.parentReplyId === parent.id);
-        result.push(...children);
+        appendDescendants(parent.id);
       }
     });
     
@@ -134,8 +171,57 @@ export default function DiscussionDetail() {
   };
 
   const getChildReplyCount = (parentId: string) => {
-    return replies.filter(r => r.parentReplyId === parentId).length;
+    const childrenByParent = new Map<string, string[]>();
+    replies.forEach((reply) => {
+      if (!reply.parentReplyId) return;
+      const existing = childrenByParent.get(reply.parentReplyId) || [];
+      existing.push(reply.id);
+      childrenByParent.set(reply.parentReplyId, existing);
+    });
+
+    const countDescendants = (id: string): number => {
+      const children = childrenByParent.get(id) || [];
+      return children.reduce((total, childId) => total + 1 + countDescendants(childId), 0);
+    };
+
+    return countDescendants(parentId);
   };
+
+  useEffect(() => {
+    setScrolledReplyId(null);
+    setHighlightedReplyId(null);
+  }, [targetReplyId]);
+
+  useEffect(() => {
+    if (!targetReplyId || replies.length === 0 || scrolledReplyId === targetReplyId) return;
+
+    const targetReply = replies.find((reply) => reply.id === targetReplyId);
+    if (!targetReply) return;
+
+    if (targetReply.parentReplyId && !expandedReplies.has(targetReply.parentReplyId)) {
+      setExpandedReplies((prev) => {
+        const next = new Set(prev);
+        next.add(targetReply.parentReplyId as string);
+        return next;
+      });
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      const replyElement = replyRefs.current[targetReplyId];
+      if (!replyElement) return;
+
+      replyElement.scrollIntoView({ behavior: "smooth", block: "center" });
+      setHighlightedReplyId(targetReplyId);
+      setScrolledReplyId(targetReplyId);
+
+      window.setTimeout(() => {
+        setHighlightedReplyId((current) => (current === targetReplyId ? null : current));
+      }, 1800);
+    }, 120);
+
+    return () => window.clearTimeout(timer);
+  }, [targetReplyId, replies, expandedReplies, scrolledReplyId]);
 
   const handleShare = (reply: DiscussionReply) => {
     const link = buildPublicUrl(`/community/discussions/${id}?reply=${reply.id}`);
@@ -241,10 +327,6 @@ export default function DiscussionDetail() {
       // Call API to save vote
       const result = await toggleDiscussionReplyVote(reply.id, voteType);
 
-      // Determine new vote state
-      const isCurrentlyVoted = reply.userVote === voteType;
-      const newVote = isCurrentlyVoted ? null : voteType;
-
       // Update local state with result from API
       setReplies((prev) =>
         prev.map((r) => {
@@ -254,7 +336,7 @@ export default function DiscussionDetail() {
             ...r,
             upvotes: result.upvotes,
             downvotes: result.downvotes,
-            userVote: newVote,
+            userVote: result.userVote,
           };
         })
       );
@@ -275,8 +357,11 @@ export default function DiscussionDetail() {
   };
 
   const handleReplyTo = (reply: DiscussionReply) => {
+    setEditingReplyId(null);
+    setReplyText("");
     setReplyingToId(reply.id);
     setReplyingToAuthor(reply.author.name);
+    focusReplyComposer();
   };
 
   const cancelReplyTo = () => {
@@ -292,7 +377,7 @@ export default function DiscussionDetail() {
       try {
         const [discussionData, repliesData] = await Promise.all([
           fetchDiscussionById(id, user?.id),
-          fetchDiscussionReplies(id),
+          fetchDiscussionReplies(id, user?.id),
         ]);
 
         if (!isMounted) return;
@@ -389,27 +474,43 @@ export default function DiscussionDetail() {
 
   const handleSendReply = async () => {
     if (!id || !replyText.trim()) return;
+    const trimmedReply = replyText.trim();
     setIsSubmitting(true);
     try {
-      const newReply = await createDiscussionReply(id, replyText.trim(), replyingToId || undefined);
-      setReplies((prev) => [...prev, newReply as DiscussionReply]);
+      if (editingReplyId) {
+        await updateDiscussionReply(editingReplyId, trimmedReply);
+        setReplies((prev) =>
+          prev.map((reply) =>
+            reply.id === editingReplyId ? { ...reply, content: trimmedReply } : reply
+          )
+        );
+        toast({
+          title: "Reply updated",
+          description: "Your changes have been saved.",
+        });
+      } else {
+        const newReply = await createDiscussionReply(id, trimmedReply, replyingToId || undefined);
+        setReplies((prev) => [...prev, newReply as DiscussionReply]);
+        toast({
+          title: "Reply posted!",
+          description: "Your reply has been added to the discussion."
+        });
+      }
+
       setReplyText("");
+      setEditingReplyId(null);
       
       // Clear the reply-to context after sending
       if (replyingToId) {
         setReplyingToId(null);
         setReplyingToAuthor(null);
       }
-      
-      toast({
-        title: "Reply posted!",
-        description: "Your reply has been added to the discussion."
-      });
+
       const updatedDiscussion = await fetchDiscussionById(id, user?.id);
       setDiscussion(updatedDiscussion);
     } catch (error) {
       toast({
-        title: "Failed to post reply",
+        title: editingReplyId ? "Failed to update reply" : "Failed to post reply",
         description: error instanceof Error ? error.message : "Please try again.",
         variant: "destructive",
       });
@@ -420,40 +521,15 @@ export default function DiscussionDetail() {
 
   const handleEditReply = (replyId: string, currentBody: string) => {
     setEditingReplyId(replyId);
-    setEditReplyText(currentBody);
+    setReplyingToId(null);
+    setReplyingToAuthor(null);
+    setReplyText(currentBody);
+    focusReplyComposer();
   };
 
   const handleCancelEdit = () => {
     setEditingReplyId(null);
-    setEditReplyText("");
-  };
-
-  const handleSaveEdit = async (replyId: string) => {
-    if (!editReplyText.trim()) return;
-
-    setSavingReplyId(replyId);
-    try {
-      await updateDiscussionReply(replyId, editReplyText);
-      setReplies((prev) =>
-        prev.map((reply) =>
-          reply.id === replyId ? { ...reply, content: editReplyText.trim() } : reply
-        )
-      );
-      toast({
-        title: "Reply updated",
-        description: "Your changes have been saved.",
-      });
-      setEditingReplyId(null);
-      setEditReplyText("");
-    } catch (error) {
-      toast({
-        title: "Failed to update reply",
-        description: error instanceof Error ? error.message : "Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setSavingReplyId(null);
-    }
+    setReplyText("");
   };
 
   const handleDeleteReply = async (replyId: string) => {
@@ -473,6 +549,31 @@ export default function DiscussionDetail() {
       });
     } finally {
       setDeletingReplyId(null);
+    }
+  };
+
+  const handleDeleteDiscussion = async () => {
+    if (!discussion || isDeletingDiscussion) return;
+
+    const confirmed = window.confirm("Delete this discussion? This action cannot be undone.");
+    if (!confirmed) return;
+
+    setIsDeletingDiscussion(true);
+    try {
+      await deleteDiscussion(discussion.id);
+      toast({
+        title: "Discussion deleted",
+        description: "Your discussion has been removed.",
+      });
+      navigate("/community?tab=discussions");
+    } catch (error) {
+      toast({
+        title: "Failed to delete discussion",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsDeletingDiscussion(false);
     }
   };
 
@@ -524,29 +625,63 @@ export default function DiscussionDetail() {
 
       {/* Sub-header for back navigation */}
       <div className="sticky top-0 z-40 bg-background/95 backdrop-blur-md border-b border-border/50 px-5 py-4 sm:px-4 sm:py-3">
-        <div className="flex items-center gap-3">
-          <Link
-            to="/community?tab=discussions"
-            className="p-2 -ml-2 rounded-lg hover:bg-secondary transition-colors"
-          >
-            <ArrowLeft className="h-5 w-5" />
-          </Link>
-          <h1 className="font-semibold text-base">Discussion</h1>
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <Link
+              to="/community?tab=discussions"
+              className="p-2 -ml-2 rounded-lg hover:bg-secondary transition-colors"
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </Link>
+            <h1 className="font-semibold text-base">Discussion</h1>
+          </div>
+
+          {isDiscussionOwner ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8">
+                  <MoreVertical className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  disabled={isDeletingDiscussion}
+                  className="text-destructive"
+                  onClick={() => {
+                    void handleDeleteDiscussion();
+                  }}
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  {isDeletingDiscussion ? "Deleting..." : "Delete discussion"}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : discussion ? (
+            <ModerationMenu
+              reportType="DISCUSSION"
+              targetId={discussion.id}
+              reportedUserId={discussion.author.id}
+              targetLabel="Discussion"
+              reportLabel="Report Discussion"
+            />
+          ) : null}
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto pb-24 sm:pb-4">
+      <div className="flex-1 overflow-y-auto pb-24 sm:pb-4 lg:pb-20">
         {/* Question - Main Card */}
         <div className="p-5 sm:p-4 md:p-6 border-b border-border/50">
           <div className="space-y-4">
             {/* Author Info */}
             <div className="flex items-center gap-3">
-              <Avatar className="h-12 w-12 border-2 border-border/50">
-                <AvatarImage src={discussion?.author.avatar} />
-                <AvatarFallback className="text-sm font-semibold">{discussion?.author.name?.[0]}</AvatarFallback>
-              </Avatar>
+              <Link to={discussion?.author.id === user?.id ? "/profile" : `/user/${discussion?.author.id}`} onClick={(e) => e.stopPropagation()} className="shrink-0">
+                <Avatar className="h-12 w-12 border-2 border-border/50">
+                  <AvatarImage src={discussion?.author.avatar} />
+                  <AvatarFallback className="text-sm font-semibold">{discussion?.author.name?.[0]}</AvatarFallback>
+                </Avatar>
+              </Link>
               <div className="flex-1 min-w-0">
-                <p className="font-semibold text-sm">{discussion?.author.name}</p>
+                <Link to={discussion?.author.id === user?.id ? "/profile" : `/user/${discussion?.author.id}`} onClick={(e) => e.stopPropagation()} className="font-semibold text-sm hover:underline">{discussion?.author.name}</Link>
                 <p className="text-xs text-muted-foreground">{timeAgo}</p>
               </div>
             </div>
@@ -645,7 +780,14 @@ export default function DiscussionDetail() {
                 const isExpanded = expandedReplies.has(reply.id);
                 
                 return (
-                  <div key={reply.id}>
+                  <div
+                    key={reply.id}
+                    data-reply-id={reply.id}
+                    ref={(element) => {
+                      replyRefs.current[reply.id] = element;
+                    }}
+                    className={highlightedReplyId === reply.id ? "rounded-lg bg-primary/10 ring-1 ring-primary/40 transition-colors duration-500" : "transition-colors duration-300"}
+                  >
                     <div className="flex gap-4 py-4 border-b border-border/30 last:border-b-0" style={{ marginLeft: `${reply.depth * 32}px` }}>
                   {/* Vote Section */}
                   <div className="flex flex-col items-center gap-2 pt-1">
@@ -662,7 +804,7 @@ export default function DiscussionDetail() {
                       <ChevronUp className="h-4 w-4" />
                     </button>
                     <span className="text-xs font-bold text-foreground">
-                      {reply.upvotes - reply.downvotes > 0 ? reply.upvotes - reply.downvotes : (reply.upvotes - reply.downvotes < 0 ? reply.upvotes - reply.downvotes : reply.upvotes)}
+                      {reply.upvotes - reply.downvotes}
                     </span>
                     <button
                       onClick={() => handleVote(reply, "down")}
@@ -682,44 +824,23 @@ export default function DiscussionDetail() {
                   <div className="flex-1 min-w-0">
                     {/* Reply Header */}
                     <div className="flex items-center gap-2 flex-wrap mb-2">
-                      <Avatar className="h-8 w-8">
-                        <AvatarImage src={reply.author.avatar} />
-                        <AvatarFallback className="text-xs font-semibold">{reply.author.name?.[0] || "?"}</AvatarFallback>
-                      </Avatar>
-                      <p className="text-sm font-semibold">{reply.author.name}</p>
+                      <Link to={reply.author.id === user?.id ? "/profile" : `/user/${reply.author.id}`} onClick={(e) => e.stopPropagation()} className="shrink-0">
+                        <Avatar className="h-8 w-8">
+                          <AvatarImage src={reply.author.avatar} />
+                          <AvatarFallback className="text-xs font-semibold">{reply.author.name?.[0] || "?"}</AvatarFallback>
+                        </Avatar>
+                      </Link>
+                      <Link to={reply.author.id === user?.id ? "/profile" : `/user/${reply.author.id}`} onClick={(e) => e.stopPropagation()} className="text-sm font-semibold hover:underline">{reply.author.name}</Link>
                       <p className="text-xs text-muted-foreground">{formatDistanceToNow(reply.createdAt, { addSuffix: true })}</p>
                     </div>
 
                     {/* Reply Content */}
-                    {editingReplyId === reply.id ? (
-                      <div className="flex gap-2 mt-3">
-                        <Input
-                          value={editReplyText}
-                          onChange={(e) => setEditReplyText(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" && !e.shiftKey) {
-                              e.preventDefault();
-                              handleSaveEdit(reply.id);
-                            } else if (e.key === "Escape") {
-                              handleCancelEdit();
-                            }
-                          }}
-                          className="flex-1 text-sm"
-                          autoFocus
-                        />
-                        <Button
-                          size="sm"
-                          onClick={() => handleSaveEdit(reply.id)}
-                          disabled={!editReplyText.trim() || savingReplyId === reply.id}
-                        >
-                          Save
-                        </Button>
-                        <Button size="sm" variant="ghost" onClick={handleCancelEdit}>
-                          Cancel
-                        </Button>
+                    <p className="text-sm text-foreground/85 leading-relaxed">{reply.content}</p>
+
+                    {editingReplyId === reply.id && (
+                      <div className="mt-1 text-xs text-primary font-medium">
+                        Editing in reply field below
                       </div>
-                    ) : (
-                      <p className="text-sm text-foreground/85 leading-relaxed">{reply.content}</p>
                     )}
 
                     {/* Action Buttons */}
@@ -815,10 +936,18 @@ export default function DiscussionDetail() {
 
       {/* Reply input - positioned above navbar */}
       {isAuthenticated && (
-        <div className="fixed bottom-above-nav left-0 right-0 bg-background">
-          <div className="max-w-5xl mx-auto p-4 border-t border-border">
-            {replyingToId && (
-              <div className="flex items-center gap-2 mb-2 text-xs text-muted-foreground">
+        <div className="fixed bottom-above-nav lg:bottom-0 left-0 lg:left-60 right-0 bg-background">
+          <div className="max-w-5xl mx-auto px-3 py-2 sm:p-4 border-t border-border">
+            {editingReplyId && (
+              <div className="flex items-center gap-2 mb-1 sm:mb-2 text-xs text-muted-foreground">
+                <span>Editing your reply</span>
+                <button onClick={handleCancelEdit} className="text-primary hover:underline text-xs">
+                  Cancel
+                </button>
+              </div>
+            )}
+            {!editingReplyId && replyingToId && (
+              <div className="flex items-center gap-2 mb-1 sm:mb-2 text-xs text-muted-foreground">
                 <span>Replying to <strong>{replyingToAuthor}</strong></span>
                 <button onClick={cancelReplyTo} className="text-primary hover:underline text-xs">
                   Cancel
@@ -827,7 +956,8 @@ export default function DiscussionDetail() {
             )}
             <div className="flex items-center gap-2">
               <Input
-                placeholder={replyingToId ? `Reply to ${replyingToAuthor}...` : "Write a reply..."}
+                ref={replyInputRef}
+                placeholder={editingReplyId ? "Edit your reply..." : replyingToId ? `Reply to ${replyingToAuthor}...` : "Write a reply..."}
                 value={replyText}
                 onChange={(e) => setReplyText(e.target.value)}
                 onKeyDown={(e) => {
@@ -838,15 +968,23 @@ export default function DiscussionDetail() {
                     }
                   }
                 }}
-                className="flex-1"
+                className="flex-1 h-8 sm:h-10 text-xs sm:text-sm px-3"
                 disabled={isSubmitting}
               />
               <Button
-                size="icon"
+                size={editingReplyId ? "sm" : "icon"}
+                className={editingReplyId ? "h-8 sm:h-10 px-3 sm:px-4 flex-shrink-0 text-xs sm:text-sm" : "h-8 w-8 sm:h-10 sm:w-10 flex-shrink-0"}
                 disabled={!replyText.trim() || isSubmitting}
                 onClick={handleSendReply}
               >
-                <Send className="h-4 w-4" />
+                {editingReplyId ? (
+                  <>
+                    <Check className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1" />
+                    Save
+                  </>
+                ) : (
+                  <Send className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                )}
               </Button>
             </div>
           </div>

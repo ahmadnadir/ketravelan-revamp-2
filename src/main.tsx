@@ -4,6 +4,23 @@ import { Capacitor } from "@capacitor/core";
 import App from "./App.tsx";
 import "./index.css";
 
+if (typeof window !== "undefined" && window.location.hostname === "localhost" && "serviceWorker" in navigator) {
+  // Keep localhost free from stale cached bundles during rapid UI iteration.
+  void navigator.serviceWorker.getRegistrations().then((registrations) => {
+    registrations.forEach((registration) => {
+      void registration.unregister();
+    });
+  });
+
+  if ("caches" in window) {
+    void caches.keys().then((keys) => {
+      keys.forEach((key) => {
+        void caches.delete(key);
+      });
+    });
+  }
+}
+
 // Aborted browser operations (for example canceled share dialogs) can surface
 // as unhandled promise rejections in WebKit. Ignore only AbortError globally.
 window.addEventListener("unhandledrejection", (event) => {

@@ -7,6 +7,17 @@ import { clearPushToken, syncPushNotifications } from "@/lib/pushNotifications";
 import { getAuthRedirectUrl } from "@/lib/authRedirect";
 import { isNativePlatform } from "@/lib/capacitor";
 import { Browser } from "@capacitor/browser";
+import {
+  clearAuthError,
+  clearPendingAuthIntent,
+  getIdentityLinkingDisabled,
+  isManualLinkingDisabledMessage,
+  normalizeOAuthErrorMessage,
+  persistAuthError,
+  persistPendingAuthIntent,
+  setIdentityLinkingDisabled,
+  type OAuthProvider,
+} from "@/lib/authFlow";
 
 const HOME_CURRENCY_KEY = "ketravelan-home-currency";
 
@@ -56,7 +67,7 @@ function getInitialHomeCurrency(): CurrencyCode {
 }
 
 interface Profile {
-  [x: string]: string;
+  [x: string]: unknown;
   id: string;
   role: 'traveler' | 'agent';
   username: string | null;
@@ -108,6 +119,7 @@ interface Profile {
   home_currency?: CurrencyCode | null;
   name?: string | null;
   gender?: string | null;
+  ugc_terms_accepted_at?: string | null;
 }
 
 interface AuthContextType {
@@ -116,10 +128,26 @@ interface AuthContextType {
   profile: Profile | null;
   loading: boolean;
   signInWithGoogle: () => Promise<void>;
+  signInWithApple: () => Promise<void>;
+  linkGoogleIdentity: (returnTo?: string) => Promise<void>;
+  linkAppleIdentity: (returnTo?: string) => Promise<void>;
+  linkedProviders: string[];
+  identityLinkingAvailable: boolean;
   signInWithEmail: (email: string, password: string) => Promise<void>;
   signUpWithEmail: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
+  deleteAccount: () => Promise<{
+    ok: boolean;
+    mode?: "hard" | "soft";
+    email?: {
+      attempted: boolean;
+      sent: boolean;
+      to: string;
+      error: string | null;
+    };
+  }>;
   refreshProfile: () => Promise<void>;
+  refreshLinkedProviders: () => Promise<void>;
   homeCurrency: CurrencyCode;
   setHomeCurrency: (currency: CurrencyCode) => void;
 }
@@ -131,13 +159,152 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [homeCurrency, setHomeCurrencyState] = useState<CurrencyCode>(getInitialHomeCurrency);
+  const [linkedProviders, setLinkedProviders] = useState<string[]>([]);
+  const [identityLinkingAvailable, setIdentityLinkingAvailable] = useState<boolean>(() => !getIdentityLinkingDisabled());
+
+  const updateLinkedProvidersFromUser = async (currentUser: SupabaseUser | null) => {
+    if (!currentUser) {
+      setLinkedProviders([]);
+      return;
+    }
+
+    const providers = new Set<string>();
+    const appMetadataProviders = currentUser.app_metadata?.providers;
+    if (Array.isArray(appMetadataProviders)) {
+      appMetadataProviders.forEach((provider) => {
+        if (typeof provider === "string" && provider.trim()) {
+          providers.add(provider);
+        }
+      });
+    }
+
+    const userIdentities = Array.isArray((currentUser as any).identities)
+      ? ((currentUser as any).identities as Array<{ provider?: string | null }>)
+      : [];
+    userIdentities.forEach((identity) => {
+      if (identity?.provider) {
+        providers.add(identity.provider);
+      }
+    });
+
+    try {
+      const { data, error } = await supabase.auth.getUserIdentities();
+      if (!error && Array.isArray(data?.identities)) {
+        data.identities.forEach((identity) => {
+          if (identity?.provider) {
+            providers.add(identity.provider);
+          }
+        });
+      }
+    } catch {
+      // Ignore: user/app metadata fallback above is enough to keep the UI usable.
+    }
+
+    setLinkedProviders(Array.from(providers));
+  };
+
+  const refreshLinkedProviders = async () => {
+    await updateLinkedProvidersFromUser(user);
+  };
+
+  const attachBrowserFallbackListener = async () => {
+    const listenerHandle = await Browser.addListener("browserFinished", async () => {
+      listenerHandle.remove();
+      try {
+        await new Promise((res) => setTimeout(res, 300));
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (!sessionData.session) {
+          await supabase.auth.refreshSession();
+        }
+      } catch {
+        // Ignore – deep-link handler is the primary path.
+      }
+    });
+  };
+
+  const startOAuth = async (
+    provider: OAuthProvider,
+    kind: "sign-in" | "link",
+    returnTo?: string,
+  ) => {
+    const redirectTo = getAuthRedirectUrl();
+    const isNative = isNativePlatform();
+
+    if (kind === "link" && !identityLinkingAvailable) {
+      const message = normalizeOAuthErrorMessage("Manual linking is disabled", provider);
+      persistAuthError(message);
+      throw new Error(message);
+    }
+
+    persistPendingAuthIntent({
+      kind,
+      provider,
+      returnTo,
+      startedAt: Date.now(),
+    });
+    clearAuthError();
+
+    const result = kind === "link"
+      ? await supabase.auth.linkIdentity({
+          provider,
+          options: {
+            redirectTo,
+            ...(isNative ? { skipBrowserRedirect: true } : {}),
+          },
+        })
+      : await supabase.auth.signInWithOAuth({
+          provider,
+          options: {
+            redirectTo,
+            ...(isNative ? { skipBrowserRedirect: true } : {}),
+          },
+        });
+
+    if (result.error) {
+      clearPendingAuthIntent();
+      if (kind === "link" && isManualLinkingDisabledMessage(result.error.message)) {
+        setIdentityLinkingAvailable(false);
+        setIdentityLinkingDisabled(true);
+      }
+      const message = normalizeOAuthErrorMessage(result.error.message, provider);
+      persistAuthError(message);
+      throw new Error(message);
+    }
+
+    if (kind === "link") {
+      setIdentityLinkingAvailable(true);
+      setIdentityLinkingDisabled(false);
+    }
+
+    if (isNative) {
+      const url = result.data?.url;
+      if (!url) {
+        clearPendingAuthIntent();
+        const message = `Missing OAuth URL for ${provider} ${kind === "link" ? "linking" : "sign-in"}`;
+        persistAuthError(message);
+        throw new Error(message);
+      }
+
+      await attachBrowserFallbackListener();
+
+      try {
+        await Browser.close();
+      } catch {
+        // Ignore when nothing is open.
+      }
+
+      await Browser.open({ url, presentationStyle: "fullscreen" });
+    }
+  };
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
       if (session?.user) {
+        void updateLinkedProvidersFromUser(session.user);
         fetchProfile(session.user.id);
       } else {
+        setLinkedProviders([]);
         setLoading(false);
       }
     });
@@ -146,9 +313,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       (async () => {
         setUser(session?.user ?? null);
         if (session?.user) {
+          await updateLinkedProvidersFromUser(session.user);
           await fetchProfile(session.user.id);
         } else {
           setProfile(null);
+          setLinkedProviders([]);
           setLoading(false);
         }
       })();
@@ -182,59 +351,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signInWithGoogle = async () => {
-    const redirectTo = getAuthRedirectUrl();
-    const isNative = isNativePlatform();
+    await startOAuth("google", "sign-in");
+  };
 
-    const { data, error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo,
-        ...(isNative ? { skipBrowserRedirect: true } : {}),
-      },
-    });
-    if (error) throw error;
+  const signInWithApple = async () => {
+    await startOAuth("apple", "sign-in");
+  };
 
-    if (isNative) {
-      const url = data?.url;
-      if (!url) {
-        throw new Error("Missing OAuth URL for native sign-in");
-      }
+  const linkGoogleIdentity = async (returnTo = "/settings") => {
+    await startOAuth("google", "link", returnTo);
+  };
 
-      // Attach a browserFinished listener BEFORE opening the browser so we
-      // never miss the callback.  When the in-app browser closes (either
-      // because iOS intercepted the custom-scheme redirect or the user
-      // dismissed it manually), poll for a session.  The deep-link handler in
-      // App.tsx handles the happy path; this is the fallback for the case
-      // where appUrlOpen fires before the listener is mounted.
-      const listenerHandle = await Browser.addListener("browserFinished", async () => {
-        listenerHandle.remove();
-        try {
-          // Give the deep-link handler a short window to run first.
-          await new Promise((res) => setTimeout(res, 300));
-          const { data: sessionData } = await supabase.auth.getSession();
-          if (!sessionData.session) {
-            // Session not yet set — the PKCE exchange may not have completed.
-            // Re-trigger onAuthStateChange by refreshing; Supabase will pick up
-            // any tokens stored from the deep link.
-            await supabase.auth.refreshSession();
-          }
-        } catch {
-          // Ignore – the deep-link handler is the primary path.
-        }
-      });
-
-      // Defensive: close any stale SFSafariViewController before opening a new one.
-      // When iOS auto-dismisses the browser via OAuth URL redirect, it does not call
-      // safariViewControllerDidFinish, leaving the Browser plugin's internal reference
-      // non-nil. A close() here resets that so the upcoming open() always succeeds.
-      try {
-        await Browser.close();
-      } catch {
-        // "No active window to close!" is expected when no browser is open — ignore.
-      }
-
-      await Browser.open({ url, presentationStyle: "fullscreen" });
-    }
+  const linkAppleIdentity = async (returnTo = "/settings") => {
+    await startOAuth("apple", "link", returnTo);
   };
 
   const signInWithEmail = async (email: string, password: string) => {
@@ -275,6 +404,54 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await clearPushToken();
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
+  };
+
+  const deleteAccount = async () => {
+    const { data, error } = await supabase.functions.invoke("delete-account", {
+      body: {},
+    });
+
+    if (error) {
+      const fnError = error as {
+        message?: string;
+        context?: { error?: string; message?: string; status?: number };
+      };
+      const message =
+        fnError?.context?.error ||
+        fnError?.context?.message ||
+        fnError?.message ||
+        "Failed to delete account";
+
+      if (message.toLowerCase().includes("failed to send a request to the edge function")) {
+        throw new Error("Delete account service is not reachable. Please try again in a moment.");
+      }
+
+      throw new Error(message);
+    }
+
+    if (!data?.ok) {
+      throw new Error((data as { error?: string })?.error || "Failed to delete account");
+    }
+
+    const result = data as {
+      ok: boolean;
+      mode?: "hard" | "soft";
+      email?: {
+        attempted: boolean;
+        sent: boolean;
+        to: string;
+        error: string | null;
+      };
+    };
+
+    // The auth user is now deleted server-side; clear local session remnants.
+    try {
+      await supabase.auth.signOut();
+    } catch {
+      // Ignore local sign-out failures after deletion.
+    }
+
+    return result;
   };
 
   const refreshProfile = async () => {
@@ -323,10 +500,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         profile,
         loading,
         signInWithGoogle,
+        signInWithApple,
+        linkGoogleIdentity,
+        linkAppleIdentity,
+        linkedProviders,
+        identityLinkingAvailable,
         signInWithEmail,
         signUpWithEmail,
         signOut,
+        deleteAccount,
         refreshProfile,
+        refreshLinkedProviders,
         homeCurrency,
         setHomeCurrency,
       }}

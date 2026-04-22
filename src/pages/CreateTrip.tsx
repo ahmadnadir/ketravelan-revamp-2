@@ -59,7 +59,7 @@ import {
 import { toast } from "@/hooks/use-toast";
 import { tripCategories } from "@/data/categories";
 import { createTrip, updateTrip, fetchTripDetails, deleteDraftTrip } from "@/lib/trips";
-import { uploadImageFromDataUrl, isUrl } from "@/lib/imageStorage";
+import { normalizeImageDataUrl, optimizeImageDataUrl, uploadImageFromDataUrl, isUrl } from "@/lib/imageStorage";
 import { supabase } from "@/lib/supabase";
 import { scheduleTripReminder } from "@/lib/tripReminders";
 import { useQueryClient } from "@tanstack/react-query";
@@ -236,10 +236,27 @@ export default function CreateTrip() {
 
     // Convert to base64 for localStorage storage
     const reader = new FileReader();
-    reader.onload = (event) => {
-      const base64 = event.target?.result as string;
-      if (base64 && draft.galleryImages.length < 5) {
-        updateDraft("galleryImages", [...draft.galleryImages, base64]);
+    reader.onload = async (event) => {
+      try {
+        const base64 = event.target?.result as string;
+        if (!base64 || draft.galleryImages.length >= 5) return;
+
+        const normalized = await normalizeImageDataUrl(base64);
+        const optimized = await optimizeImageDataUrl(normalized, {
+          maxDimension: 1920,
+          maxBytes: 1_500_000,
+          qualityStart: 0.82,
+          qualityMin: 0.58,
+        });
+
+        updateDraft("galleryImages", [...draft.galleryImages, optimized]);
+      } catch (error) {
+        console.warn("Failed to process gallery image", error);
+        toast({
+          title: "Image not supported",
+          description: "Please choose another photo or convert it to JPG/PNG.",
+          variant: "destructive",
+        });
       }
     };
     reader.readAsDataURL(file);
@@ -843,7 +860,7 @@ export default function CreateTrip() {
               <input
                 type="file"
                 ref={galleryInputRef}
-                accept="image/*"
+                accept="image/*,.heic,.heif"
                 onChange={handleGalleryImageUpload}
                 className="hidden"
               />
