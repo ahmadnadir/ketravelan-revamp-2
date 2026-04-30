@@ -1,0 +1,6 @@
+tables_in_file=51
+missing_tables=0
+tables_with_missing_columns=1
+
+[missing columns]
+profiles: travel_style

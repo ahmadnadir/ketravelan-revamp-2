@@ -1,0 +1,100 @@
+{
+  "projectUrl": "https://ydwhrqtqskdcepqiqkxi.supabase.co",
+  "createdAt": "2026-04-22T17:52:19.970Z",
+  "bucketCount": 8,
+  "fileCount": 476,
+  "buckets": [
+    {
+      "id": "trip-photos",
+      "name": "trip-photos",
+      "public": true,
+      "fileSizeLimit": 5242880,
+      "allowedMimeTypes": [
+        "image/jpeg",
+        "image/jpg",
+        "image/png",
+        "image/gif",
+        "image/webp"
+      ]
+    },
+    {
+      "id": "trip-covers",
+      "name": "trip-covers",
+      "public": true,
+      "fileSizeLimit": 5242880,
+      "allowedMimeTypes": [
+        "image/jpeg",
+        "image/jpg",
+        "image/png",
+        "image/gif",
+        "image/webp"
+      ]
+    },
+    {
+      "id": "trip-images",
+      "name": "trip-images",
+      "public": true,
+      "fileSizeLimit": 10485760,
+      "allowedMimeTypes": [
+        "image/jpeg",
+        "image/jpg",
+        "image/png",
+        "image/gif",
+        "image/webp"
+      ]
+    },
+    {
+      "id": "avatars",
+      "name": "avatars",
+      "public": true,
+      "fileSizeLimit": null,
+      "allowedMimeTypes": null
+    },
+    {
+      "id": "payment-qr-codes",
+      "name": "payment-qr-codes",
+      "public": true,
+      "fileSizeLimit": 5242880,
+      "allowedMimeTypes": [
+        "image/*"
+      ]
+    },
+    {
+      "id": "expense-receipts",
+      "name": "expense-receipts",
+      "public": true,
+      "fileSizeLimit": 10485760,
+      "allowedMimeTypes": [
+        "image/jpeg",
+        "image/jpg",
+        "image/png",
+        "image/gif",
+        "image/webp",
+        "application/pdf"
+      ]
+    },
+    {
+      "id": "receipts",
+      "name": "receipts",
+      "public": true,
+      "fileSizeLimit": 5242880,
+      "allowedMimeTypes": [
+        "image/jpeg",
+        "image/jpg",
+        "image/png",
+        "image/gif",
+        "application/pdf"
+      ]
+    },
+    {
+      "id": "inspirations",
+      "name": "inspirations",
+      "public": true,
+      "fileSizeLimit": null,
+      "allowedMimeTypes": [
+        "image/jpeg",
+        "image/png"
+      ]
+    }
+  ]
+}
