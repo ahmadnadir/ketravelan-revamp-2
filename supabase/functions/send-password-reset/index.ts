@@ -10,7 +10,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY")!;
-const RESEND_FROM = Deno.env.get("RESEND_FROM") ?? "Ketravelan <no-reply@ketravelan.xyz>";
+const RESEND_FROM = Deno.env.get("RESEND_FROM") ?? "Ketravelan <no-reply@ketravelan.com>";
 const RESEND_RESET_TEMPLATE_ID = Deno.env.get("RESEND_RESET_TEMPLATE_ID") ?? Deno.env.get("RESEND_TEMPLATE_ID_RESET");
 const DEFAULT_REDIRECT = Deno.env.get("SITE_URL") ?? "https://ketravelan.app/auth/callback";
 
@@ -23,7 +23,7 @@ function buildCorsHeaders(req: Request): Record<string, string> {
   const allowedOrigins = new Set([
     "http://localhost:8080",
     "http://127.0.0.1:8080",
-    "https://ketravelan.xyz",
+    "https://ketravelan.com",
   ]);
   const allowOrigin = allowedOrigins.has(origin) ? origin : "*";
   const requestedHeaders = req.headers.get("access-control-request-headers");

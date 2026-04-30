@@ -11,7 +11,7 @@ interface BeforeInstallPromptEvent extends Event {
 
 const BANNER_DISMISSED_KEY = "ketravelan_install_banner_dismissed";
 const PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=com.ketravelan.app";
-const APP_STORE_URL = "https://apps.apple.com/us/search?term=Ketravelan";
+const APP_STORE_URL = "https://apps.apple.com/my/app/ketravelan/id6762271506";
 
 export function InstallBanner() {
   const [showBanner, setShowBanner] = useState(false);

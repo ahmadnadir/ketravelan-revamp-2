@@ -102,9 +102,12 @@ export default function Explore() {
 
   // Build query filters
   const queryFilters = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
     const filters: any = {
       destination: appliedFilters.destination || undefined,
       maxPrice: appliedFilters.budgetRange[1],
+      startDate: today.toISOString().slice(0, 10),
     };
     if (appliedFilters.budgetRange[0] > 0) {
       filters.minPrice = appliedFilters.budgetRange[0];

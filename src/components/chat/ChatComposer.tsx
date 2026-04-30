@@ -220,12 +220,10 @@ export function ChatComposer({ onSend, placeholder = "Type a message...", onTypi
 
   return (
     <>
-      <div 
-        className="w-full border-t border-border/30"
-      >
+      <div className="w-full">
         {/* Slim input container - WhatsApp style */}
-        <div className="px-2 sm:px-3 py-2">
-          <div className="container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto">
+        <div className="px-3 py-1.5">
+          <div>
             {/* Mention suggestions dropdown */}
             {showMentionDropdown && mentionSuggestions.length > 0 && (
               <div className="mb-1.5 max-h-32 overflow-y-auto bg-secondary border border-border/50 rounded-lg">

@@ -272,12 +272,12 @@ export default function DiscussionDetail() {
         Date: ${new Date().toISOString()}
       `;
 
-      // Send email to no-reply@ketravelan.xyz
+      // Send email to no-reply@ketravelan.com
       await fetch("/api/send-report", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          to: "no-reply@ketravelan.xyz",
+          to: "no-reply@ketravelan.com",
           subject: `New Comment Report - Discussion ${id}`,
           body: reportEmail,
         }),

@@ -113,8 +113,8 @@ export async function fetchUnreadCount(): Promise<number> {
 }
 
 /**
- * Get TOTAL unread notification count including both system and chat notifications
- * This is what displays in the UI badge (header, bottom nav, sidebar)
+ * Get TOTAL unread rows in notifications, including chat-derived notification rows.
+ * Kept for diagnostics and any legacy flows that need the raw table count.
  */
 export async function fetchTotalUnreadCount(): Promise<number> {
   const { data: { user } } = await supabase.auth.getUser();

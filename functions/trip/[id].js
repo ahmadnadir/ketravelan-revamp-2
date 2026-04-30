@@ -1,4 +1,4 @@
-const DEFAULT_OG_IMAGE = "https://ketravelan.xyz/ketravelan_icon.jpeg";
+const DEFAULT_OG_IMAGE = "https://ketravelan.com/ketravelan_icon.jpeg";
 const DEFAULT_SUPABASE_URL = "https://sspvqhleqlycsiniywkg.supabase.co";
 const DEFAULT_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNzcHZxaGxlcWx5Y3Npbml5d2tnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MDU4NjEsImV4cCI6MjA4Mjk4MTg2MX0.yMDAvpxbvfhcCXNtiPnMg8z5DL-yNixNND4naGPZBXw";
 

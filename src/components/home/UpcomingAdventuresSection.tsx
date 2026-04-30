@@ -16,7 +16,13 @@ export function UpcomingAdventuresSection() {
     try {
       setIsLoading(true);
       const data = await fetchTrips({});
-      const mappedTrips = (data || []).slice(0, 6).map((trip: any) => {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const upcomingData = (data || []).filter((trip: any) => {
+        if (!trip.end_date) return true;
+        return new Date(trip.end_date) >= today;
+      });
+      const mappedTrips = upcomingData.slice(0, 6).map((trip: any) => {
         const maxParticipants = trip.max_participants ?? 0;
         const currentParticipants = trip.current_participants ?? 0;
         let slotsLeft = maxParticipants - currentParticipants;
@@ -65,7 +71,7 @@ export function UpcomingAdventuresSection() {
       </div>
 
       {/* Trip Cards - Horizontal Scroll */}
-      <div className="flex gap-3 sm:gap-4 overflow-x-auto scrollbar-hide pb-2 snap-x snap-mandatory">
+      <div className="flex items-stretch gap-3 sm:gap-4 overflow-x-auto scrollbar-hide pb-2 snap-x snap-mandatory h-[420px] sm:h-[450px]">
         {isLoading ? (
           <div className="w-full py-8 text-center text-muted-foreground text-sm">
             Loading trips...
@@ -76,7 +82,7 @@ export function UpcomingAdventuresSection() {
               key={trip.id}
               {...trip}
               creatorId={trip.creator_id ?? trip.creator?.id}
-              className="w-[280px] sm:w-[320px] shrink-0 snap-start"
+              className="w-[280px] sm:w-[320px] shrink-0 snap-start h-full"
             />
           ))
         ) : (

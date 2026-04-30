@@ -126,8 +126,7 @@ function navigateToActionUrl(rawUrl: string) {
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
-function registerListeners() {
-  if (listenersRegistered) return;
+export function registerListeners() {  if (listenersRegistered) return;
   listenersRegistered = true;
 
   PushNotifications.addListener("registration", async (token) => {
@@ -253,6 +252,138 @@ export async function syncPushNotifications(userId: string, enabled: boolean) {
   } finally {
     registrationInFlight = false;
   }
+}
+
+export async function debugNotificationPermissions() {
+  if (!isNative()) {
+    console.log("[Push] Web platform — checking service worker push support");
+    const swReg = await navigator.serviceWorker?.getRegistration?.();
+    const swPushManager = swReg?.pushManager;
+    const permState = swPushManager
+      ? await swPushManager.permissionState({ userVisibleOnly: true })
+      : "unsupported";
+    console.log("[Push] Web push permission:", permState);
+    return { platform: "web", permissionState: permState };
+  }
+
+  const platform = Capacitor.getPlatform();
+  const permStatus = await PushNotifications.checkPermissions();
+  console.log(`[Push] ${platform} permission status:`, permStatus);
+
+  const storedToken = localStorage.getItem(TOKEN_STORAGE_KEY);
+  console.log("[Push] Stored token:", storedToken ? `${storedToken.slice(0, 12)}...` : "none");
+
+  const displayStatus =
+    permStatus.receive === "granted"
+      ? "✅ Granted (check iOS Settings for banner/sound preferences)"
+      : "❌ Denied (user rejected notifications)";
+
+  return {
+    platform,
+    receive: permStatus.receive,
+    display: displayStatus,
+    hasToken: !!storedToken,
+  };
+}
+
+export async function forceRefreshNotificationPermissions() {
+  if (!isNative()) {
+    console.log("[Push] Web platform, skipping native permission refresh");
+    return { receive: "granted", display: "Web platform" };
+  }
+
+  try {
+    console.log("[Push] Force-refreshing notification permissions...");
+    const reqStatus = await PushNotifications.requestPermissions();
+
+    const displayMsg =
+      reqStatus.receive === "granted"
+        ? "✅ Permissions granted! Check iOS Settings > Ketravelan to enable Banners & Sounds"
+        : "❌ Permissions denied. Enable in Settings > Notifications > Ketravelan";
+
+    console.log("[Push] Permission request result:", {
+      receive: reqStatus.receive,
+      display: displayMsg,
+    });
+
+    if (reqStatus.receive === "granted") {
+      console.log("✅ [Push] Full notification permissions granted");
+    } else {
+      console.warn("⚠️ [Push] Permissions not fully granted. You may need to enable in Settings.");
+    }
+
+    return { receive: reqStatus.receive, display: displayMsg };
+  } catch (err) {
+    console.warn("[Push] Error requesting permissions:", err);
+    return { receive: "denied", display: "Error requesting permissions" };
+  }
+}
+
+export async function openNotificationSettings() {
+  const platform = Capacitor.getPlatform();
+  
+  if (platform === "ios") {
+    try {
+      // On iOS, we can try to open the app's notification settings
+      // Using App plugin's openUrl to navigate to settings
+      const { App: CapApp } = await import("@capacitor/app");
+      // Note: app-specific settings URL scheme may not work on all iOS versions
+      // User may need to navigate manually to Settings > Notifications > Ketravelan
+      console.log("[Push] Please manually open: Settings > Notifications > Ketravelan");
+      console.log("[Push] Ensure: Allow Notifications, Banners, Sounds, and Badges are all ON");
+    } catch (err) {
+      console.warn("[Push] Could not open settings directly:", err);
+    }
+  } else if (platform === "android") {
+    try {
+      const { App: CapApp } = await import("@capacitor/app");
+      // Android settings URL for app notifications
+      console.log("[Push] Please manually open: Settings > Apps > Ketravelan > Notifications");
+    } catch (err) {
+      console.warn("[Push] Could not open settings directly:", err);
+    }
+  }
+}
+
+export async function getNotificationSettingsInstructions(): Promise<string> {
+  const platform = Capacitor.getPlatform();
+  
+  if (platform === "ios") {
+    return `
+📱 iOS Notification Settings Fix:
+
+1. Open iPhone Settings app
+2. Scroll down and tap "Ketravelan"
+3. Tap "Notifications"
+4. Verify these are ALL enabled (toggle ON if OFF):
+   ✓ Allow Notifications
+   ✓ Banners (choose "Persistent" or "Temporary")
+   ✓ Sounds
+   ✓ Badges
+5. Close Settings and return to app
+6. You should now receive full notifications with sound and banner
+    `.trim();
+  } else if (platform === "android") {
+    return `
+📱 Android Notification Settings Fix:
+
+1. Open Android Settings app
+2. Go to "Apps" or "Application Manager"
+3. Find and tap "Ketravelan"
+4. Tap "Notifications"
+5. Verify these are enabled:
+   ✓ Allow notifications
+   ✓ Sound
+   ✓ Vibration
+6. Tap channel name (e.g., "Alerts") and verify:
+   ✓ Importance level is set to "High" or "Max"
+   ✓ Sound is enabled
+7. Close Settings and return to app
+8. You should now receive full notifications with sound
+    `.trim();
+  }
+
+  return "Unknown platform";
 }
 
 export async function clearPushToken() {

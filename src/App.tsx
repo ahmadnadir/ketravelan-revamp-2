@@ -54,7 +54,6 @@ import HelpArticleDetail from "./pages/HelpArticleDetail";
 import { classifyRequestError } from "@/lib/requestErrors";
 import { getPendingAuthIntent, normalizeOAuthErrorMessage, persistAuthError } from "@/lib/authFlow";
 
-import { PageTransition } from "./components/layout/PageTransition";
 import { OfflineBanner } from "./components/layout/OfflineBanner";
 import { NetworkStatusProvider } from "./contexts/NetworkStatusContext";
 import { AppInitializer } from "./components/AppInitializer";
@@ -287,6 +286,124 @@ function IOSStatusBarInitializer() {
   return null;
 }
 
+function GlobalSwipeBackHandler() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const touchStartXRef = useRef<number | null>(null);
+  const touchStartYRef = useRef<number | null>(null);
+  const touchStartAtRef = useRef<number>(0);
+  const touchTargetRef = useRef<EventTarget | null>(null);
+  const lastBackAtRef = useRef<number>(0);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const isTouchDevice = "ontouchstart" in window || navigator.maxTouchPoints > 0;
+    if (!isTouchDevice) return;
+
+    const shouldIgnoreTarget = (target: EventTarget | null) => {
+      if (!(target instanceof HTMLElement)) return false;
+      return Boolean(
+        target.closest(
+          'input, textarea, select, [contenteditable="true"], [data-swipe-back-ignore="true"], [data-no-swipe-back="true"], [role="slider"]'
+        )
+      );
+    };
+
+    const hasHorizontalScrollableAncestor = (target: EventTarget | null, deltaX: number) => {
+      if (!(target instanceof HTMLElement)) return false;
+      let node: HTMLElement | null = target;
+
+      while (node && node !== document.body) {
+        const style = window.getComputedStyle(node);
+        const canScrollX =
+          (style.overflowX === "auto" || style.overflowX === "scroll") && node.scrollWidth > node.clientWidth;
+
+        if (canScrollX) {
+          const atLeft = node.scrollLeft <= 0;
+          const atRight = node.scrollLeft + node.clientWidth >= node.scrollWidth - 1;
+
+          // Swiping left means content attempts to move right, requiring room on the right.
+          if (deltaX < 0 && !atRight) return true;
+          // Swiping right means content attempts to move left, requiring room on the left.
+          if (deltaX > 0 && !atLeft) return true;
+        }
+
+        node = node.parentElement;
+      }
+
+      return false;
+    };
+
+    const handleTouchStart = (event: TouchEvent) => {
+      if (event.touches.length !== 1) {
+        touchStartXRef.current = null;
+        touchStartYRef.current = null;
+        touchTargetRef.current = null;
+        return;
+      }
+
+      const touch = event.touches[0];
+
+      // Only allow swipe-back when the gesture starts within the left edge zone (first 24px)
+      const EDGE_ZONE = 24;
+      if (touch.clientX > EDGE_ZONE) {
+        touchStartXRef.current = null;
+        touchStartYRef.current = null;
+        touchTargetRef.current = null;
+        return;
+      }
+
+      touchStartXRef.current = touch.clientX;
+      touchStartYRef.current = touch.clientY;
+      touchStartAtRef.current = Date.now();
+      touchTargetRef.current = event.target;
+    };
+
+    const handleTouchEnd = (event: TouchEvent) => {
+      const startX = touchStartXRef.current;
+      const startY = touchStartYRef.current;
+      const target = touchTargetRef.current;
+
+      touchStartXRef.current = null;
+      touchStartYRef.current = null;
+      touchTargetRef.current = null;
+
+      if (startX === null || startY === null) return;
+      if (event.changedTouches.length !== 1) return;
+
+      const touch = event.changedTouches[0];
+      const deltaX = touch.clientX - startX;
+      const deltaY = touch.clientY - startY;
+      const elapsed = Date.now() - touchStartAtRef.current;
+
+      if (elapsed > 650) return;
+      if (Math.abs(deltaX) < 70) return;
+      if (Math.abs(deltaY) > 80) return;
+      if (Math.abs(deltaX) <= Math.abs(deltaY)) return;
+      if (shouldIgnoreTarget(target)) return;
+      if (hasHorizontalScrollableAncestor(target, deltaX)) return;
+
+      const now = Date.now();
+      if (now - lastBackAtRef.current < 450) return;
+      lastBackAtRef.current = now;
+
+      if (window.history.length > 1 && location.pathname !== "/") {
+        navigate(-1);
+      }
+    };
+
+    document.addEventListener("touchstart", handleTouchStart, { passive: true });
+    document.addEventListener("touchend", handleTouchEnd, { passive: true });
+
+    return () => {
+      document.removeEventListener("touchstart", handleTouchStart);
+      document.removeEventListener("touchend", handleTouchEnd);
+    };
+  }, [location.pathname, navigate]);
+
+  return null;
+}
+
 function NativeAnimatedSplash() {
   const [visible, setVisible] = useState(isNativePlatform());
 
@@ -344,12 +461,12 @@ const App = () => (
           <SafeAreaLayout>
             <OfflineBanner />
             <IOSStatusBarInitializer />
+            <GlobalSwipeBackHandler />
             <AppInitializer />
             <TermsAcceptanceModal />
             <ScrollToTop />
           <AuthDeepLinkHandler />
             <RecoveryBootstrap />
-            <PageTransition>
           <Suspense fallback={null}>
             <Routes>
               <Route path="/" element={<MainPage />} />
@@ -405,7 +522,6 @@ const App = () => (
               <Route path="*" element={<NotFound />} />
             </Routes>
           </Suspense>
-          </PageTransition>
           </SafeAreaLayout>
         </BrowserRouter>
       </TooltipProvider>

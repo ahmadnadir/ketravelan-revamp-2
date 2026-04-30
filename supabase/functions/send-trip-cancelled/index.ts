@@ -6,15 +6,15 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY")!;
-const RESEND_FROM = Deno.env.get("RESEND_FROM") ?? "Ketravelan <no-reply@ketravelan.xyz>";
-const SITE_URL = Deno.env.get("SITE_URL") ?? "https://ketravelan.xyz";
+const RESEND_FROM = Deno.env.get("RESEND_FROM") ?? "Ketravelan <no-reply@ketravelan.com>";
+const SITE_URL = Deno.env.get("SITE_URL") ?? "https://ketravelan.com";
 
 const SITE_ORIGIN = (() => {
   try {
     return new URL(SITE_URL).origin;
   } catch {
     const m = SITE_URL.match(/^(https?:\/\/[^/]+)/);
-    return m ? m[1] : "https://ketravelan.xyz";
+    return m ? m[1] : "https://ketravelan.com";
   }
 })();
 
@@ -29,7 +29,7 @@ function buildCorsHeaders(req: Request): Record<string, string> {
     "http://127.0.0.1:8080",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-    "https://ketravelan.xyz",
+    "https://ketravelan.com",
     "http://10.0.2.2:5173",
     "capacitor://localhost",
   ]);
@@ -204,7 +204,7 @@ serve(async (req: Request) => {
       title: "Trip Cancelled",
       messageHtml,
       ctaUrl: exploreUrl,
-      logoUrl: "https://ketravelan.xyz/ketravelan_logo.png",
+      logoUrl: "https://ketravelan.com/ketravelan_logo.png",
       ctaLabel: "Find Another Trip",
       coverImage: trip.cover_image,
     });

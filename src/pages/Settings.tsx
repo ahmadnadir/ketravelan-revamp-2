@@ -48,6 +48,7 @@ import { fetchUserPreferences, updateUserPreference } from "@/lib/userPreference
 import { useEffect } from "react";
 import { syncPushNotifications } from "@/lib/pushNotifications";
 import { supabase } from "@/lib/supabase";
+import { Capacitor } from "@capacitor/core";
 
 
 interface SettingItemProps {
@@ -204,6 +205,34 @@ export default function Settings() {
     const success = await handlePreferenceChange("push_notifications", value);
     if (success && user?.id) {
       await syncPushNotifications(user.id, value);
+    }
+  };
+
+  const handleResetNotificationSettings = async () => {
+    if (!user?.id) {
+      toast.error("Please sign in again and retry");
+      return;
+    }
+
+    if (!Capacitor.isNativePlatform()) {
+      toast.info("Reset notification state is available in the mobile app.");
+      return;
+    }
+
+    try {
+      // Reset push registration state on device and server, then register again.
+      await syncPushNotifications(user.id, false);
+      await syncPushNotifications(user.id, true);
+
+      if (!pushNotifications) {
+        setPushNotifications(true);
+        await handlePreferenceChange("push_notifications", true);
+      }
+
+      toast.success("Notification state reset complete. Send a test notification now.");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to reset notification state";
+      toast.error(message);
     }
   };
 
@@ -427,6 +456,12 @@ export default function Settings() {
                 setTripReminders(newValue);
                 handlePreferenceChange("trip_reminders", newValue);
               }}
+            />
+            <SettingItem
+              icon={<Bell className="h-5 w-5" />}
+              label="Reset Notification State"
+              description="Re-register push notifications on this device"
+              onClick={handleResetNotificationSettings}
             />
           </div>
         </Card>

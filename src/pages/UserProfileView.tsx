@@ -260,16 +260,29 @@ const UserProfilePage = () => {
   const headerContent = (
     <header className="glass border-b border-border/50 safe-top safe-x">
       <div className="container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto px-3 sm:px-4">
-        <div className="flex items-center gap-3 h-14">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-9 w-9 rounded-full bg-secondary"
-            onClick={() => navigate(-1)}
-          >
-            <ChevronLeft className="h-5 w-5 text-foreground" />
-          </Button>
-          <h1 className="font-semibold text-foreground">Profile</h1>
+        <div className="flex items-center h-14">
+          <div className="flex items-center gap-3">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9 rounded-full bg-secondary"
+              onClick={() => navigate(-1)}
+            >
+              <ChevronLeft className="h-5 w-5 text-foreground" />
+            </Button>
+            <h1 className="font-semibold text-foreground">Profile</h1>
+          </div>
+          <div className="ml-auto">
+            {user?.id && profile?.id && user.id !== profile.id && (
+              <ModerationMenu
+                reportType="USER"
+                targetId={String(profile.id)}
+                reportedUserId={String(profile.id)}
+                targetLabel="User"
+                reportLabel="Report User"
+              />
+            )}
+          </div>
         </div>
       </div>
     </header>
@@ -546,15 +559,6 @@ const UserProfilePage = () => {
                 <MessageCircle className="h-5 w-5" />
                 Message {displayName.split(" ")[0]}
               </Button>
-              {user?.id && user.id !== profile.id && (
-                <ModerationMenu
-                  reportType="USER"
-                  targetId={String(profile.id)}
-                  reportedUserId={String(profile.id)}
-                  targetLabel="User"
-                  reportLabel="Report User"
-                />
-              )}
             </div>
             {user?.id && user.id !== profile.id && (
               <Button

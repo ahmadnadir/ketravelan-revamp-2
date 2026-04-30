@@ -452,6 +452,12 @@
   /* keyboard-aware-footer: no longer needs a transform – the shell shrinks.
    * Kept as a no-op marker class so existing JSX doesn't need changes. */
 
+  /* When keyboard is open, remove safe-area bottom padding from footer
+   * so there's no gap between the input bar and the keyboard (WhatsApp-style). */
+  body.keyboard-open .keyboard-aware-footer {
+    padding-bottom: 0 !important;
+  }
+
   /* Fixed action bars that live OUTSIDE the app-shell flex column
    * (position:fixed, class bottom-above-nav) must be adjusted separately
    * because they are anchored to the viewport, not the shell.
@@ -461,6 +467,31 @@
   }
   body.native-ios-no-safe-area.keyboard-open .bottom-above-nav-lg {
     bottom: calc(var(--keyboard-height, 0px) + var(--tabbar-height) + 1rem + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  /* ── Dialog keyboard handling ──────────────────────────────────────────────
+   * By default Radix Dialog uses `top: 50%; transform: translateY(-50%)` which
+   * centres relative to the LAYOUT viewport (full screen).  When the soft
+   * keyboard opens the dialog stays anchored to mid-screen and overlaps the
+   * keyboard.  These rules re-centre it inside the keyboard-free area.
+   *
+   * Web / Android Chrome: dvh units already reflect the shrinking visual
+   *   viewport so a plain max-height cap is enough.
+   * iOS native (Capacitor): --vv-height is updated frame-by-frame by JS to
+   *   equal window.visualViewport.height (= screen minus keyboard).  We
+   *   override `top` so the dialog centres inside that area.
+   */
+
+  /* Web/Android: constrain height so dialog stays within visual viewport */
+  .dialog-keyboard-aware {
+    max-height: min(90dvh, calc(100dvh - 2rem));
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* iOS native: recentre dialog inside the shrinking --vv-height area */
+  body.native-ios-no-safe-area .dialog-keyboard-aware {
+    top: calc(var(--vv-height, 100dvh) / 2) !important;
+    max-height: calc(var(--vv-height, 100dvh) - 2rem) !important;
   }
 
   /* Glass effect for overlays */

@@ -7,7 +7,7 @@ declare const Deno: { env: { get(name: string): string | undefined } };
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const SITE_URL = Deno.env.get("SITE_URL") ?? "https://ketravelan.xyz";
+const SITE_URL = Deno.env.get("SITE_URL") ?? "https://ketravelan.com";
 const FIREBASE_SERVICE_ACCOUNT_JSON = Deno.env.get("FIREBASE_SERVICE_ACCOUNT_JSON") ?? "";
 const APPLE_TEAM_ID = Deno.env.get("APPLE_TEAM_ID") ?? "";
 const APPLE_KEY_ID = Deno.env.get("APPLE_KEY_ID") ?? "";
@@ -26,7 +26,7 @@ function buildCorsHeaders(req: Request): Record<string, string> {
     "http://127.0.0.1:8080",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-    "https://ketravelan.xyz",
+    "https://ketravelan.com",
     "http://10.0.2.2:5173",
     "capacitor://localhost",
   ]);
@@ -216,7 +216,7 @@ function getSiteOrigin() {
     return new URL(SITE_URL).origin;
   } catch {
     const match = SITE_URL.match(/^(https?:\/\/[^/]+)/);
-    return match ? match[1] : "https://ketravelan.xyz";
+    return match ? match[1] : "https://ketravelan.com";
   }
 }
 
@@ -329,13 +329,13 @@ serve(async (req: Request) => {
 
     // After insertion, fetch each recipient's total unread count so we can
     // set aps.badge to the authoritative value rather than a blind increment.
-    // We fetch raw rows (not a count aggregate via PostgREST) and tally locally.
+    // We fetch ALL unread notifications (including chat messages) to match
+    // what the client-side syncBadgeWithUnreadCount() computes on app open.
     const { data: unreadRows } = await admin
       .from("notifications")
       .select("user_id")
       .in("user_id", pushEnabledIds)
-      .eq("read", false)
-      .not("type", "in", "(new_message,message)");
+      .eq("read", false);
 
     const unreadCountMap = new Map<string, number>();
     for (const row of unreadRows ?? []) {
@@ -394,8 +394,15 @@ serve(async (req: Request) => {
       const fcmPayload = {
         ...payload,
         apns: {
+          headers: {
+            "apns-push-type": "alert",
+            "apns-priority": "10",
+          },
           payload: {
-            aps: { badge: badgeCount },
+            aps: {
+              badge: badgeCount,
+              sound: "default",
+            },
           },
         },
       };

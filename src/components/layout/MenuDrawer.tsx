@@ -78,57 +78,59 @@ export function MenuDrawer({ open, onOpenChange }: MenuDrawerProps) {
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className="w-full sm:max-w-md px-4 sm:px-6 [&>button]:hidden"
+        className="w-full sm:max-w-md px-6 !pt-0 [&>button]:hidden"
       >
-        <SheetHeader className="flex flex-row items-center justify-between gap-3">
-          <SheetTitle className="flex items-center gap-3 text-base sm:text-lg">
-            <div className="h-10 w-10 rounded-full overflow-hidden bg-muted">
-              <img
-                src={avatarUrl}
-                alt={displayName}
-                className="h-full w-full object-cover"
-                onError={(e) => {
-                  const target = e.target as HTMLImageElement;
-                  target.src = defaultAvatar;
-                }}
-              />
-            </div>
-            <span>{displayName}</span>
-          </SheetTitle>
-          <SheetClose asChild>
-            <button className="h-8 w-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors focus:outline-none">
-              <X className="h-5 w-5" />
-              <span className="sr-only">Close menu</span>
-            </button>
-          </SheetClose>
-        </SheetHeader>
-        
-        <div className="mt-6 space-y-1">
-          {menuItems.map((item) => {
-            const Icon = item.icon;
-            return (
-              <button
-                key={item.path + item.label}
-                onClick={() => handleNavigation(item.path)}
-                className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-secondary transition-colors text-left"
-              >
-                <Icon className="h-5 w-5 text-muted-foreground" />
-                <span className="text-sm font-medium">{item.label}</span>
+        <div className="pt-[2.25rem]">
+          <SheetHeader className="mt-2 flex flex-row items-center justify-between gap-3">
+            <SheetTitle className="flex items-center gap-3 text-base sm:text-lg">
+              <div className="h-10 w-10 rounded-full overflow-hidden bg-muted">
+                <img
+                  src={avatarUrl}
+                  alt={displayName}
+                  className="h-full w-full object-cover"
+                  onError={(e) => {
+                    const target = e.target as HTMLImageElement;
+                    target.src = defaultAvatar;
+                  }}
+                />
+              </div>
+              <span>{displayName}</span>
+            </SheetTitle>
+            <SheetClose asChild>
+              <button className="h-8 w-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors focus:outline-none">
+                <X className="h-5 w-5" />
+                <span className="sr-only">Close menu</span>
               </button>
-            );
-          })}
-          
-          {/* Separator */}
-          <div className="h-px bg-border my-3" />
-          
-          {/* Log Out (destructive) */}
-          <button
-            onClick={handleLogout}
-            className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-destructive/10 transition-colors text-destructive text-left"
-          >
-            <LogOut className="h-5 w-5" />
-            <span className="text-sm font-medium">Log Out</span>
-          </button>
+            </SheetClose>
+          </SheetHeader>
+
+          <div className="mt-6 space-y-1">
+            {menuItems.map((item) => {
+              const Icon = item.icon;
+              return (
+                <button
+                  key={item.path + item.label}
+                  onClick={() => handleNavigation(item.path)}
+                  className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-secondary transition-colors text-left"
+                >
+                  <Icon className="h-5 w-5 text-muted-foreground" />
+                  <span className="text-sm font-medium">{item.label}</span>
+                </button>
+              );
+            })}
+
+            {/* Separator */}
+            <div className="h-px bg-border my-3" />
+
+            {/* Log Out (destructive) */}
+            <button
+              onClick={handleLogout}
+              className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-destructive/10 transition-colors text-destructive text-left"
+            >
+              <LogOut className="h-5 w-5" />
+              <span className="text-sm font-medium">Log Out</span>
+            </button>
+            </div>
         </div>
       </SheetContent>
     </Sheet>

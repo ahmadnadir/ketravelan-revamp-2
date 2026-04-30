@@ -49,12 +49,21 @@ import { sendSystemMessage } from "@/lib/system-messages";
 // Category configuration with colors and emojis
 const CATEGORY_CONFIG: Record<string, { color: string; emoji: string }> = {
   "Transport": { color: "bg-stat-blue", emoji: "🚗" },
+  "transport": { color: "bg-stat-blue", emoji: "🚗" },
+  "transportation": { color: "bg-stat-blue", emoji: "🚗" },
   "Food & Drinks": { color: "bg-stat-orange", emoji: "🍴" },
+  "food & drinks": { color: "bg-stat-orange", emoji: "🍴" },
+  "food": { color: "bg-stat-orange", emoji: "🍴" },
   "Accommodation": { color: "bg-purple-500", emoji: "🏨" },
+  "accommodation": { color: "bg-purple-500", emoji: "🏨" },
   "Activities": { color: "bg-stat-green", emoji: "🎫" },
+  "activities": { color: "bg-stat-green", emoji: "🎫" },
   "Shopping": { color: "bg-pink-500", emoji: "🛍️" },
+  "shopping": { color: "bg-pink-500", emoji: "🛍️" },
   "Entertainment": { color: "bg-yellow-500", emoji: "🎭" },
+  "entertainment": { color: "bg-yellow-500", emoji: "🎭" },
   "Other": { color: "bg-gray-500", emoji: "📦" },
+  "other": { color: "bg-gray-500", emoji: "📦" },
 };
 
 // Member color palette for contribution charts

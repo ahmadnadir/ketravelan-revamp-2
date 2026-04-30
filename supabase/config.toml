@@ -1,4 +1,12 @@
 
+[auth]
+site_url = "https://ketravelan.com"
+additional_redirect_urls = [
+  "https://ketravelan.com/**",
+  "https://www.ketravelan.com/**",
+  "http://localhost:5173/**"
+]
+
 [functions.send-notification-email]
 enabled = true
 verify_jwt = false

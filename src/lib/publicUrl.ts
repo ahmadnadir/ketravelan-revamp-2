@@ -1,4 +1,4 @@
-const DEFAULT_PUBLIC_BASE_URL = "https://ketravelan.xyz";
+const DEFAULT_PUBLIC_BASE_URL = "https://ketravelan.com";
 
 const getConfiguredBaseUrl = (): string | null => {
   const env = (import.meta as unknown as {

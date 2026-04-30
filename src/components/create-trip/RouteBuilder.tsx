@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { MapPin, Plus, X, GripVertical, ArrowRight, Search, Loader } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -30,6 +30,7 @@ export function RouteBuilder({ stops, onChange, onStopsDetailsChange, primaryDes
   const [isSearching, setIsSearching] = useState(false);
   const [searchResults, setSearchResults] = useState<LocationResult[]>([]);
   const [stopsDetails, setStopsDetails] = useState<Array<{ name: string; place?: string; state?: string; country?: string }>>([]);
+  const activeSearchSeqRef = useRef(0);
 
   const handleDragStart = (index: number) => {
     setDraggedIndex(index);
@@ -67,6 +68,8 @@ export function RouteBuilder({ stops, onChange, onStopsDetailsChange, primaryDes
     setIsAdding(false);
     setShowSuggestions(false);
     setSearchResults([]);
+    setIsSearching(false);
+    activeSearchSeqRef.current += 1;
   };
 
   const removeStop = (index: number) => {
@@ -91,24 +94,42 @@ export function RouteBuilder({ stops, onChange, onStopsDetailsChange, primaryDes
   };
 
   // Search locations as user types
-  const handleStopSearch = async (query: string) => {
+  const handleStopSearch = (query: string) => {
     setNewStop(query);
-    if (query.length < 2) {
+  };
+
+  useEffect(() => {
+    const query = newStop.trim();
+
+    if (!isAdding || query.length < 2) {
       setSearchResults([]);
+      setIsSearching(false);
       return;
     }
-    
+
+    const seq = ++activeSearchSeqRef.current;
     setIsSearching(true);
-    try {
-      const results = await searchLocations(query);
-      setSearchResults(results);
-    } catch (error) {
-      console.error('Search error:', error);
-      setSearchResults([]);
-    } finally {
-      setIsSearching(false);
-    }
-  };
+
+    const timeout = window.setTimeout(async () => {
+      try {
+        const results = await searchLocations(query);
+        if (activeSearchSeqRef.current !== seq) return;
+        setSearchResults(results);
+      } catch (error) {
+        if (activeSearchSeqRef.current !== seq) return;
+        console.error('Search error:', error);
+        setSearchResults([]);
+      } finally {
+        if (activeSearchSeqRef.current === seq) {
+          setIsSearching(false);
+        }
+      }
+    }, 280);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [isAdding, newStop]);
 
   const filteredSuggestions = popularStops.filter(
     s => 
@@ -230,6 +251,9 @@ export function RouteBuilder({ stops, onChange, onStopsDetailsChange, primaryDes
                 } else if (e.key === 'Escape') {
                   setIsAdding(false);
                   setNewStop('');
+                  setSearchResults([]);
+                  setIsSearching(false);
+                  activeSearchSeqRef.current += 1;
                 }
               }}
               placeholder="Search city or country..."
@@ -239,7 +263,7 @@ export function RouteBuilder({ stops, onChange, onStopsDetailsChange, primaryDes
           </div>
 
           {showSuggestions && (
-            <div className="absolute z-50 w-full mt-1 bg-card border border-border rounded-xl shadow-lg overflow-hidden max-h-[240px] overflow-y-auto">
+            <div className="absolute z-50 w-full bg-card border border-border rounded-xl shadow-lg overflow-hidden overflow-y-auto bottom-full mb-1 max-h-[180px] sm:bottom-auto sm:top-full sm:mt-1 sm:mb-0 sm:max-h-[240px]">
               {searchResults.length > 0 ? (
                 searchResults.slice(0, 8).map((result, idx) => (
                   <button
@@ -285,6 +309,8 @@ export function RouteBuilder({ stops, onChange, onStopsDetailsChange, primaryDes
                 setIsAdding(false);
                 setNewStop('');
                 setSearchResults([]);
+                setIsSearching(false);
+                activeSearchSeqRef.current += 1;
               }}
               className="rounded-lg"
             >

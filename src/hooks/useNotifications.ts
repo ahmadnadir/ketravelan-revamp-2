@@ -3,7 +3,7 @@ import { useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   fetchNotifications,
-  fetchTotalUnreadCount,
+  fetchUnreadCount,
   markNotificationAsRead,
   markAllNotificationsAsRead,
   deleteNotification,
@@ -45,7 +45,7 @@ export function useUnreadNotificationCount(
 ) {
   return useQuery<number, Error>({
     queryKey: ['notifications', 'unread-count'],
-    queryFn: fetchTotalUnreadCount,
+    queryFn: fetchUnreadCount,
     staleTime: 1000 * 20, // Fresh for 20 seconds
     gcTime: 1000 * 60 * 5, // Cache for 5 minutes
     refetchOnWindowFocus: true,
@@ -84,8 +84,8 @@ export function useMarkAllNotificationsAsRead() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['notifications'] });
       toast.success('All notifications marked as read');
-      // All read → badge must be zero.
-      resetBadgeCount().catch(() => {});
+      // Keep chat unread reflected in the app icon badge.
+      syncBadgeWithUnreadCount().catch(() => {});
     },
     onError: (error) => {
       console.error('Error marking all notifications as read:', error);
@@ -125,8 +125,8 @@ export function useDeleteAllNotifications() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['notifications'] });
       toast.success('All notifications cleared');
-      // Nothing left to notify about.
-      resetBadgeCount().catch(() => {});
+      // Keep chat unread reflected in the app icon badge.
+      syncBadgeWithUnreadCount().catch(() => {});
     },
     onError: (error) => {
       console.error('Error deleting all notifications:', error);

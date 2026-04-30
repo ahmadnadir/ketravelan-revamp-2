@@ -11,7 +11,7 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 // Use non-reserved env name; fallback to legacy if present
 const SERVICE_ROLE_KEY = Deno.env.get("SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY")!;
-const RESEND_FROM = Deno.env.get("RESEND_FROM") ?? "Ketravelan <no-reply@ketravelan.xyz>";
+const RESEND_FROM = Deno.env.get("RESEND_FROM") ?? "Ketravelan <no-reply@ketravelan.com>";
 const RESEND_TEMPLATE_ID = "2dc6db0a-f106-43c2-84a9-4d5107094ce6";
 const DEFAULT_REDIRECT = Deno.env.get("SITE_URL") ?? "https://ketravelan.app/auth/callback";
 
@@ -24,7 +24,7 @@ function buildCorsHeaders(req: Request): Record<string, string> {
   const allowedOrigins = new Set([
     "http://localhost:8080",
     "http://127.0.0.1:8080",
-    "https://ketravelan.xyz",
+    "https://ketravelan.com",
     // Android emulator + Capacitor webview
     "http://10.0.2.2:5173",
     "capacitor://localhost",
@@ -252,7 +252,7 @@ serve(async (req: Request) => {
         title: "Confirm your email to get started",
         messageHtml: `${greet}You’re one click away from joining <strong>Ketravelan</strong>.`,
         ctaUrl: variables.ctaUrl as string,
-        logoUrl: "https://ketravelan.xyz/ketravelan_logo.png",
+        logoUrl: "https://ketravelan.com/ketravelan_logo.png",
       });
       const text = [
         "Verify your email for Ketravelan",

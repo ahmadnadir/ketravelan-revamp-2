@@ -155,23 +155,9 @@ const getUrgencyText = (joined: number, total: number): string => {
 
 // Parse description into bullet points
 const parseDescriptionToBullets = (description: string): string[] => {
-  // Try to extract key phrases from the description
-  const sentences = description.split(/[.!]/).filter(s => s.trim().length > 10);
-  const bullets: string[] = [];
-  
-  sentences.forEach(sentence => {
-    const trimmed = sentence.trim();
-    if (trimmed.length > 0 && bullets.length < 4) {
-      // Clean up and shorten if needed
-      let bullet = trimmed;
-      if (bullet.length > 80) {
-        bullet = bullet.substring(0, 77) + '...';
-      }
-      bullets.push(bullet);
-    }
-  });
-  
-  return bullets.length > 0 ? bullets : [description];
+  // Split by newlines to preserve the user's intended line breaks
+  const lines = description.split(/\r?\n/).map(s => s.trim()).filter(s => s.length > 0);
+  return lines.length > 0 ? lines : [description];
 };
 
 import { getExpectationIcon, getExpectationLabel } from "@/lib/expectationUtils";
@@ -260,6 +246,8 @@ export default function TripDetails() {
         ? (dayByDayFromArray.length > 0 ? 'dayByDay' : (notesFromArray ? 'notes' : 'skip'))
         : (dbTrip.itinerary_type || 'skip');
 
+      const dbBudgetType = (dbTrip.budget_breakdown && typeof dbTrip.budget_breakdown === 'object' && !Array.isArray(dbTrip.budget_breakdown) && 'total' in dbTrip.budget_breakdown && Array.isArray((dbTrip.budget_breakdown as any).categories)) ? 'rough' : 'detailed';
+
       return {
         id: dbTrip.id,
         title: dbTrip.title,
@@ -268,6 +256,7 @@ export default function TripDetails() {
         tags: travelStyleTags.map((styleId: string) => categoryLookup[styleId]?.label || styleId),
         requirements: expectationTags,
         budgetBreakdown,
+        budgetType: dbBudgetType,
         price: Number(dbTrip.price) || 0,
         totalSlots: dbTrip.max_participants || 10,
         slotsLeft: (dbTrip.max_participants || 10) - (dbTrip.current_participants || 0),
@@ -318,6 +307,7 @@ export default function TripDetails() {
         tags: publishedTrip.travelStyles.map(s => categoryLookup[s]?.label || s),
         requirements: publishedTrip.expectations,
         budgetBreakdown,
+        budgetType: publishedTrip.budgetType || 'detailed',
         price: totalBudget,
         totalSlots: publishedTrip.groupSizeType === 'set' ? publishedTrip.groupSize : 10,
         slotsLeft: publishedTrip.groupSizeType === 'set' ? publishedTrip.groupSize - 1 : 9,
@@ -1463,13 +1453,14 @@ export default function TripDetails() {
             <div className="flex flex-wrap gap-2">
               {tripData.tags.map((tag) => {
                 const category = tripCategories.find(c => c.label === tag);
+                const icon = category?.icon || getExpectationIcon(tag);
                 return (
                   <span
                     key={tag}
                     className="px-3 py-2 text-sm rounded-full border bg-white border-border text-muted-foreground flex items-center gap-2"
                   >
-                    {category?.icon && <span>{category.icon}</span>}
-                    {tag}
+                    {icon && <span>{icon}</span>}
+                    {getExpectationLabel(tag)}
                   </span>
                 );
               })}
@@ -1491,17 +1482,14 @@ export default function TripDetails() {
           {/* Tab Content */}
           {activeTab === "overview" && (
             <div className="space-y-3 sm:space-y-4">
-              {/* Description - Now as bullet points */}
+              {/* Description */}
               <Card className="p-3 sm:p-4 border-border/50">
                 <h3 className="font-semibold text-foreground mb-2 text-sm sm:text-base">About This Trip</h3>
-                <ul className="space-y-1.5 sm:space-y-2">
-                  {descriptionBullets.map((bullet, index) => (
-                    <li key={index} className="flex items-start gap-2 text-xs sm:text-sm text-muted-foreground">
-                      <span className="h-1.5 w-1.5 rounded-full bg-primary mt-1.5 sm:mt-2 shrink-0" />
-                      {bullet}
-                    </li>
+                <div className="space-y-1.5 sm:space-y-2">
+                  {parseDescriptionToBullets(tripData.description).map((line, index) => (
+                    <p key={index} className="text-xs sm:text-sm text-muted-foreground">{line}</p>
                   ))}
-                </ul>
+                </div>
               </Card>
 
               {/* Requirements */}
@@ -1524,67 +1512,95 @@ export default function TripDetails() {
 
 
               {/* Budget Breakdown */}
-              {tripData.budgetBreakdown.length > 0 && (
-                <Card className="p-3 sm:p-4 border-border/50">
-                  <h3 className="font-semibold text-foreground mb-2 sm:mb-3 text-sm sm:text-base">Budget Breakdown</h3>
-                  <div className="space-y-2 sm:space-y-3">
-                    {tripData.budgetBreakdown.map((item) => {
-                      // Get the converted amount from convertedBudgetBreakdown or use original
-                      // Try to find by exact category match first, then by normalized category name
-                      const convertedItem = convertedBudgetBreakdown.find(c => 
-                        c.category === item.category || 
-                        c.category.toLowerCase() === item.category.toLowerCase()
-                      );
-                      const displayAmount = convertedItem?.amount ?? item.amount;
-                      const currencyToDisplay = homeCurrency || "MYR";
-                      // Map budget categories to emojis
-                      const categoryEmojiMap: Record<string, string> = {
-                        'Transport': '🚗',
-                        'transport': '🚗',
-                        'Accommodation': '🏨',
-                        'accommodation': '🏨',
-                        'Food & Drinks': '🍴',
-                        'food': '🍴',
-                        'Food': '🍴',
-                        'Activities': '🎫',
-                        'activities': '🎫',
-                        'Flight': '✈️',
-                        'flight': '✈️',
-                        'Stay': '🏨',
-                        'stay': '🏨',
-                      };
-                      const emoji = categoryEmojiMap[item.category] || categoryEmojiMap[item.icon] || '📦';
-                      return (
-                        <div key={item.category} className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-                            <div className="h-8 w-8 sm:h-10 sm:w-10 rounded-lg sm:rounded-xl bg-secondary flex items-center justify-center shrink-0">
-                              <span className="text-base sm:text-lg">{emoji}</span>
+              {tripData.budgetBreakdown.length > 0 && (() => {
+                const categoryEmojiMap: Record<string, string> = {
+                  'Transport': '🚗',
+                  'transport': '🚗',
+                  'Accommodation': '🏨',
+                  'accommodation': '🏨',
+                  'Food & Drinks': '🍴',
+                  'food': '🍴',
+                  'Food': '🍴',
+                  'Activities': '🎫',
+                  'activities': '🎫',
+                  'Flight': '✈️',
+                  'flight': '✈️',
+                  'Stay': '🏨',
+                  'stay': '🏨',
+                };
+                const currencyToDisplay = homeCurrency || "MYR";
+                const totalDisplay = `${getCurrencySymbol(currencyToDisplay)} ${Math.round(convertedTotalPrice || tripData.price).toLocaleString()}`;
+
+                if ((tripData as any).budgetType === 'rough') {
+                  return (
+                    <Card className="p-3 sm:p-4 border-border/50">
+                      <h3 className="font-semibold text-foreground mb-1 text-sm sm:text-base">Rough Budget</h3>
+                      <p className="text-2xl sm:text-3xl font-bold text-foreground">{totalDisplay}</p>
+                      <p className="text-xs text-muted-foreground mb-3">Per person (estimated)</p>
+                      <p className="text-xs sm:text-sm text-foreground font-medium mb-2">This budget may cover:</p>
+                      <div className="flex flex-wrap gap-2 mb-3">
+                        {tripData.budgetBreakdown.map((item) => {
+                          const emoji = categoryEmojiMap[item.category] || categoryEmojiMap[item.icon] || '📦';
+                          return (
+                            <span
+                              key={item.category}
+                              className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs text-foreground bg-background"
+                            >
+                              <span>{emoji}</span>
+                              <span>{item.category}</span>
+                            </span>
+                          );
+                        })}
+                      </div>
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        This is an estimated amount to prepare, not a fixed cost or payment to the organizer. Actual spending may be higher or lower depending on bookings, preferences, and shared expenses during the trip.
+                      </p>
+                    </Card>
+                  );
+                }
+
+                return (
+                  <Card className="p-3 sm:p-4 border-border/50">
+                    <h3 className="font-semibold text-foreground mb-2 sm:mb-3 text-sm sm:text-base">Budget Breakdown</h3>
+                    <div className="space-y-2 sm:space-y-3">
+                      {tripData.budgetBreakdown.map((item) => {
+                        const convertedItem = convertedBudgetBreakdown.find(c =>
+                          c.category === item.category ||
+                          c.category.toLowerCase() === item.category.toLowerCase()
+                        );
+                        const displayAmount = convertedItem?.amount ?? item.amount;
+                        const emoji = categoryEmojiMap[item.category] || categoryEmojiMap[item.icon] || '📦';
+                        return (
+                          <div key={item.category} className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                              <div className="h-8 w-8 sm:h-10 sm:w-10 rounded-lg sm:rounded-xl bg-secondary flex items-center justify-center shrink-0">
+                                <span className="text-base sm:text-lg">{emoji}</span>
+                              </div>
+                              <span className="text-xs sm:text-sm text-foreground truncate">{item.category}</span>
                             </div>
-                            <span className="text-xs sm:text-sm text-foreground truncate">{item.category}</span>
+                            <span className="font-semibold text-foreground text-sm sm:text-base shrink-0">
+                              {getCurrencySymbol(currencyToDisplay)} {Math.round(displayAmount).toLocaleString()}
+                            </span>
                           </div>
-                          <span className="font-semibold text-foreground text-sm sm:text-base shrink-0">
-                            {getCurrencySymbol(currencyToDisplay)} {Math.round(displayAmount)}
+                        );
+                      })}
+                      <div className="pt-2 sm:pt-3 border-t border-border/50">
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold text-foreground text-sm sm:text-base">Total per person</span>
+                          <span className="text-base sm:text-lg font-bold text-primary">
+                            {totalDisplay}
                           </span>
                         </div>
-                      );
-                    })}
-                    <div className="pt-2 sm:pt-3 border-t border-border/50">
-                      <div className="flex items-center justify-between">
-                        <span className="font-semibold text-foreground text-sm sm:text-base">Total per person</span>
-                        <span className="text-base sm:text-lg font-bold text-primary">
-                          {getCurrencySymbol(homeCurrency || "MYR")} {Math.round(convertedTotalPrice || tripData.price)}
-                        </span>
-                      </div>
-                      {/* Budget Clarification */}
-                      <div className="mt-2 p-2 bg-secondary/50 rounded-lg">
-                        <p className="text-xs text-muted-foreground leading-relaxed">
-                          <span className="font-medium text-foreground">Estimated shared expenses.</span> This is the amount you should be prepared to spend during the trip. You don't pay this to the organizer  expenses are tracked and split transparently in the group.
-                        </p>
+                        <div className="mt-2 p-2 bg-secondary/50 rounded-lg">
+                          <p className="text-xs text-muted-foreground leading-relaxed">
+                            <span className="font-medium text-foreground">Estimated shared expenses.</span> This is the amount you should be prepared to spend during the trip. You don't pay this to the organizer — expenses are tracked and split transparently in the group.
+                          </p>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                </Card>
-              )}
+                  </Card>
+                );
+              })()}
 
               {/* No budget set message */}
               {tripData.budgetBreakdown.length === 0 && (

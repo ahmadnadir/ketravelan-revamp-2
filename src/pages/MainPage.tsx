@@ -33,10 +33,11 @@ export default function MainPage() {
     if (loading) return;
 
     getVisitedFlag().then((hasVisitedBefore) => {
-      if (!hasVisitedBefore && !isAuthenticated) {
+      if (!hasVisitedBefore && isNativePlatform() && !isAuthenticated) {
+        // Show welcome onboarding only for native first-time installs.
         navigate("/welcome", { replace: true });
-      } else if (!hasVisitedBefore && isAuthenticated) {
-        // Logged-in user on fresh install  mark as visited, skip welcome
+      } else if (!hasVisitedBefore) {
+        // Mark visited for web and authenticated users to keep `/` as the entry route.
         setVisitedFlag();
       }
       setVisitChecked(true);

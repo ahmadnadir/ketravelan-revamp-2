@@ -1208,7 +1208,7 @@ export function ChatPage({
       <button
         type="button"
         onClick={() => scrollToBottom()}
-        className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+5.2rem)] right-4 z-50 flex h-10 w-10 items-center justify-center rounded-full bg-[#25D366] text-white shadow-[0_8px_22px_rgba(0,0,0,0.28)] ring-2 ring-white/70 hover:brightness-95 active:scale-95 transition"
+        className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+5.2rem)] right-4 z-50 flex h-10 w-10 items-center justify-center rounded-full bg-zinc-500 text-white shadow-[0_8px_22px_rgba(0,0,0,0.28)] ring-2 ring-white/70 hover:bg-zinc-600 active:scale-95 transition"
         aria-label="Scroll to bottom"
       >
         <ArrowDown className="h-5 w-5" />

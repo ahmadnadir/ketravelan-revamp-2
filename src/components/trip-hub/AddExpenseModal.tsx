@@ -554,7 +554,14 @@ export function AddExpenseModal({
               <Label>Category *</Label>
               <Select value={category} onValueChange={setCategory}>
                 <SelectTrigger className="h-12 rounded-xl">
-                  <SelectValue placeholder="Select category" />
+                  {category ? (
+                    <span className="flex items-center gap-2">
+                      <span className="text-base">{expenseCategories.find(c => c.id === category)?.emoji}</span>
+                      <span>{expenseCategories.find(c => c.id === category)?.label}</span>
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">Select category</span>
+                  )}
                 </SelectTrigger>
                 <SelectContent className="rounded-xl">
                   {expenseCategories.map((cat) => (
