@@ -117,7 +117,10 @@ serve(async (req: Request) => {
         }
 
         const sendResult = await admin.functions.invoke(functionName, {
-          body: { tripId: trip.id },
+          body: {
+            tripId: trip.id,
+            reminderType: reminder.reminder_type,
+          },
         });
 
         if (sendResult.error) {

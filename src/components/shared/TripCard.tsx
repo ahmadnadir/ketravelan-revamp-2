@@ -19,6 +19,8 @@ import { isTripSaved, saveTrip, unsaveTrip } from "@/lib/savedTrips";
 import { buildPublicUrl, buildTripShareUrl } from "@/lib/publicUrl";
 import { getExpectationIcon, getExpectationLabel } from "@/lib/expectationUtils";
 
+const DEFAULT_TRIP_IMAGE = "/default-trip-photo.jpeg";
+
 interface TripCardProps {
   id: string;
   title: string;
@@ -125,18 +127,8 @@ export function TripCard({
   };
 
   // Fallbacks for all props
-  // Use a special 'no photo' SVG icon if imageUrl is missing
-  const noPhotoIcon = (
-    <div className="flex items-center justify-center h-full w-full bg-muted text-muted-foreground">
-      <img
-        src="https://static.thenounproject.com/png/1211233-200.png"
-        alt="No Photo"
-        className="w-12 h-12 object-contain"
-      />
-    </div>
-  );
   const hasImage = imageUrl && imageUrl.trim() !== "";
-  const safeImageUrl = hasImage ? imageUrl : undefined;
+  const safeImageUrl = hasImage ? imageUrl : DEFAULT_TRIP_IMAGE;
   const safeTitle = title && title.trim() !== "" ? title : "Untitled Trip";
   const safeDestination = destination && destination.trim() !== "" ? destination : "Unknown Destination";
   const safeStartDate = startDate && startDate.trim() !== "" ? startDate : "TBA";
@@ -360,17 +352,16 @@ export function TripCard({
           <div className="space-y-4">
             {/* Trip Preview */}
             <div className="flex items-center gap-3 p-3 rounded-xl bg-secondary/50">
-              {hasImage ? (
-                <img 
-                  src={safeImageUrl} 
-                  alt={safeTitle} 
-                  className="h-12 w-12 rounded-lg object-cover"
-                />
-              ) : (
-                <div className="h-12 w-12 rounded-lg overflow-hidden bg-muted flex items-center justify-center">
-                  {noPhotoIcon}
-                </div>
-              )}
+              <img
+                src={safeImageUrl}
+                alt={safeTitle}
+                className="h-12 w-12 rounded-lg object-cover"
+                onError={(event) => {
+                  const img = event.currentTarget;
+                  if (img.src.endsWith(DEFAULT_TRIP_IMAGE)) return;
+                  img.src = DEFAULT_TRIP_IMAGE;
+                }}
+              />
               <div className="flex-1 min-w-0">
                 <p className="font-medium text-sm text-foreground truncate">{safeTitle}</p>
                 <p className="text-xs text-muted-foreground truncate">{safeDestination}</p>
@@ -438,17 +429,16 @@ export function TripCard({
       <Link to={tripLink}>
         {/* Image */}
         <div className="relative aspect-[16/10] sm:aspect-[16/9] overflow-hidden">
-          {hasImage ? (
-            <img
-              src={safeImageUrl}
-              alt={safeTitle}
-              className="h-full w-full object-cover transition-transform hover:scale-105"
-            />
-          ) : (
-            <div className="h-full w-full flex items-center justify-center bg-muted">
-              {noPhotoIcon}
-            </div>
-          )}
+          <img
+            src={safeImageUrl}
+            alt={safeTitle}
+            className="h-full w-full object-cover transition-transform hover:scale-105"
+            onError={(event) => {
+              const img = event.currentTarget;
+              if (img.src.endsWith(DEFAULT_TRIP_IMAGE)) return;
+              img.src = DEFAULT_TRIP_IMAGE;
+            }}
+          />
           {showLikeFx && (
             <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
               <span className="absolute h-20 w-20 rounded-full border-2 border-destructive/55 animate-ping" />

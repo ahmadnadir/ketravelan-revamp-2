@@ -7,6 +7,24 @@ import { getBlockedRelationshipUserIds } from '@/lib/moderation';
 // Populated eagerly from conversations list so chat never needs a fresh profile fetch.
 export const profileCache = new Map<string, { id: string; username: string; full_name: string; avatar_url: string }>();
 
+let blockedIdsCache: { ids: Set<string>; expiresAt: number } | null = null;
+
+async function getBlockedIdsCached(enabled: boolean): Promise<Set<string>> {
+  if (!enabled) return new Set<string>();
+
+  const now = Date.now();
+  if (blockedIdsCache && blockedIdsCache.expiresAt > now) {
+    return blockedIdsCache.ids;
+  }
+
+  const ids = new Set(await getBlockedRelationshipUserIds());
+  blockedIdsCache = {
+    ids,
+    expiresAt: now + 30000,
+  };
+  return ids;
+}
+
 function isVisibleConversation(participant: any) {
   const conv = participant?.conversation;
   if (!conv || conv.is_deleted) return false;
@@ -110,8 +128,9 @@ export async function fetchTripConversation(tripId: string) {
     .from('conversations')
     .select('id, trip_id, conversation_type, created_at')
     .eq('trip_id', tripId)
-    .eq('conversation_type', 'trip_group')
     .eq('is_deleted', false)
+    .order('created_at', { ascending: false })
+    .limit(1)
     .maybeSingle();
 
   if (error) throw error;
@@ -192,7 +211,7 @@ export async function fetchConversationMessages(conversationId: string, limit = 
     .limit(limit);
 
   if (error) throw error;
-  const blockedUserIds = new Set(user ? await getBlockedRelationshipUserIds() : []);
+  const blockedUserIds = await getBlockedIdsCached(Boolean(user));
   const result = (data || [])
     .filter((message: any) => !message.sender_id || !blockedUserIds.has(message.sender_id))
     .reverse();
@@ -201,6 +220,41 @@ export async function fetchConversationMessages(conversationId: string, limit = 
     const s = Array.isArray(msg.sender) ? msg.sender[0] : msg.sender;
     if (s?.id) profileCache.set(s.id, s);
   });
+  return result;
+}
+
+export async function fetchConversationMessagesAfter(conversationId: string, afterCreatedAt: string, limit = 100) {
+  const { data: { user } } = await supabase.auth.getUser();
+  const { data, error } = await supabase
+    .from('messages')
+    .select(`
+      id,
+      conversation_id,
+      sender_id,
+      content,
+      attachments,
+      is_edited,
+      edited_at,
+      created_at,
+      client_id,
+      type,
+      sender:profiles!messages_sender_id_fkey(id, username, full_name, avatar_url)
+    `)
+    .eq('conversation_id', conversationId)
+    .gt('created_at', afterCreatedAt)
+    .order('created_at', { ascending: true })
+    .limit(limit);
+
+  if (error) throw error;
+
+  const blockedUserIds = await getBlockedIdsCached(Boolean(user));
+  const result = (data || []).filter((message: any) => !message.sender_id || !blockedUserIds.has(message.sender_id));
+
+  result.forEach((msg: any) => {
+    const s = Array.isArray(msg.sender) ? msg.sender[0] : msg.sender;
+    if (s?.id) profileCache.set(s.id, s);
+  });
+
   return result;
 }
 
@@ -404,25 +458,14 @@ export async function subscribeToMessages(conversationId: string, callback: (mes
       async (payload) => {
         const raw = payload.new as any;
         if (user && raw.sender_id) {
-          const blockedUserIds = new Set(await getBlockedRelationshipUserIds());
+          const blockedUserIds = await getBlockedIdsCached(true);
           if (blockedUserIds.has(raw.sender_id)) {
             return;
           }
         }
 
-        // Use cached profile or fetch once, then cache
-        let sender = profileCache.get(raw.sender_id) ?? null;
-        if (!sender && raw.sender_id && raw.type !== 'system') {
-          const { data } = await supabase
-            .from('profiles')
-            .select('id, username, full_name, avatar_url')
-            .eq('id', raw.sender_id)
-            .single();
-          if (data) {
-            profileCache.set(raw.sender_id, data);
-            sender = data;
-          }
-        }
+        // Use only in-memory profile cache here to avoid per-message DB lookups.
+        const sender = profileCache.get(raw.sender_id) ?? null;
 
         callback({ ...raw, sender });
       }
@@ -547,7 +590,86 @@ export async function fetchConversationsWithLastMessages() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
 
-  // Fetch conversations
+  const { data: rows, error } = await supabase.rpc('get_chat_conversation_summaries', {
+    p_user_id: user.id,
+  });
+
+  if (error) {
+    const rpcError = error as { code?: string; status?: number; message?: string; details?: string; hint?: string };
+    const maybeCode = rpcError?.code;
+    const maybeStatus = rpcError?.status;
+    const errorText = `${rpcError?.message || ''} ${rpcError?.details || ''} ${rpcError?.hint || ''}`.toLowerCase();
+    const isMissingRpc =
+      maybeCode === 'PGRST202' ||
+      maybeStatus === 404 ||
+      maybeCode === '404' ||
+      errorText.includes('get_chat_conversation_summaries') ||
+      errorText.includes('schema cache');
+
+    // Backward-compatible fallback when migration hasn't been applied yet or schema cache is stale.
+    if (isMissingRpc) {
+      console.warn('[chat] summary RPC unavailable, falling back to legacy query path');
+      return fetchConversationsWithLastMessagesLegacy(user.id);
+    }
+    console.error('Conversation summary fetch error:', error);
+    throw error;
+  }
+
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return [];
+  }
+
+  const participants = rows.map((row: any) => {
+    const conversation = {
+      id: row.conversation_id,
+      conversation_type: row.conversation_type,
+      name: row.conversation_name,
+      trip_id: row.trip_id,
+      user1_id: row.conversation_user1_id,
+      user2_id: row.conversation_user2_id,
+      is_deleted: row.conversation_is_deleted,
+      created_at: row.conversation_created_at,
+      trip: row.trip,
+      user1: row.user1,
+      user2: row.user2,
+    };
+
+    const lastMessage = row.last_message_id
+      ? {
+          id: row.last_message_id,
+          conversation_id: row.conversation_id,
+          sender_id: row.last_message_sender_id,
+          content: row.last_message_content,
+          attachments: Array.isArray(row.last_message_attachments) ? row.last_message_attachments : [],
+          created_at: row.last_message_created_at,
+          type: row.last_message_type,
+          sender: row.last_message_sender,
+        }
+      : null;
+
+    return {
+      id: row.participant_id,
+      user_id: row.user_id,
+      last_read_at: row.last_read_at,
+      is_admin: row.is_admin,
+      created_at: row.participant_created_at,
+      conversation,
+      lastMessage,
+      unreadCount: Number(row.unread_count || 0),
+    };
+  });
+
+  participants.forEach((p: any) => {
+    const conv = p.conversation;
+    [conv?.user1, conv?.user2, p.lastMessage?.sender].forEach((profile: any) => {
+      if (profile?.id) profileCache.set(profile.id, profile);
+    });
+  });
+
+  return participants.filter(isVisibleConversation);
+}
+
+async function fetchConversationsWithLastMessagesLegacy(userId: string) {
   const { data: participants, error: convError } = await supabase
     .from('conversation_participants')
     .select(`
@@ -569,16 +691,15 @@ export async function fetchConversationsWithLastMessages() {
         user2:profiles!conversations_user2_id_fkey(id, username, full_name, avatar_url)
       )
     `)
-    .eq('user_id', user.id)
+    .eq('user_id', userId)
     .eq('conversation.is_deleted', false)
     .order('created_at', { ascending: false });
 
   if (convError) {
-    console.error('Conversation fetch error:', convError);
+    console.error('Legacy conversation fetch error:', convError);
     throw convError;
   }
-  
-  // Populate profile cache eagerly from participant data (user1 / user2 for direct chats)
+
   participants?.forEach((p: any) => {
     const conv = Array.isArray(p.conversation) ? p.conversation[0] : p.conversation;
     if (!conv) return;
@@ -589,54 +710,48 @@ export async function fetchConversationsWithLastMessages() {
   });
 
   const activeParticipants = participants?.filter(isVisibleConversation) || [];
-  
-  if (!activeParticipants || activeParticipants.length === 0) {
-    console.log('No participants found for user:', user.id);
-    return [];
-  }
+  if (!activeParticipants.length) return [];
 
-  // Deduplicate conversations by ID (since each conversation appears once per participant)
   const seenConversationIds = new Set<string>();
   const uniqueParticipants = activeParticipants.filter((p: any) => {
-    const convId = p.conversation?.id;
-    if (seenConversationIds.has(convId)) {
-      return false;
-    }
+    const conv = Array.isArray(p.conversation) ? p.conversation[0] : p.conversation;
+    const convId = conv?.id;
+    if (!convId || seenConversationIds.has(convId)) return false;
     seenConversationIds.add(convId);
     return true;
   });
 
-  // Fetch last messages for all conversations in a single query
   const conversationIds = uniqueParticipants
-    .map((p: any) => Array.isArray(p.conversation) ? p.conversation[0]?.id : p.conversation?.id)
+    .map((p: any) => {
+      const conv = Array.isArray(p.conversation) ? p.conversation[0] : p.conversation;
+      return conv?.id;
+    })
     .filter(Boolean);
-    
+
   if (conversationIds.length === 0) {
-    console.log('No conversation IDs found');
-    return uniqueParticipants.map(p => ({
+    return uniqueParticipants.map((p: any) => ({
       ...p,
       conversation: Array.isArray(p.conversation) ? p.conversation[0] : p.conversation,
-      lastMessage: null
+      lastMessage: null,
+      unreadCount: 0,
     }));
   }
 
   const { data: messages, error: msgError } = await supabase
     .from('messages')
-    .select('id, conversation_id, sender_id, content, attachments, created_at, sender:profiles(id, full_name)')
+    .select('id, conversation_id, sender_id, content, attachments, created_at, type, sender:profiles(id, username, full_name, avatar_url)')
     .in('conversation_id', conversationIds)
     .order('created_at', { ascending: false });
 
   if (msgError) {
-    console.error('Messages fetch error:', msgError);
+    console.error('Legacy messages fetch error:', msgError);
     throw msgError;
   }
 
-  // Group messages by conversation: last message + unread count per conversation
-  const lastMessageMap = new Map();
+  const lastMessageMap = new Map<string, any>();
   const unreadCountMap = new Map<string, number>();
-
-  // Build last_read_at lookup per conversation for the current user
   const lastReadMap = new Map<string, string | null>();
+
   uniqueParticipants.forEach((p: any) => {
     const conv = Array.isArray(p.conversation) ? p.conversation[0] : p.conversation;
     if (conv?.id) lastReadMap.set(conv.id, p.last_read_at || null);
@@ -644,12 +759,10 @@ export async function fetchConversationsWithLastMessages() {
 
   (messages || []).forEach((msg: any) => {
     const convId = msg.conversation_id;
-    // Last message (first encountered since desc order)
     if (!lastMessageMap.has(convId)) {
       lastMessageMap.set(convId, msg);
     }
-    // Count unread: sender is not current user AND message is after last_read_at
-    if (msg.sender_id !== user.id) {
+    if (msg.sender_id !== userId) {
       const lastRead = lastReadMap.get(convId);
       const isUnread = !lastRead || new Date(msg.created_at) > new Date(lastRead);
       if (isUnread) {
@@ -658,8 +771,7 @@ export async function fetchConversationsWithLastMessages() {
     }
   });
 
-  // Attach last message to each participant and sort by latest message desc
-  const enriched = uniqueParticipants.map(p => {
+  const enriched = uniqueParticipants.map((p: any) => {
     const conv = Array.isArray(p.conversation) ? p.conversation[0] : p.conversation;
     return {
       ...p,
@@ -670,11 +782,6 @@ export async function fetchConversationsWithLastMessages() {
   });
 
   return enriched.sort((a: any, b: any) => {
-    // Primary: latest message timestamp.
-    // Fallback: participant.created_at — the moment THIS user joined the conversation.
-    // This ensures newly created or newly joined trip groups appear at the top
-    // before any messages exist, without relying on conversation.created_at which
-    // reflects when the trip was published (potentially weeks ago).
     const aTime = a.lastMessage?.created_at
       ? new Date(a.lastMessage.created_at).getTime()
       : new Date(a.created_at ?? a.conversation?.created_at ?? 0).getTime();

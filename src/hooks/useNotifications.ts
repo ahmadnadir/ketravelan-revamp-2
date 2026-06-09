@@ -32,7 +32,7 @@ export function useNotifications(
     queryFn: () => fetchNotifications(filters),
     staleTime: 1000 * 30, // Fresh for 30 seconds
     gcTime: 1000 * 60 * 5, // Cache for 5 minutes
-    refetchOnWindowFocus: true,
+    refetchOnWindowFocus: false,
     ...options,
   });
 }
@@ -48,7 +48,7 @@ export function useUnreadNotificationCount(
     queryFn: fetchUnreadCount,
     staleTime: 1000 * 20, // Fresh for 20 seconds
     gcTime: 1000 * 60 * 5, // Cache for 5 minutes
-    refetchOnWindowFocus: true,
+    refetchOnWindowFocus: false,
     ...options,
   });
 }

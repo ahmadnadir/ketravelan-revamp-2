@@ -162,10 +162,12 @@ export function GroupInfoModal({
   const [showLastOrganizerLeaveDialog, setShowLastOrganizerLeaveDialog] = useState(false);
   const [settingsDraft, setSettingsDraft] = useState<TripSettingsState>(DEFAULT_TRIP_SETTINGS);
   const [settingsDirty, setSettingsDirty] = useState(false);
+  const actorId = currentUserId || user?.id;
+  const isCurrentUserCreator = Boolean(actorId && trip?.creatorId === actorId);
 
   const currentUserMembership = useMemo(
-    () => members.find((member) => member.id === (currentUserId || user?.id)),
-    [members, currentUserId, user?.id],
+    () => members.find((member) => member.id === actorId),
+    [members, actorId],
   );
 
   const organizerCount = useMemo(
@@ -176,7 +178,7 @@ export function GroupInfoModal({
   const isCurrentUserOrganizer = Boolean(
     currentUserMembership?.isAdmin ||
     currentUserMembership?.role?.toLowerCase() === 'organizer' ||
-    ((currentUserId || user?.id) && trip?.creatorId === (currentUserId || user?.id)),
+    isCurrentUserCreator,
   );
   const isLastOrganizer = isCurrentUserOrganizer && organizerCount <= 1;
 
@@ -379,8 +381,75 @@ export function GroupInfoModal({
     }
   };
 
+  const handleDemoteOrganizer = async (member: Member) => {
+    if (!trip) return;
+
+    const memberIsOrganizer = Boolean(member.isAdmin || member.role?.toLowerCase() === 'organizer');
+    if (!memberIsOrganizer) return;
+
+    if (!isCurrentUserCreator) {
+      toast({
+        title: 'Only trip creator can demote organizers',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (member.id === trip.creatorId) {
+      toast({
+        title: 'Trip creator cannot be demoted',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const confirmed = window.confirm(`Demote ${member.name} to member?`);
+    if (!confirmed) return;
+
+    setIsSubmitting(true);
+    try {
+      const { error } = await supabase
+        .from('trip_members')
+        .update({ is_admin: false, role: 'member' })
+        .eq('trip_id', trip.id)
+        .eq('user_id', member.id)
+        .is('left_at', null);
+
+      if (error) throw error;
+
+      await onDataChanged?.();
+      toast({ title: 'Organizer demoted', description: `${member.name} is now a member.` });
+    } catch (err) {
+      toast({
+        title: 'Unable to demote organizer',
+        description: err instanceof Error ? err.message : 'Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const handleRemoveMember = async (member: Member) => {
     if (!trip) return;
+
+    const memberIsOrganizer = Boolean(member.isAdmin || member.role?.toLowerCase() === 'organizer');
+    if (memberIsOrganizer && !isCurrentUserCreator) {
+      toast({
+        title: 'Only trip creator can remove organizers',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (member.id === trip.creatorId) {
+      toast({
+        title: 'Trip creator cannot be removed',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     const confirmed = window.confirm(`Remove ${member.name} from this trip?`);
     if (!confirmed) return;
 
@@ -699,7 +768,7 @@ export function GroupInfoModal({
                         </button>
 
                         {/* Message Button */}
-                        {member.id !== (currentUserId || user?.id) && (
+                        {member.id !== actorId && (
                           <Button
                             variant="outline"
                             size="sm"
@@ -710,7 +779,7 @@ export function GroupInfoModal({
                           </Button>
                         )}
 
-                        {canManageTrip && member.id !== currentUserId && (
+                        {canManageTrip && member.id !== actorId && (
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <Button
@@ -723,19 +792,30 @@ export function GroupInfoModal({
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end" className="w-48">
-                              {!member.isAdmin && (
+                              {!(member.isAdmin || member.role?.toLowerCase() === 'organizer') && (
                                 <DropdownMenuItem onClick={() => handlePromoteMember(member)}>
                                   <Shield className="h-4 w-4 mr-2" />
                                   Promote to Organizer
                                 </DropdownMenuItem>
                               )}
-                              <DropdownMenuItem
-                                onClick={() => handleRemoveMember(member)}
-                                className="text-destructive focus:text-destructive"
-                              >
-                                <LogOut className="h-4 w-4 mr-2" />
-                                Remove from Trip
-                              </DropdownMenuItem>
+                              {(member.isAdmin || member.role?.toLowerCase() === 'organizer') &&
+                                member.id !== trip.creatorId &&
+                                isCurrentUserCreator && (
+                                  <DropdownMenuItem onClick={() => handleDemoteOrganizer(member)}>
+                                    <Shield className="h-4 w-4 mr-2" />
+                                    Demote to Member
+                                  </DropdownMenuItem>
+                                )}
+                              {((member.isAdmin || member.role?.toLowerCase() === 'organizer') ? isCurrentUserCreator : true) &&
+                                member.id !== trip.creatorId && (
+                                  <DropdownMenuItem
+                                    onClick={() => handleRemoveMember(member)}
+                                    className="text-destructive focus:text-destructive"
+                                  >
+                                    <LogOut className="h-4 w-4 mr-2" />
+                                    Remove from Trip
+                                  </DropdownMenuItem>
+                                )}
                             </DropdownMenuContent>
                           </DropdownMenu>
                         )}

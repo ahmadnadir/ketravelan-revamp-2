@@ -74,7 +74,7 @@ export function useJoinRequestStatus(
     enabled: !!tripId && !!userId,
     staleTime: 1000 * 60 * 2, // Data stays fresh for 2 minutes
     gcTime: 1000 * 60 * 5, // Cache for 5 minutes
-    refetchOnWindowFocus: true, // Refetch to get latest status
+    refetchOnWindowFocus: false,
     ...options,
   });
 }

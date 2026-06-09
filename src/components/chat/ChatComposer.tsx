@@ -307,7 +307,7 @@ export function ChatComposer({ onSend, placeholder = "Type a message...", onTypi
                 onChange={handleInputChange}
                 onBlur={handleInputBlur}
                 onKeyDown={(e) => e.key === "Enter" && handleSend()}
-                className="flex-1 rounded-2xl bg-white text-black border-0 h-9 text-sm px-3 placeholder:text-gray-400"
+                className="flex-1 rounded-2xl bg-white text-black border border-[#d9d9d9] h-9 text-sm px-3 placeholder:text-gray-400 shadow-[0_1px_3px_rgba(0,0,0,0.14)] focus-visible:ring-2 focus-visible:ring-black/10 focus-visible:ring-offset-0"
                 style={{
                   fontSize: '16px', // Prevent iOS zoom on focus
                 }}

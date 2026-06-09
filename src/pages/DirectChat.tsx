@@ -230,7 +230,8 @@ export default function DirectChat() {
     try {
       setIsDeleting(true);
       await deleteDirectConversation(conversationId);
-      toast.success("Chat deleted");
+      const targetName = String(otherUser?.full_name || otherUser?.username || "this person").trim() || "this person";
+      toast.success(`Chat with ${targetName} has been deleted.`);
       navigate('/chat?tab=direct');
     } catch (err) {
       console.error('Failed to delete direct chat:', err);
@@ -250,7 +251,7 @@ export default function DirectChat() {
       scrollContainerRef={scrollContainerRef}
     >
       <div className="relative">
-        <div className="container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto px-3 sm:px-4 pt-4 sm:pt-6 pb-2 space-y-4">
+        <div className="w-full px-3 sm:px-4 lg:px-6 xl:px-8 pt-4 sm:pt-6 pb-2 space-y-4">
           {messagesContent}
           {messagingBlocked && (
             <p className="text-xs text-muted-foreground text-center -mt-2">

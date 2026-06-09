@@ -476,9 +476,19 @@ export function ExpenseDetailsModal({
 
           {/* Fixed Tabs */}
           <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as TabType)} className="w-full">
-            <TabsList className="w-full grid grid-cols-2 mx-4 mt-4" style={{ width: "calc(100% - 2rem)" }}>
-              <TabsTrigger value="overview" className="text-xs sm:text-sm">Overview</TabsTrigger>
-              <TabsTrigger value="payments" className="text-xs sm:text-sm">Payments</TabsTrigger>
+            <TabsList className="w-full grid grid-cols-2 mx-4 mt-4 rounded-xl bg-muted/40 border border-border/50 p-1" style={{ width: "calc(100% - 2rem)" }}>
+              <TabsTrigger
+                value="overview"
+                className="text-xs sm:text-sm text-muted-foreground hover:text-foreground/80 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:font-medium data-[state=active]:shadow-sm data-[state=active]:border data-[state=active]:border-border/60"
+              >
+                Overview
+              </TabsTrigger>
+              <TabsTrigger
+                value="payments"
+                className="text-xs sm:text-sm text-muted-foreground hover:text-foreground/80 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:font-medium data-[state=active]:shadow-sm data-[state=active]:border data-[state=active]:border-border/60"
+              >
+                Payments
+              </TabsTrigger>
             </TabsList>
           </Tabs>
         </div>

@@ -31,7 +31,7 @@ export function UpcomingAdventuresSection() {
           id: trip.id ?? '',
           title: trip.title ?? 'Untitled',
           destination: trip.destination ?? 'Unknown',
-          imageUrl: trip.cover_image || '/placeholder.svg',
+          imageUrl: trip.cover_image || '/default-trip-photo.jpeg',
           startDate: trip.start_date ? new Date(trip.start_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '-',
           endDate: trip.end_date ? new Date(trip.end_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '-',
           price: trip.price ?? 0,

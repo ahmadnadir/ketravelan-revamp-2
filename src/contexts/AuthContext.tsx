@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, ReactNode, useRef } from "react";
 import { supabase } from "@/lib/supabase";
-import type { User as SupabaseUser } from "@supabase/supabase-js";
+import type { User as SupabaseUser, AuthChangeEvent } from "@supabase/supabase-js";
 import { CurrencyCode } from "@/lib/currencyUtils";
 import { clearPushToken, syncPushNotifications } from "@/lib/pushNotifications";
 import { getAuthRedirectUrl } from "@/lib/authRedirect";
@@ -161,6 +161,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [homeCurrency, setHomeCurrencyState] = useState<CurrencyCode>(getInitialHomeCurrency);
   const [linkedProviders, setLinkedProviders] = useState<string[]>([]);
   const [identityLinkingAvailable, setIdentityLinkingAvailable] = useState<boolean>(() => !getIdentityLinkingDisabled());
+  const initializedRef = useRef(false);
 
   const updateLinkedProvidersFromUser = async (currentUser: SupabaseUser | null) => {
     if (!currentUser) {
@@ -297,37 +298,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        void updateLinkedProvidersFromUser(session.user);
-        fetchProfile(session.user.id);
-      } else {
-        setLinkedProviders([]);
-        setLoading(false);
-      }
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      (async () => {
-        setUser(session?.user ?? null);
-        if (session?.user) {
-          await updateLinkedProvidersFromUser(session.user);
-          await fetchProfile(session.user.id);
-        } else {
-          setProfile(null);
-          setLinkedProviders([]);
-          setLoading(false);
-        }
-      })();
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
-
-  const fetchProfile = async (userId: string) => {
-    setLoading(true);
+  const fetchProfile = async (userId: string, options?: { blockUi?: boolean }) => {
+    const shouldBlockUi = options?.blockUi ?? false;
+    if (shouldBlockUi) {
+      setLoading(true);
+    }
     try {
       const { data, error } = await supabase
         .from('profiles')
@@ -337,18 +312,68 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (error) {
         console.error('Error fetching profile:', error);
-        setProfile(null);
+        if (!profile) {
+          setProfile(null);
+        }
       } else {
         // data will be null if no profile exists, or the profile object if it exists
         setProfile(data);
       }
     } catch (error) {
       console.error('Error fetching profile:', error);
-      setProfile(null);
+      if (!profile) {
+        setProfile(null);
+      }
     } finally {
+      if (shouldBlockUi || !initializedRef.current) {
+        setLoading(false);
+      }
+    }
+  };
+
+  const handleAuthStateChange = async (event: AuthChangeEvent, session: { user: SupabaseUser } | null) => {
+    const nextUser = session?.user ?? null;
+    setUser(nextUser);
+
+    // Token refresh happens on tab return; do not toggle global loading or remount protected routes.
+    if (event === 'TOKEN_REFRESHED') {
+      if (nextUser && !profile) {
+        await fetchProfile(nextUser.id, { blockUi: false });
+      }
+      return;
+    }
+
+    if (nextUser) {
+      await updateLinkedProvidersFromUser(nextUser);
+      await fetchProfile(nextUser.id, { blockUi: false });
+    } else {
+      setProfile(null);
+      setLinkedProviders([]);
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      setUser(session?.user ?? null);
+      if (session?.user) {
+        await updateLinkedProvidersFromUser(session.user);
+        await fetchProfile(session.user.id, { blockUi: true });
+      } else {
+        setLinkedProviders([]);
+        setLoading(false);
+      }
+      initializedRef.current = true;
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      void handleAuthStateChange(event, session as { user: SupabaseUser } | null);
+    });
+
+    return () => subscription.unsubscribe();
+    // Intentionally run once on mount to avoid re-registering auth listeners.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const signInWithGoogle = async () => {
     await startOAuth("google", "sign-in");
@@ -456,7 +481,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refreshProfile = async () => {
     if (user) {
-      await fetchProfile(user.id);
+      await fetchProfile(user.id, { blockUi: false });
     }
   };
 

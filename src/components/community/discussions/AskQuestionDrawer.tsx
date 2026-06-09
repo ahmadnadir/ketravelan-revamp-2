@@ -18,6 +18,7 @@ import { DiscussionTopic, discussionTopicLabels } from "@/data/communityMockData
 import { cn } from "@/lib/utils";
 import { CountrySelect } from "@/components/ui/country-select";
 import { toast } from "@/hooks/use-toast";
+import { detectCountryFromLocale } from "@/lib/geolocation";
 
 interface AskQuestionDrawerProps {
   open: boolean;
@@ -44,48 +45,16 @@ export function AskQuestionDrawer({ open, onOpenChange, onCreated }: AskQuestion
   const [isAnonymous, setIsAnonymous] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Preload user's country using device location (native + web)
+  // Preload user's country from locale without requesting location permission.
   useEffect(() => {
     if (open && !location) {
-      import("@/lib/geolocation").then(({ getCurrentCoords, getCountryFromCoords }) => {
-        getCurrentCoords()
-          .then(coords => getCountryFromCoords(coords))
-          .then(country => { if (country) setLocation(country); })
-          .catch(() => fallbackToLocaleDetection());
-      });
+      const country = detectCountryFromLocale();
+      if (country) {
+        setLocation(country);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
-
-  // Fallback: detect country from browser locale
-  const fallbackToLocaleDetection = () => {
-    try {
-      const locale = navigator.language.toLowerCase();
-      let detectedCountry = "";
-      
-      if (locale.includes("my") || locale.startsWith("ms")) {
-        detectedCountry = "Malaysia";
-      } else if (locale.startsWith("id")) {
-        detectedCountry = "Indonesia";
-      } else if (locale === "en-us" || locale.startsWith("en-us")) {
-        detectedCountry = "United States";
-      } else if (locale.startsWith("sg")) {
-        detectedCountry = "Singapore";
-      } else if (locale.startsWith("th")) {
-        detectedCountry = "Thailand";
-      } else if (locale.startsWith("ph")) {
-        detectedCountry = "Philippines";
-      } else if (locale.startsWith("vn")) {
-        detectedCountry = "Vietnam";
-      }
-      
-      if (detectedCountry) {
-        setLocation(detectedCountry);
-      }
-    } catch (error) {
-      console.error("Error detecting country from locale:", error);
-    }
-  };
 
   const handleSubmit = async () => {
     if (!title.trim()) {

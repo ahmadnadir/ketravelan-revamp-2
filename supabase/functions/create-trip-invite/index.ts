@@ -22,6 +22,17 @@ const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
 
+async function sendSystemPush(payload: Record<string, unknown>) {
+  try {
+    await admin.functions.invoke("send-system-push", {
+      body: payload,
+      headers: { Authorization: `Bearer ${SERVICE_ROLE_KEY}` },
+    });
+  } catch (err) {
+    console.warn("Failed to send system push", err);
+  }
+}
+
 function buildCorsHeaders(req: Request): Record<string, string> {
   const origin = req.headers.get("origin") || "*";
   const allowedOrigins = new Set([
@@ -248,10 +259,77 @@ async function createInviteNotification(opts: {
   }
 }
 
+async function sendInvitePush(opts: {
+  inviteeUserId: string;
+  inviterId: string;
+  tripId: string;
+  tripTitle: string;
+  inviteId: string;
+}) {
+  const { data: inviterProfile } = await admin
+    .from("profiles")
+    .select("full_name, username")
+    .eq("id", opts.inviterId)
+    .maybeSingle();
+
+  const inviterName = (inviterProfile?.full_name || inviterProfile?.username || "Someone").trim();
+
+  await sendSystemPush({
+    userIds: [opts.inviteeUserId],
+    type: "trip_invite",
+    title: "Trip invite",
+    body: `${inviterName} invited you to join ${opts.tripTitle}`,
+    actionUrl: "/approvals",
+    priority: "high",
+    skipInsert: true,
+    metadata: {
+      trip_id: opts.tripId,
+      invite_id: opts.inviteId,
+      inviter_id: opts.inviterId,
+    },
+  });
+}
+
 interface CreateInviteRequest {
   tripId: string;
   inviteeEmail: string;
   dryRun?: boolean;
+}
+
+async function findUserIdByEmail(emailRaw: string): Promise<{ userId: string | null; lookupFailed: boolean }> {
+  const inviteeEmail = emailRaw.trim().toLowerCase();
+  const perPage = 50;
+  const maxPages = 20;
+
+  let lookupFailed = false;
+
+  for (let page = 1; page <= maxPages; page += 1) {
+    let usersPage: { users?: Array<{ email?: string; id: string }> } | null = null;
+    let usersErr: unknown = null;
+
+    // Retry each page once before giving up.
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const { data, error } = await admin.auth.admin.listUsers({ page, perPage });
+      usersPage = (data as { users?: Array<{ email?: string; id: string }> } | null) || null;
+      usersErr = error;
+      if (!error) break;
+      await new Promise((resolve) => setTimeout(resolve, 120));
+    }
+
+    if (usersErr) {
+      lookupFailed = true;
+      console.warn("[create-trip-invite] listUsers failed", { page, perPage, error: usersErr });
+      continue;
+    }
+
+    const users = usersPage?.users || [];
+    const match = users.find((u) => (u.email || "").toLowerCase() === inviteeEmail);
+    if (match?.id) return { userId: match.id, lookupFailed };
+
+    if (users.length < perPage) break;
+  }
+
+  return { userId: null, lookupFailed };
 }
 
 serve(async (req: Request) => {
@@ -310,18 +388,13 @@ serve(async (req: Request) => {
     }
 
     const inviteeEmail = body.inviteeEmail.trim().toLowerCase();
-    let inviteeUserId: string | null = null;
-    let page = 1;
-    const perPage = 200;
-    while (!inviteeUserId && page <= 5) {
-      const { data: usersPage, error: usersErr } = await admin.auth.admin.listUsers({ page, perPage });
-      if (usersErr) throw usersErr;
-      const match = (usersPage?.users || []).find((u: { email?: string; id: string }) =>
-        (u.email || "").toLowerCase() === inviteeEmail
-      );
-      if (match?.id) inviteeUserId = match.id;
-      if ((usersPage?.users || []).length < perPage) break;
-      page += 1;
+    const { userId: inviteeUserId, lookupFailed } = await findUserIdByEmail(inviteeEmail);
+
+    if (!inviteeUserId && lookupFailed) {
+      return new Response(JSON.stringify({ error: "Unable to look up user right now. Please try again." }), {
+        status: 503,
+        headers: { "Content-Type": "application/json", ...corsHeaders },
+      });
     }
 
     if (!inviteeUserId) {
@@ -349,6 +422,13 @@ serve(async (req: Request) => {
         coverImage: trip.cover_image,
       });
       await createInviteNotification({
+        inviteeUserId,
+        inviterId,
+        tripId: trip.id,
+        tripTitle: trip.title,
+        inviteId: existing.id,
+      });
+      await sendInvitePush({
         inviteeUserId,
         inviterId,
         tripId: trip.id,
@@ -399,6 +479,13 @@ serve(async (req: Request) => {
 
     if (inviteRow?.id) {
       await createInviteNotification({
+        inviteeUserId,
+        inviterId,
+        tripId: trip.id,
+        tripTitle: trip.title,
+        inviteId: inviteRow.id,
+      });
+      await sendInvitePush({
         inviteeUserId,
         inviterId,
         tripId: trip.id,

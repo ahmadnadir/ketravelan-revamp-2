@@ -1,45 +1,30 @@
-import { Capacitor } from "@capacitor/core";
-
-export interface GeoCoords {
-  latitude: number;
-  longitude: number;
-}
-
 /**
- * Get the device's current coordinates.
- * Uses @capacitor/geolocation on native (Android/iOS) for proper runtime permission
- * requests, and falls back to navigator.geolocation on web.
+ * Best-effort country detection from browser locale.
+ * Keeps onboarding friction low without requesting location permission.
  */
-export async function getCurrentCoords(): Promise<GeoCoords> {
-  if (Capacitor.isNativePlatform()) {
-    const { Geolocation } = await import("@capacitor/geolocation");
-    await Geolocation.requestPermissions();
-    const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: false, timeout: 10000 });
-    return { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
+export function detectCountryFromLocale(localeInput?: string): string | null {
+  const locale = (localeInput || navigator.language || "").toLowerCase();
+  if (!locale) return null;
+
+  const map: Record<string, string> = {
+    my: "Malaysia",
+    ms: "Malaysia",
+    id: "Indonesia",
+    "en-us": "United States",
+    sg: "Singapore",
+    th: "Thailand",
+    ph: "Philippines",
+    vn: "Vietnam",
+  };
+
+  const exact = map[locale];
+  if (exact) return exact;
+
+  for (const [prefix, country] of Object.entries(map)) {
+    if (locale.startsWith(prefix)) {
+      return country;
+    }
   }
 
-  return new Promise((resolve, reject) => {
-    if (!navigator.geolocation) {
-      reject(new Error("Geolocation not supported"));
-      return;
-    }
-    navigator.geolocation.getCurrentPosition(
-      (pos) => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
-      reject,
-      { enableHighAccuracy: false, timeout: 10000 }
-    );
-  });
-}
-
-/**
- * Reverse-geocode coordinates to a country name via Nominatim.
- */
-export async function getCountryFromCoords(coords: GeoCoords): Promise<string | null> {
-  const res = await fetch(
-    `https://nominatim.openstreetmap.org/reverse?format=json&lat=${coords.latitude}&lon=${coords.longitude}`,
-    { headers: { "Accept": "application/json", "User-Agent": "Ketravelan App (contact: support@ketravelan.com)" } }
-  );
-  if (!res.ok) return null;
-  const data = await res.json();
-  return data.address?.country || null;
+  return null;
 }

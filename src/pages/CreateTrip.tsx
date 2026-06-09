@@ -108,6 +108,7 @@ export default function CreateTrip() {
   // File input ref for gallery images
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const hasLoadedEditTrip = useRef(false);
+  const isEditTripLoading = Boolean(editTripId) && isLoadingTrip;
 
   useEffect(() => {
     topRef.current?.scrollIntoView({ behavior: "auto", block: "start" });
@@ -1314,13 +1315,23 @@ export default function CreateTrip() {
                     size="lg"
                     onClick={nextStep}
                     disabled={
+                      isEditTripLoading ||
                       (currentStep === 1 && !draft.visibility) ||
                       (currentStep === 2 && !canProceedStep2())
                     }
                     className="w-full rounded-xl text-sm sm:text-base gap-2"
                   >
-                    Continue
-                    <ChevronRight className="h-4 w-4" />
+                    {isEditTripLoading ? (
+                      <>
+                        <span className="animate-spin h-4 w-4 border-2 border-white/40 border-t-white rounded-full" />
+                        Loading trip...
+                      </>
+                    ) : (
+                      <>
+                        Continue
+                        <ChevronRight className="h-4 w-4" />
+                      </>
+                    )}
                   </Button>
                 ) : (
                   <Button

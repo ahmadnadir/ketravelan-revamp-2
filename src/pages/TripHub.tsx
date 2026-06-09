@@ -172,7 +172,7 @@ export default function TripHub() {
   const headerContent = (
     <header className="h-full glass border-b border-border/50 safe-x">
       <div className="h-[var(--safe-top)]" />
-      <div className="container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto px-3 sm:px-4">
+      <div className="container max-w-lg sm:max-w-2xl md:max-w-4xl lg:max-w-6xl mx-auto px-3 sm:px-4 lg:px-6 xl:px-8">
         <div className="flex items-center gap-2 sm:gap-3 h-[var(--header-height)]">
           <Link to={backTo}>
             <Button variant="ghost" size="icon" className="h-8 w-8 sm:h-9 sm:w-9">
@@ -200,9 +200,14 @@ export default function TripHub() {
                 <div className="h-9 w-9 sm:h-10 sm:w-10 rounded-full overflow-hidden shrink-0 border-2 border-background shadow-sm">
                   {displayTrip ? (
                     <img
-                      src={displayTrip.cover_image || displayTrip.imageUrl || `https://ui-avatars.com/api/?name=Trip`}
+                      src={displayTrip.cover_image || displayTrip.imageUrl || "/default-trip-photo.jpeg"}
                       alt={displayTrip.title}
                       className="h-full w-full object-cover"
+                      onError={(event) => {
+                        const img = event.currentTarget;
+                        if (img.src.endsWith('/default-trip-photo.jpeg')) return;
+                        img.src = '/default-trip-photo.jpeg';
+                      }}
                     />
                   ) : (
                     <div className="h-full w-full flex items-center justify-center bg-muted text-muted-foreground">?</div>
@@ -250,7 +255,7 @@ export default function TripHub() {
         className="px-0 sm:px-0"
         scrollContainerRef={scrollContainerRef}
       >
-        <div className="container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto">
+        <div className="w-full px-3 sm:px-4 lg:px-6 xl:px-8">
           {isLoading ? (
             <div className="px-3 sm:px-4 space-y-4 animate-pulse">
               {activeTab === "chat" && (

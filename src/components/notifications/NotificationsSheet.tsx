@@ -260,24 +260,39 @@ export function NotificationsSheet({ open, onOpenChange }: NotificationsSheetPro
       
       try {
         const isNative = isNativePlatform();
+        const knownInAppPathPrefixes = [
+          "/trip/",
+          "/share/trip/",
+          "/chat",
+          "/approvals",
+          "/expenses",
+          "/explore",
+          "/community",
+          "/settings",
+          "/profile",
+        ];
 
         if (rawUrl.startsWith("http")) {
           const parsedUrl = new URL(rawUrl);
           const inAppPath = `${parsedUrl.pathname}${parsedUrl.search}${parsedUrl.hash}` || "/";
           const isSameOrigin = parsedUrl.origin === window.location.origin;
+          const isKnownInAppPath = knownInAppPathPrefixes.some((prefix) =>
+            parsedUrl.pathname.startsWith(prefix)
+          );
 
           persistLog('Full URL detected', {
             parsedOrigin: parsedUrl.origin,
             windowOrigin: window.location.origin,
             isSameOrigin,
             isNative,
+            isKnownInAppPath,
             pathname: parsedUrl.pathname,
             search: parsedUrl.search,
             hash: parsedUrl.hash,
             inAppPath,
           });
 
-          if (isNative || isSameOrigin) {
+          if (isNative || isSameOrigin || isKnownInAppPath) {
             persistLog('In-app navigation from full URL', { inAppPath });
             setTimeout(() => {
               navigate(inAppPath);
@@ -354,7 +369,7 @@ export function NotificationsSheet({ open, onOpenChange }: NotificationsSheetPro
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className="w-full sm:max-w-md px-4 sm:px-6 pt-[calc(env(safe-area-inset-top)+2.5rem)] h-[100dvh] flex flex-col [&>button]:hidden"
+        className="w-full sm:max-w-md px-4 sm:px-6 pt-[calc(env(safe-area-inset-top)+3.1rem)] h-[100dvh] flex flex-col [&>button]:hidden"
       >
         <SheetHeader className="flex flex-row items-center justify-between gap-2">
           <SheetTitle className="flex items-center gap-2 text-base sm:text-lg">

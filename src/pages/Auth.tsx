@@ -75,18 +75,15 @@ export default function Auth() {
 
   useEffect(() => {
     if (!loading && isAuthenticated) {
-      // Check if profile exists and onboarding is completed
-      if (profile === null) {
-        // Profile doesn't exist yet, redirect to onboarding
-        navigate("/onboarding");
-      } else if (profile && !isProfileComplete(profile)) {
+      // Route based on profile only when profile is available.
+      if (profile && !isProfileComplete(profile)) {
         // Profile exists but missing required fields
         navigate("/onboarding");
       } else if (profile && isProfileComplete(profile)) {
         // Profile exists and onboarding completed, go to explore
         navigate("/explore");
       }
-      // If profile is undefined (still loading), don't navigate
+      // If profile is null (temporarily unavailable), avoid false onboarding redirect.
     }
   }, [isAuthenticated, loading, profile, navigate, isProfileComplete]);
 

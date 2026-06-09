@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { ChatComposer, type TripMember } from "@/components/chat/ChatComposer";
 import type { ChatAttachment } from "@/lib/conversations";
 import { MessageAttachments } from "@/components/chat/MessageAttachments";
-import { fetchConversationMessages, subscribeToMessages, sendMessage, editOwnMessage, unsendOwnMessage, deleteOwnMessage } from "@/lib/conversations";
+import { fetchConversationMessages, fetchConversationMessagesAfter, subscribeToMessages, sendMessage, editOwnMessage, unsendOwnMessage, deleteOwnMessage } from "@/lib/conversations";
 import { parseMessageForDisplay } from "@/lib/chatMentions";
 import { supabase } from "@/lib/supabase";
 import { markConversationReadOptimistically } from "@/lib/chatReadService";
@@ -35,6 +35,21 @@ export interface ChatPageMessage {
   type?: 'user' | 'system';
   systemData?: { action: string; details?: string };
 }
+
+type ConversationListItem = {
+  created_at?: string;
+  unreadCount?: number;
+  conversation?: {
+    id?: string;
+    created_at?: string;
+  };
+  lastMessage?: {
+    id?: string;
+    created_at?: string;
+    sender?: { id?: string; full_name?: string; username?: string; avatar_url?: string };
+  };
+  [key: string]: unknown;
+};
 
 interface ChatPageProps {
   conversationId: string;
@@ -80,6 +95,9 @@ export function ChatPage({
   scrollContainerRef,
 }: ChatPageProps) {
   const MESSAGE_ACTION_WINDOW_MS = 60 * 1000;
+  const MAX_RENDERED_MESSAGES = 220;
+  const LOAD_MORE_STEP = 120;
+  const REFRESH_THROTTLE_MS = 30000;
   const LONG_PRESS_MS = 450;
 
   const canUseMessageActions = (message: ChatPageMessage): boolean => {
@@ -110,10 +128,93 @@ export function ChatPage({
     });
   };
 
+  const getLocalDayKey = (date: Date): string => {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, "0");
+    const d = String(date.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  };
+
+  const parseMessageDate = (value: string | null | undefined): Date | null => {
+    if (!value) return null;
+    const raw = String(value).trim();
+    if (!raw) return null;
+
+    let parsed = new Date(raw);
+    if (Number.isFinite(parsed.getTime())) return parsed;
+
+    // Fallback for SQL-style timestamps like "2026-05-21 18:20:00+00"
+    if (raw.includes(" ")) {
+      parsed = new Date(raw.replace(" ", "T"));
+      if (Number.isFinite(parsed.getTime())) return parsed;
+    }
+
+    return null;
+  };
+
+  const getWeekStart = (date: Date): Date => {
+    const start = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    const localeName = Intl.DateTimeFormat().resolvedOptions().locale;
+    const localeObj = typeof Intl.Locale === "function"
+      ? (new Intl.Locale(localeName) as unknown as { weekInfo?: { firstDay?: number } })
+      : null;
+    const firstDay = localeObj?.weekInfo?.firstDay ?? 1;
+    const currentDay = start.getDay();
+    const normalizedFirstDay = firstDay % 7;
+    const daysSinceWeekStart = (currentDay - normalizedFirstDay + 7) % 7;
+    start.setDate(start.getDate() - daysSinceWeekStart);
+    return start;
+  };
+
+  const formatDateSeparatorLabel = (isoDate: string): string => {
+    const messageDate = parseMessageDate(isoDate);
+    if (!messageDate) return "";
+
+    const today = new Date();
+    const messageDay = new Date(messageDate.getFullYear(), messageDate.getMonth(), messageDate.getDate());
+    const todayDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+
+    const messageDayKey = getLocalDayKey(messageDay);
+    const todayKey = getLocalDayKey(todayDay);
+    if (messageDayKey === todayKey) return "Today";
+
+    const yesterday = new Date(todayDay);
+    yesterday.setDate(yesterday.getDate() - 1);
+    if (messageDayKey === getLocalDayKey(yesterday)) return "Yesterday";
+
+    const messageWeekStart = getWeekStart(messageDay).getTime();
+    const currentWeekStart = getWeekStart(todayDay).getTime();
+    if (messageWeekStart === currentWeekStart) {
+      return new Intl.DateTimeFormat(undefined, { weekday: "long" }).format(messageDate);
+    }
+
+    return new Intl.DateTimeFormat(undefined, {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    }).format(messageDate);
+  };
+
+  const renderDateSeparator = (label: string, isFirst: boolean) => {
+    if (!label) return null;
+    return (
+      <div
+        data-date-label={label}
+        className={cn("relative z-10 flex justify-center pointer-events-none", isFirst ? "mt-1 mb-3" : "my-2")}
+      >
+        <span className="rounded-lg border border-[#d6d6d6] bg-white px-3 py-1 text-[11px] font-medium tracking-[0.01em] text-[#5f6368] shadow-[0_1px_2px_rgba(0,0,0,0.08)]">
+          {label}
+        </span>
+      </div>
+    );
+  };
+
   const [confirmedMessages, setConfirmedMessages] = useState<ChatPageMessage[]>([]);
   const [pendingMessages, setPendingMessages] = useState<ChatPageMessage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
+  const [scrollDateLabel, setScrollDateLabel] = useState("");
+  const scrollDateTimeoutRef = useRef<number | null>(null);
   const [actionMenu, setActionMenu] = useState<{ messageId: string; x: number; y: number } | null>(null);
   const [hoveredMessageId, setHoveredMessageId] = useState<string | null>(null);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
@@ -124,6 +225,7 @@ export function ChatPage({
   const [reportDescription, setReportDescription] = useState('');
   const [confirmReport, setConfirmReport] = useState(false);
   const [isSubmittingAction, setIsSubmittingAction] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(MAX_RENDERED_MESSAGES);
   const [activeConversationId, setActiveConversationId] = useState(conversationId);
   const queryClient = useQueryClient();
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -131,6 +233,9 @@ export function ChatPage({
   const pollInFlightRef = useRef(false);
   const latestSnapshotRef = useRef<string>('');
   const lastRealtimeAtRef = useRef(0);
+  const lastSyncCreatedAtRef = useRef<string | null>(null);
+  const lastListRefreshAtRef = useRef(0);
+  const lastThreadRefreshAtRef = useRef(0);
   const longPressTimerRef = useRef<number | null>(null);
   const mentionUserIdByUsername = useMemo(() => {
     const map = new Map<string, string>();
@@ -143,11 +248,17 @@ export function ChatPage({
   }, [tripMembers]);
 
   useEffect(() => {
+    setVisibleCount(MAX_RENDERED_MESSAGES);
     setActiveConversationId(conversationId);
   }, [conversationId]);
 
   // Combine messages for display (confirmed + pending)
   const allMessages = useMemo(() => [...confirmedMessages, ...pendingMessages], [confirmedMessages, pendingMessages]);
+  const renderedMessages = useMemo(
+    () => (allMessages.length > visibleCount ? allMessages.slice(-visibleCount) : allMessages),
+    [allMessages, visibleCount],
+  );
+  const hiddenMessagesCount = Math.max(0, allMessages.length - renderedMessages.length);
   const actionMessage = useMemo(
     () => (actionMenu ? allMessages.find((msg) => msg.id === actionMenu.messageId) || null : null),
     [actionMenu, allMessages],
@@ -189,6 +300,12 @@ export function ChatPage({
 
   const applyServerMessages = (incomingRaw: unknown[]) => {
     const normalizedMsgs = normalizeMessages(incomingRaw);
+    if (normalizedMsgs.length > 0) {
+      const newest = normalizedMsgs[normalizedMsgs.length - 1];
+      if (newest?.created_at) {
+        lastSyncCreatedAtRef.current = newest.created_at;
+      }
+    }
     const nextSnapshot = getSnapshot(normalizedMsgs);
     if (nextSnapshot === latestSnapshotRef.current) return false;
 
@@ -208,6 +325,45 @@ export function ChatPage({
     };
     container.addEventListener('scroll', onScroll, { passive: true });
     return () => container.removeEventListener('scroll', onScroll);
+  }, [scrollContainerRef, isLoading]);
+
+  // WhatsApp-style: show sticky date chip at top while scrolling
+  useEffect(() => {
+    const container = scrollContainerRef?.current;
+    if (!container) return;
+
+    const onScroll = () => {
+      const separators = container.querySelectorAll<HTMLElement>('[data-date-label]');
+      if (!separators.length) return;
+
+      const containerTop = container.getBoundingClientRect().top;
+      let activeLabel = "";
+
+      separators.forEach((el) => {
+        const elTop = el.getBoundingClientRect().top;
+        if (elTop <= containerTop + 56) {
+          activeLabel = el.dataset.dateLabel || "";
+        }
+      });
+
+      // If no separator has scrolled past yet, show the first one
+      if (!activeLabel) {
+        activeLabel = (separators[0] as HTMLElement)?.dataset?.dateLabel || "";
+      }
+
+      setScrollDateLabel(activeLabel);
+
+      if (scrollDateTimeoutRef.current) clearTimeout(scrollDateTimeoutRef.current);
+      scrollDateTimeoutRef.current = window.setTimeout(() => {
+        setScrollDateLabel("");
+      }, 1500);
+    };
+
+    container.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      container.removeEventListener('scroll', onScroll);
+      if (scrollDateTimeoutRef.current) clearTimeout(scrollDateTimeoutRef.current);
+    };
   }, [scrollContainerRef, isLoading]);
 
   useEffect(() => {
@@ -246,6 +402,7 @@ export function ChatPage({
         // Cache-then-network: show cached messages instantly, skip skeleton on revisit
         const cached = queryClient.getQueryData<ChatPageMessage[]>(['messages', activeConversationId]);
         if (cached && cached.length > 0) {
+          lastSyncCreatedAtRef.current = cached[cached.length - 1]?.created_at || null;
           setConfirmedMessages(cached);
           latestSnapshotRef.current = getSnapshot(cached);
           setIsLoading(false);
@@ -275,6 +432,7 @@ export function ChatPage({
 
           setConfirmedMessages((prev) => {
             const merged = mergeById(prev, [normalizedIncoming]);
+            lastSyncCreatedAtRef.current = merged[merged.length - 1]?.created_at || lastSyncCreatedAtRef.current;
             latestSnapshotRef.current = getSnapshot(merged);
             queryClient.setQueryData(['messages', activeConversationId], merged);
             return merged;
@@ -328,14 +486,23 @@ export function ChatPage({
 
       try {
         pollInFlightRef.current = true;
-        const msgs = await fetchConversationMessages(activeConversationId);
-        applyServerMessages(msgs as unknown[]);
+        const after = lastSyncCreatedAtRef.current;
+        if (!after) {
+          const msgs = await fetchConversationMessages(activeConversationId);
+          applyServerMessages(msgs as unknown[]);
+          return;
+        }
+
+        const delta = await fetchConversationMessagesAfter(activeConversationId, after, 120);
+        if (delta.length > 0) {
+          applyServerMessages(delta as unknown[]);
+        }
       } catch (err) {
         console.error('Polling messages failed:', err);
       } finally {
         pollInFlightRef.current = false;
       }
-    }, 25000);
+    }, 35000);
 
     return () => clearInterval(interval);
   }, [activeConversationId]);
@@ -384,8 +551,8 @@ export function ChatPage({
     openActionMenu(messageId, rect.right - 8, rect.bottom + 8);
   };
 
-  const sortConversationsByLatest = (items: any[]) => {
-    return [...items].sort((a: any, b: any) => {
+  const sortConversationsByLatest = (items: ConversationListItem[]) => {
+    return [...items].sort((a, b) => {
       const aTime = a.lastMessage?.created_at
         ? new Date(a.lastMessage.created_at).getTime()
         : new Date(a.created_at ?? a.conversation?.created_at ?? 0).getTime();
@@ -400,11 +567,11 @@ export function ChatPage({
     const conversationIdToUpdate = targetConversationId || activeConversationId;
     if (!currentUserId || !conversationIdToUpdate) return;
 
-    queryClient.setQueryData(['conversations', currentUserId], (oldData: any[] | undefined) => {
+    queryClient.setQueryData(['conversations', currentUserId], (oldData: ConversationListItem[] | undefined) => {
       if (!Array.isArray(oldData) || oldData.length === 0) return oldData;
 
       let foundConversation = false;
-      const nextData = oldData.map((participant: any) => {
+      const nextData = oldData.map((participant) => {
         if (participant?.conversation?.id !== conversationIdToUpdate) return participant;
 
         foundConversation = true;
@@ -431,7 +598,11 @@ export function ChatPage({
   const refreshConversationListInBackground = () => {
     if (!currentUserId) return;
 
-    void queryClient.refetchQueries({
+    const now = Date.now();
+    if (now - lastListRefreshAtRef.current < REFRESH_THROTTLE_MS) return;
+    lastListRefreshAtRef.current = now;
+
+    void queryClient.invalidateQueries({
       queryKey: ['conversations', currentUserId],
       type: 'all',
     });
@@ -440,7 +611,11 @@ export function ChatPage({
   const refreshMessagesInBackground = () => {
     if (!activeConversationId) return;
 
-    void queryClient.refetchQueries({
+    const now = Date.now();
+    if (now - lastThreadRefreshAtRef.current < REFRESH_THROTTLE_MS) return;
+    lastThreadRefreshAtRef.current = now;
+
+    void queryClient.invalidateQueries({
       queryKey: ['messages', activeConversationId],
       type: 'all',
     });
@@ -458,10 +633,10 @@ export function ChatPage({
   const removeConversationListPreviewForMessage = (messageId: string) => {
     if (!currentUserId || !activeConversationId) return;
 
-    queryClient.setQueryData(['conversations', currentUserId], (oldData: any[] | undefined) => {
+    queryClient.setQueryData(['conversations', currentUserId], (oldData: ConversationListItem[] | undefined) => {
       if (!Array.isArray(oldData) || oldData.length === 0) return oldData;
 
-      return oldData.map((participant: any) => {
+      return oldData.map((participant) => {
         if (participant?.conversation?.id !== activeConversationId) return participant;
         if (participant?.lastMessage?.id !== messageId) return participant;
 
@@ -746,7 +921,7 @@ export function ChatPage({
   const headerContent = (
     <header className="h-full glass border-b border-border/50 safe-x">
       <div className="h-[var(--safe-top)]" />
-      <div className="container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto px-3 sm:px-4">
+      <div className="w-full px-3 sm:px-4 lg:px-6 xl:px-8">
         <div className="flex items-center gap-3 h-[var(--header-height)]">
           {showBackButton && (
             <Button variant="ghost" size="icon" className="h-9 w-9" onClick={onBackClick}>
@@ -852,12 +1027,44 @@ export function ChatPage({
     </div>
   ) : (
     <>
-      {allMessages.map((msg) => {
+      {/* WhatsApp-style sticky scroll date overlay */}
+      <div className="sticky top-2 z-30 flex justify-center pointer-events-none">
+        <span
+          className={cn(
+            "rounded-lg border border-[#d6d6d6] bg-white px-3 py-1 text-[11px] font-medium tracking-[0.01em] text-[#5f6368] shadow-[0_1px_2px_rgba(0,0,0,0.08)] transition-opacity duration-300",
+            scrollDateLabel ? "opacity-100" : "opacity-0"
+          )}
+        >
+          {scrollDateLabel || "\u00A0"}
+        </span>
+      </div>
+
+      {hiddenMessagesCount > 0 && (
+        <div className="mb-3 flex justify-center">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setVisibleCount((prev) => prev + LOAD_MORE_STEP)}
+          >
+            Load earlier messages ({hiddenMessagesCount})
+          </Button>
+        </div>
+      )}
+
+      {renderedMessages.map((msg, index) => {
+        const previous = index > 0 ? renderedMessages[index - 1] : null;
+        const currentDate = parseMessageDate(msg.created_at);
+        const previousDate = parseMessageDate(previous?.created_at);
+        const currentDayKey = currentDate ? getLocalDayKey(currentDate) : "";
+        const previousDayKey = previousDate ? getLocalDayKey(previousDate) : "";
+        const showDateSeparator = index === 0 || currentDayKey !== previousDayKey;
+        const dateSeparatorLabel = msg.created_at ? formatDateSeparatorLabel(String(msg.created_at)) : "";
         const isOwn = msg.sender_id === currentUserId;
         const isSystem = msg.type === 'system';
         const canOpenMenuForMessage = canUseMessageActions(msg) || (msg.sender_id !== currentUserId && Boolean(messageReportType));
-        const timeLabel = msg.created_at
-          ? new Date(String(msg.created_at)).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+        const timeLabel = currentDate
+          ? currentDate.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
           : "";
         
         // Get sender info for group chats
@@ -867,123 +1074,133 @@ export function ChatPage({
         // Render system messages
         if (isSystem) {
           return (
-            <div key={String(msg.id)} className="flex justify-center py-3">
-              <p className="text-xs sm:text-sm text-muted-foreground text-center px-4">
-                {formatSystemMessageContent(msg.content)}
-              </p>
+            <div key={String(msg.id)}>
+              {showDateSeparator && dateSeparatorLabel && (
+                renderDateSeparator(dateSeparatorLabel, index === 0)
+              )}
+              <div className="flex justify-center py-3">
+                <p className="text-xs sm:text-sm text-muted-foreground text-center px-4">
+                  {formatSystemMessageContent(msg.content)}
+                </p>
+              </div>
             </div>
           );
         }
 
         return (
-          <div
-            key={String(msg.id)}
-            className={cn("flex gap-2 py-1.0", isOwn ? "justify-end" : "justify-start")}
-            onMouseEnter={() => setHoveredMessageId(String(msg.id))}
-            onMouseLeave={() => setHoveredMessageId((current) => (current === String(msg.id) ? null : current))}
-          >
-            {/* Avatar for other users' messages (left side) */}
-            {!isOwn && showSenderInfo && (
-              <Avatar className="h-6 w-6 shrink-0 mt-5 bg-white border border-border">
-                <AvatarImage 
-                  src={senderAvatar || getDefaultAvatar(msg.sender_id)} 
-                  alt={senderName} 
-                />
-                <AvatarFallback className="text-[8px] bg-white">
-                  {senderName.charAt(0).toUpperCase()}
-                </AvatarFallback>
-              </Avatar>
+          <div key={String(msg.id)}>
+            {showDateSeparator && dateSeparatorLabel && (
+              renderDateSeparator(dateSeparatorLabel, index === 0)
             )}
-            
-            <div className="flex items-start gap-1.5" style={{ maxWidth: isOwn ? "75%" : "75%" }}>
-              <div className={cn("flex flex-col gap-0.5", isOwn ? "items-end" : "items-start")}>
-                {!isOwn && showSenderInfo && (
-                  <span className="text-xs font-medium text-foreground">{senderName}</span>
-                )}
 
-                <div
-                  className={cn(
-                    "relative px-4 py-2 rounded-2xl border shadow-sm",
-                    isOwn
-                      ? "bg-black text-white border-black rounded-br-sm"
-                      : "bg-white text-foreground border-border rounded-bl-sm"
-                  )}
-                  style={{ wordBreak: "break-word", overflowWrap: "anywhere" }}
-                  onContextMenu={(event) => handleMessageContextMenu(event, msg)}
-                  onTouchStart={(event) => handleMessageTouchStart(event, msg)}
-                  onTouchMove={clearLongPress}
-                  onTouchEnd={clearLongPress}
-                  onTouchCancel={clearLongPress}
-                >
-                  {canOpenMenuForMessage && (
-                    <button
-                      type="button"
-                      aria-label="Message actions"
-                      className={cn(
-                        "absolute right-1.5 top-1.5 hidden h-5 w-5 items-center justify-center rounded-full transition md:flex",
-                        hoveredMessageId === String(msg.id) ? "opacity-100" : "opacity-0 pointer-events-none",
-                        isOwn
-                          ? "text-white/75 hover:bg-white/15 hover:text-white"
-                          : "text-muted-foreground hover:bg-black/10 hover:text-foreground"
-                      )}
-                      onClick={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        openActionMenuNearElement(String(msg.id), event.currentTarget);
-                      }}
-                    >
-                      <ChevronDown className="h-3.5 w-3.5" />
-                    </button>
+            <div
+              className={cn("flex gap-2 py-1.0", isOwn ? "justify-end" : "justify-start")}
+              onMouseEnter={() => setHoveredMessageId(String(msg.id))}
+              onMouseLeave={() => setHoveredMessageId((current) => (current === String(msg.id) ? null : current))}
+            >
+              {/* Avatar for other users' messages (left side) */}
+              {!isOwn && showSenderInfo && (
+                <Avatar className="h-6 w-6 shrink-0 mt-5 bg-white border border-border">
+                  <AvatarImage
+                    src={senderAvatar || getDefaultAvatar(msg.sender_id)}
+                    alt={senderName}
+                  />
+                  <AvatarFallback className="text-[8px] bg-white">
+                    {senderName.charAt(0).toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+              )}
+
+              <div className="flex items-start gap-1.5" style={{ maxWidth: isOwn ? "75%" : "75%" }}>
+                <div className={cn("flex flex-col gap-0.5", isOwn ? "items-end" : "items-start")}>
+                  {!isOwn && showSenderInfo && (
+                    <span className="text-xs font-medium text-foreground">{senderName}</span>
                   )}
 
-                  <div className={cn(
-                    "pr-5 text-sm sm:text-base leading-snug whitespace-pre-wrap",
-                    isUnsentMessage(msg) && "italic opacity-80"
-                  )}>
-                    {(() => {
-                      const parts = parseMessageForDisplay(msg.content);
-                      return parts.map((part, idx) =>
-                        part.type === 'mention' ? (() => {
-                          const mentionUserId = part.username
-                            ? mentionUserIdByUsername.get(part.username.toLowerCase())
-                            : undefined;
-                          const mentionClassName = cn(
-                            "font-semibold text-emerald-400",
-                            mentionUserId ? "hover:underline" : ""
-                          );
-                          return mentionUserId ? (
-                            <Link key={idx} to={`/user/${mentionUserId}`} className="cursor-pointer">
-                              <span className={mentionClassName}>{part.value}</span>
-                            </Link>
-                          ) : (
-                            <span key={idx} className={mentionClassName}>{part.value}</span>
-                          );
-                        })() : (
-                          <span key={idx}>{part.value}</span>
-                        )
-                      );
-                    })()}
+                  <div
+                    className={cn(
+                      "relative px-4 py-2 rounded-2xl border shadow-sm",
+                      isOwn
+                        ? "bg-black text-white border-black rounded-br-sm"
+                        : "bg-white text-foreground border-border rounded-bl-sm"
+                    )}
+                    style={{ wordBreak: "break-word", overflowWrap: "anywhere" }}
+                    onContextMenu={(event) => handleMessageContextMenu(event, msg)}
+                    onTouchStart={(event) => handleMessageTouchStart(event, msg)}
+                    onTouchMove={clearLongPress}
+                    onTouchEnd={clearLongPress}
+                    onTouchCancel={clearLongPress}
+                  >
+                    {canOpenMenuForMessage && (
+                      <button
+                        type="button"
+                        aria-label="Message actions"
+                        className={cn(
+                          "absolute right-1.5 top-1.5 hidden h-5 w-5 items-center justify-center rounded-full transition md:flex",
+                          hoveredMessageId === String(msg.id) ? "opacity-100" : "opacity-0 pointer-events-none",
+                          isOwn
+                            ? "text-white/75 hover:bg-white/15 hover:text-white"
+                            : "text-muted-foreground hover:bg-black/10 hover:text-foreground"
+                        )}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          openActionMenuNearElement(String(msg.id), event.currentTarget);
+                        }}
+                      >
+                        <ChevronDown className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+
+                    <div className={cn(
+                      "pr-5 text-sm sm:text-base leading-snug whitespace-pre-wrap",
+                      isUnsentMessage(msg) && "italic opacity-80"
+                    )}>
+                      {(() => {
+                        const parts = parseMessageForDisplay(msg.content);
+                        return parts.map((part, idx) =>
+                          part.type === 'mention' ? (() => {
+                            const mentionUserId = part.username
+                              ? mentionUserIdByUsername.get(part.username.toLowerCase())
+                              : undefined;
+                            const mentionClassName = cn(
+                              "font-semibold text-emerald-400",
+                              mentionUserId ? "hover:underline" : ""
+                            );
+                            return mentionUserId ? (
+                              <Link key={idx} to={`/user/${mentionUserId}`} className="cursor-pointer">
+                                <span className={mentionClassName}>{part.value}</span>
+                              </Link>
+                            ) : (
+                              <span key={idx} className={mentionClassName}>{part.value}</span>
+                            );
+                          })() : (
+                            <span key={idx}>{part.value}</span>
+                          )
+                        );
+                      })()}
+                    </div>
+                    {Array.isArray(msg.attachments) && msg.attachments.length > 0 && (
+                      <MessageAttachments attachments={msg.attachments} isOwn={isOwn} />
+                    )}
                   </div>
-                  {Array.isArray(msg.attachments) && msg.attachments.length > 0 && (
-                    <MessageAttachments attachments={msg.attachments} isOwn={isOwn} />
-                  )}
+                  <div className={cn(
+                    "flex items-center gap-1 text-[10px] sm:text-[11px] px-2 mt-0.5",
+                    isOwn ? "justify-end text-muted-foreground/80" : "text-muted-foreground/80"
+                  )}>
+                    {msg.is_edited && !isUnsentMessage(msg) && <span>Edited</span>}
+                    <span>{timeLabel}</span>
+                    {isOwn && (
+                      <>
+                        {msg.status === "sending" && <Clock className="h-3 w-3" />}
+                        {(msg.status === "sent" || !msg.status) && <Check className="h-3 w-3" />}
+                        {msg.status === "failed" && <span className="text-red-500">!</span>}
+                      </>
+                    )}
+                  </div>
                 </div>
-                <div className={cn(
-                  "flex items-center gap-1 text-[10px] sm:text-[11px] px-2 mt-0.5",
-                  isOwn ? "justify-end text-muted-foreground/80" : "text-muted-foreground/80"
-                )}>
-                  {msg.is_edited && !isUnsentMessage(msg) && <span>Edited</span>}
-                  <span>{timeLabel}</span>
-                  {isOwn && (
-                    <>
-                      {msg.status === "sending" && <Clock className="h-3 w-3" />}
-                      {(msg.status === "sent" || !msg.status) && <Check className="h-3 w-3" />}
-                      {msg.status === "failed" && <span className="text-red-500">!</span>}
-                    </>
-                  )}
-                </div>
-              </div>
 
+              </div>
             </div>
           </div>
         );

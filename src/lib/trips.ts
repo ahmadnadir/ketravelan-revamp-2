@@ -22,6 +22,78 @@ function isSchemaDriftError(error: any): boolean {
   );
 }
 
+type EnsureTripMemberResult = 'inserted' | 'reactivated' | 'already_active';
+
+async function ensureTripMemberActive(tripId: string, userId: string): Promise<EnsureTripMemberResult> {
+  const { error: insertError } = await supabase
+    .from('trip_members')
+    .insert({
+      trip_id: tripId,
+      user_id: userId,
+      role: 'member',
+    });
+
+  if (!insertError) return 'inserted';
+  if (insertError.code !== '23505') throw insertError;
+
+  const { data: reactivatedRows, error: reactivateError } = await supabase
+    .from('trip_members')
+    .update({
+      left_at: null,
+      joined_at: new Date().toISOString(),
+      role: 'member',
+      is_admin: false,
+    })
+    .eq('trip_id', tripId)
+    .eq('user_id', userId)
+    .not('left_at', 'is', null)
+    .select('id')
+    .limit(1);
+
+  if (reactivateError) throw reactivateError;
+  return (reactivatedRows?.length || 0) > 0 ? 'reactivated' : 'already_active';
+}
+
+async function incrementTripParticipantsCount(tripId: string, context: string) {
+  const { error: rpcError } = await supabase.rpc('increment', {
+    table_name: 'trips',
+    row_id: tripId,
+    column_name: 'current_participants',
+  });
+
+  if (rpcError) {
+    console.warn(`increment RPC failed in ${context}`, rpcError.message);
+  }
+}
+
+async function ensureTripConversationParticipant(tripId: string, userId: string) {
+  const { data: conversations, error: conversationError } = await supabase
+    .from('conversations')
+    .select('id')
+    .eq('trip_id', tripId)
+    .eq('conversation_type', 'trip_group')
+    .limit(1);
+
+  if (conversationError) {
+    console.warn('Unable to load trip conversation while reactivating member:', conversationError);
+    return;
+  }
+
+  const conversationId = conversations?.[0]?.id;
+  if (!conversationId) return;
+
+  const { error: participantError } = await supabase
+    .from('conversation_participants')
+    .insert({
+      conversation_id: conversationId,
+      user_id: userId,
+    });
+
+  if (participantError && participantError.code !== '23505') {
+    console.warn('Unable to ensure trip conversation participant during member reactivation:', participantError);
+  }
+}
+
 export interface TripFilters {
   status?: string[];
   destination?: string;
@@ -408,35 +480,16 @@ export async function acceptTripInvite(inviteId: string) {
 
   if (inviteError) throw inviteError;
 
-  const { error: memberError } = await supabase
-    .from('trip_members')
-    .insert({
-      trip_id: invite.trip_id,
-      user_id: invite.invitee_user_id,
-      role: 'member',
-    });
+  const memberResult = await ensureTripMemberActive(invite.trip_id, invite.invitee_user_id);
 
-  if (memberError) throw memberError;
+  if (memberResult === 'inserted' || memberResult === 'reactivated') {
+    // Increment current_participants when a membership is newly active.
+    await incrementTripParticipantsCount(invite.trip_id, 'acceptTripInvite');
 
-  // Increment current_participants atomically
-  const { error: rpcError } = await supabase.rpc('increment', {
-    table_name: 'trips',
-    row_id: invite.trip_id,
-    column_name: 'current_participants',
-  });
-
-  // Fallback: if RPC doesn't exist yet, do a manual read+update
-  if (rpcError) {
-    console.warn('increment RPC failed, using fallback', rpcError.message);
-    const { data: tripRow } = await supabase
-      .from('trips')
-      .select('current_participants')
-      .eq('id', invite.trip_id)
-      .single();
-    await supabase
-      .from('trips')
-      .update({ current_participants: (tripRow?.current_participants ?? 0) + 1 })
-      .eq('id', invite.trip_id);
+    // Re-joining through reactivation does not fire insert triggers that add chat participants.
+    if (memberResult === 'reactivated') {
+      await ensureTripConversationParticipant(invite.trip_id, invite.invitee_user_id);
+    }
   }
 
   try {
@@ -512,26 +565,14 @@ export async function approveJoinRequest(
 
   if (approvedRequest?.trip_id && approvedRequest?.user_id) {
     if (!approvalAppliedInDb) {
-      const { error: directMemberError } = await supabase
-        .from('trip_members')
-        .insert({
-          trip_id: approvedRequest.trip_id,
-          user_id: approvedRequest.user_id,
-          role: 'member'
-        });
+      const memberResult = await ensureTripMemberActive(approvedRequest.trip_id, approvedRequest.user_id);
 
-      if (directMemberError && directMemberError.code !== '23505') {
-        throw directMemberError;
-      }
+      if (memberResult === 'inserted' || memberResult === 'reactivated') {
+        await incrementTripParticipantsCount(approvedRequest.trip_id, 'approveJoinRequest direct fallback path');
 
-      const { error: directCountError } = await supabase.rpc('increment', {
-        table_name: 'trips',
-        row_id: approvedRequest.trip_id,
-        column_name: 'current_participants'
-      });
-
-      if (directCountError) {
-        console.warn('increment RPC failed in direct fallback path', directCountError.message);
+        if (memberResult === 'reactivated') {
+          await ensureTripConversationParticipant(approvedRequest.trip_id, approvedRequest.user_id);
+        }
       }
     }
 
@@ -578,26 +619,14 @@ export async function approveJoinRequest(
       user_id: fallbackContext.userId,
     };
 
-    const { error: directMemberError } = await supabase
-      .from('trip_members')
-      .insert({
-        trip_id: directRequest.trip_id,
-        user_id: directRequest.user_id,
-        role: 'member'
-      });
+    const memberResult = await ensureTripMemberActive(directRequest.trip_id, directRequest.user_id);
 
-    if (directMemberError && directMemberError.code !== '23505') {
-      throw directMemberError;
-    }
+    if (memberResult === 'inserted' || memberResult === 'reactivated') {
+      await incrementTripParticipantsCount(directRequest.trip_id, 'approveJoinRequest UI-context fallback path');
 
-    const { error: directCountError } = await supabase.rpc('increment', {
-      table_name: 'trips',
-      row_id: directRequest.trip_id,
-      column_name: 'current_participants'
-    });
-
-    if (directCountError) {
-      console.warn('increment RPC failed in UI-context fallback path', directCountError.message);
+      if (memberResult === 'reactivated') {
+        await ensureTripConversationParticipant(directRequest.trip_id, directRequest.user_id);
+      }
     }
 
     try {
@@ -669,26 +698,14 @@ export async function approveJoinRequest(
         throw new Error('Approvals backend is not fully migrated yet. Run latest Supabase migrations, then retry.');
       }
 
-      const { error: fallbackMemberError } = await supabase
-        .from('trip_members')
-        .insert({
-          trip_id: fallbackRequest.trip_id,
-          user_id: fallbackRequest.user_id,
-          role: 'member'
-        });
+      const memberResult = await ensureTripMemberActive(fallbackRequest.trip_id, fallbackRequest.user_id);
 
-      if (fallbackMemberError && fallbackMemberError.code !== '23505') {
-        throw fallbackMemberError;
-      }
+      if (memberResult === 'inserted' || memberResult === 'reactivated') {
+        await incrementTripParticipantsCount(fallbackRequest.trip_id, 'approveJoinRequest schema-drift fallback path');
 
-      const { error: fallbackCountError } = await supabase.rpc('increment', {
-        table_name: 'trips',
-        row_id: fallbackRequest.trip_id,
-        column_name: 'current_participants'
-      });
-
-      if (fallbackCountError) {
-        console.warn('increment RPC failed in fallback path', fallbackCountError.message);
+        if (memberResult === 'reactivated') {
+          await ensureTripConversationParticipant(fallbackRequest.trip_id, fallbackRequest.user_id);
+        }
       }
 
       return fallbackRequest;
@@ -697,51 +714,31 @@ export async function approveJoinRequest(
   }
   if (!request) throw new Error('Join request not found or already processed');
 
-  const { error: memberError } = await supabase
-    .from('trip_members')
-    .insert({
-      trip_id: request.trip_id,
-      user_id: request.user_id,
-      role: 'member'
-    });
+  let memberResult: EnsureTripMemberResult;
+  try {
+    memberResult = await ensureTripMemberActive(request.trip_id, request.user_id);
+  } catch (memberError) {
+    // Best-effort rollback so fallback path does not leave request as approved without membership.
+    await supabase
+      .from('join_requests')
+      .update({
+        status: 'pending',
+        reviewed_by: null,
+        reviewed_at: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', requestId)
+      .eq('status', 'approved');
 
-  if (memberError) {
-    // Keep fallback behavior aligned with RPC semantics: duplicate member is acceptable.
-    if (memberError.code !== '23505') {
-      // Best-effort rollback so fallback path does not leave request as approved without membership.
-      await supabase
-        .from('join_requests')
-        .update({
-          status: 'pending',
-          reviewed_by: null,
-          reviewed_at: null,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', requestId)
-        .eq('status', 'approved');
-
-      throw memberError;
-    }
+    throw memberError;
   }
 
-  const { error: countError } = await supabase.rpc('increment', {
-    table_name: 'trips',
-    row_id: request.trip_id,
-    column_name: 'current_participants'
-  });
+  if (memberResult === 'inserted' || memberResult === 'reactivated') {
+    await incrementTripParticipantsCount(request.trip_id, 'approveJoinRequest legacy fallback path');
 
-  // Fallback: if RPC doesn't exist yet, do a manual read+update
-  if (countError) {
-    console.warn('increment RPC failed, using fallback', countError.message);
-    const { data: tripRow } = await supabase
-      .from('trips')
-      .select('current_participants')
-      .eq('id', request.trip_id)
-      .single();
-    await supabase
-      .from('trips')
-      .update({ current_participants: (tripRow?.current_participants ?? 0) + 1 })
-      .eq('id', request.trip_id);
+    if (memberResult === 'reactivated') {
+      await ensureTripConversationParticipant(request.trip_id, request.user_id);
+    }
   }
 
   try {

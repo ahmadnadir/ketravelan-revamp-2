@@ -126,6 +126,37 @@ function navigateToActionUrl(rawUrl: string) {
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
+function resolvePushActionUrl(data: Record<string, unknown>) {
+  const notificationType = String(data.type || "").toLowerCase();
+  const tripId = String(data.trip_id || "").trim();
+  const rawActionUrl = String(
+    data.action_url ||
+    data.actionUrl ||
+    data.url ||
+    data.deep_link ||
+    ""
+  ).trim();
+
+  const isExpenseNotification =
+    notificationType === "new_expense" ||
+    notificationType === "expense" ||
+    notificationType === "expense_paid" ||
+    notificationType === "expense_reminder";
+
+  if (isExpenseNotification && tripId) {
+    return `/trip/${tripId}/hub?tab=expenses`;
+  }
+
+  if (isExpenseNotification && rawActionUrl) {
+    const match = rawActionUrl.match(/\/trips?\/([^/?#]+)/i);
+    if (match?.[1]) {
+      return `/trip/${match[1]}/hub?tab=expenses`;
+    }
+  }
+
+  return rawActionUrl;
+}
+
 export function registerListeners() {  if (listenersRegistered) return;
   listenersRegistered = true;
 
@@ -158,12 +189,7 @@ export function registerListeners() {  if (listenersRegistered) return;
 
   PushNotifications.addListener("pushNotificationActionPerformed", (notification) => {
     const data = notification?.notification?.data || {};
-    const actionUrl =
-      data.action_url ||
-      data.actionUrl ||
-      data.url ||
-      data.deep_link ||
-      "";
+    const actionUrl = resolvePushActionUrl(data);
     if (actionUrl) {
       navigateToActionUrl(String(actionUrl));
     }

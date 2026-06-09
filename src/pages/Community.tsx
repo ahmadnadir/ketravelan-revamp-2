@@ -7,7 +7,7 @@ import { DiscussionsFeed } from "@/components/community/discussions/DiscussionsF
 import { AskQuestionDrawer } from "@/components/community/discussions/AskQuestionDrawer";
 import { SEOHead } from "@/components/seo/SEOHead";
 import { SegmentedControl } from "@/components/shared/SegmentedControl";
-import { getCurrentCoords, getCountryFromCoords } from "@/lib/geolocation";
+import { detectCountryFromLocale } from "@/lib/geolocation";
 
 const DISCUSSION_LOCATION_STORAGE_KEY = "ketravelan-discussion-country";
 
@@ -27,8 +27,8 @@ function CommunityContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Use cached discussion country when available, then only refresh discussions
-  // if the newly detected country differs from the cached one.
+  // Use cached discussion country when available, then refresh discussions only
+  // if the newly inferred locale country differs from the cached one.
   useEffect(() => {
     let isMounted = true;
 
@@ -51,9 +51,8 @@ function CommunityContent() {
           setLocationFilter(cachedCountry);
         }
 
-        const coords = await getCurrentCoords();
-        const country = await getCountryFromCoords(coords);
-        const normalizedCountry = country?.trim();
+        const detectedCountry = detectCountryFromLocale();
+        const normalizedCountry = detectedCountry?.trim();
 
         if (!isMounted || !normalizedCountry) return;
 

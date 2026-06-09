@@ -144,7 +144,39 @@ function buildHtmlEmail(opts: {
 
 interface TripReminderRequest {
   tripId: string;
+  reminderType?: "7_days" | "3_days" | "1_day";
   dryRun?: boolean;
+}
+
+function getReminderOffsetDays(reminderType?: string): number {
+  switch (reminderType) {
+    case "7_days":
+      return 7;
+    case "3_days":
+      return 3;
+    case "1_day":
+      return 1;
+    default:
+      return 1;
+  }
+}
+
+function buildReminderCopy(daysBeforeStart: number) {
+  if (daysBeforeStart <= 1) {
+    return {
+      timelineText: "tomorrow",
+      pushTitle: "Trip Starting Tomorrow",
+      pushBodyPrefix: "Trip starts tomorrow",
+      emailTitle: "Trip Reminder: Starts Tomorrow",
+    };
+  }
+
+  return {
+    timelineText: `in ${daysBeforeStart} days`,
+    pushTitle: `Trip Starting in ${daysBeforeStart} Days`,
+    pushBodyPrefix: `Trip starts in ${daysBeforeStart} days`,
+    emailTitle: `Trip Reminder: Starts in ${daysBeforeStart} Days`,
+  };
 }
 
 serve(async (req: Request) => {
@@ -209,18 +241,20 @@ serve(async (req: Request) => {
     const creatorName = creatorProfile?.full_name?.split(" ")[0] || "Traveler";
     const tripIdentifier = trip.slug || trip.id;
     const tripUrl = `${SITE_ORIGIN}/trip/${tripIdentifier}`;
+    const daysBeforeStart = getReminderOffsetDays(body.reminderType);
+    const reminderCopy = buildReminderCopy(daysBeforeStart);
     
     // Format the start date nicely
     const startDate = trip.start_date ? new Date(trip.start_date) : null;
     const dateStr = startDate ? startDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : 'TBA';
     
-    const subject = `Get ready! Your trip to ${trip.destination} starts ${dateStr} 🚀`;
+    const subject = `Get ready! Your trip to ${trip.destination} starts ${reminderCopy.timelineText} (${dateStr}) 🚀`;
     const greet = `Hi <strong>${escapeHtml(creatorName)}</strong>,<br><br>`;
-    const messageHtml = `${greet}Your trip to <strong>${escapeHtml(trip.destination || "Adventure Land")}</strong> is coming up on <strong>${dateStr}</strong>.<br><br>Make sure everything is ready and review the trip details below!`;
+    const messageHtml = `${greet}Your trip to <strong>${escapeHtml(trip.destination || "Adventure Land")}</strong> starts <strong>${escapeHtml(reminderCopy.timelineText)}</strong> on <strong>${dateStr}</strong>.<br><br>Make sure everything is ready and review the trip details below!`;
 
     const html = buildHtmlEmail({
       brand: "Ketravelan",
-      title: "Trip Reminder 📅",
+      title: `${reminderCopy.emailTitle} 📅`,
       messageHtml,
       ctaUrl: tripUrl,
       logoUrl: "https://ketravelan.com/ketravelan_logo.png",
@@ -231,7 +265,7 @@ serve(async (req: Request) => {
       "",
       `Hi ${creatorName},`,
       "",
-      `Your trip to ${trip.destination} is coming up on ${dateStr}.`,
+      `Your trip to ${trip.destination} starts ${reminderCopy.timelineText} (${dateStr}).`,
       "",
       "Make sure everything is ready and review the trip details.",
       "",
@@ -258,19 +292,47 @@ serve(async (req: Request) => {
 
     if (membersErr) throw membersErr;
 
-    const memberUserIds = (tripMembers || []).map(m => m.user_id);
+    const memberUserIds = (tripMembers || []).map((m: { user_id: string }) => m.user_id);
 
     if (memberUserIds.length > 0) {
-      await sendSystemPush({
-        userIds: memberUserIds,
-        type: "trip_starting_soon",
-        title: "Trip Starting Tomorrow",
-        body: `Trip starts tomorrow 🌄 Get ready for ${trip.title}`,
-        actionUrl: `/trip/${trip.slug || trip.id}`,
-        priority: "high",
+      const reminderMessage = `${reminderCopy.pushBodyPrefix} 🌄 Get ready for ${trip.title}`;
+
+      // Always write reminder rows to in-app notification sheet, even when push delivery is disabled.
+      const notificationsToInsert = memberUserIds.map((userId: string) => ({
+        user_id: userId,
+        type: "trip_reminder",
+        title: reminderCopy.pushTitle,
+        message: reminderMessage,
+        action_url: `${SITE_ORIGIN}/trip/${trip.slug || trip.id}`,
         metadata: {
           trip_id: trip.id,
           destination: trip.destination,
+          reminder_type: body.reminderType || "1_day",
+          days_before_start: daysBeforeStart,
+        },
+      }));
+
+      const { error: notificationInsertError } = await admin
+        .from("notifications")
+        .insert(notificationsToInsert);
+
+      if (notificationInsertError) {
+        console.warn("Failed to insert trip reminder notifications", notificationInsertError);
+      }
+
+      await sendSystemPush({
+        userIds: memberUserIds,
+        type: "trip_starting_soon",
+        title: reminderCopy.pushTitle,
+        body: reminderMessage,
+        actionUrl: `/trip/${trip.slug || trip.id}`,
+        priority: "high",
+        skipInsert: true,
+        metadata: {
+          trip_id: trip.id,
+          destination: trip.destination,
+          reminder_type: body.reminderType || "1_day",
+          days_before_start: daysBeforeStart,
         },
       });
     }

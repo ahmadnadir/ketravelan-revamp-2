@@ -11,14 +11,14 @@ interface MessageAttachmentsProps {
 
 // WhatsApp-like attachment rendering inside a bubble
 export function MessageAttachments({ attachments, isOwn }: MessageAttachmentsProps) {
+  const [imageModalOpen, setImageModalOpen] = useState(false);
+  const [imageIndex, setImageIndex] = useState(0);
+
   if (!Array.isArray(attachments) || attachments.length === 0) return null;
 
   const images = attachments.filter((a) => a.type === "image");
   const documents = attachments.filter((a) => a.type === "document");
   const locations = attachments.filter((a) => a.type === "location");
-
-  const [imageModalOpen, setImageModalOpen] = useState(false);
-  const [imageIndex, setImageIndex] = useState(0);
 
   const formatBytes = (bytes?: number): string => {
     const b = Number(bytes || 0);
@@ -50,6 +50,8 @@ export function MessageAttachments({ attachments, isOwn }: MessageAttachmentsPro
               src={images[0].url}
               alt={images[0].name || "Image"}
               className="rounded-xl w-full max-h-[420px] object-cover"
+              loading="lazy"
+              decoding="async"
             />
           </button>
         ) : (
@@ -76,6 +78,8 @@ export function MessageAttachments({ attachments, isOwn }: MessageAttachmentsPro
                   src={att.url}
                   alt={att.name || "Image"}
                   className="rounded-lg w-full h-44 sm:h-48 object-cover"
+                  loading="lazy"
+                  decoding="async"
                 />
               </button>
             ))}
@@ -183,6 +187,7 @@ export function MessageAttachments({ attachments, isOwn }: MessageAttachmentsPro
                 src={images[imageIndex]?.url}
                 alt={images[imageIndex]?.name || "Image"}
                 className="max-w-full max-h-full object-contain"
+                decoding="async"
               />
               <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-white text-xs bg-black/50 px-3 py-1 rounded-full">
                 {imageIndex + 1} / {images.length}

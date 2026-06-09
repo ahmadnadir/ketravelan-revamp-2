@@ -16,22 +16,21 @@ import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
 import { useConversations } from "@/hooks/useConversations";
-import { deleteDirectConversation } from "@/lib/conversations";
+import { deleteDirectConversation, profileCache } from "@/lib/conversations";
 import { getLoadErrorFeedback } from "@/lib/requestErrors";
 import { markConversationReadOptimistically } from "@/lib/chatReadService";
 import { getBlockedUsers } from "@/lib/blockUser";
 
 // Helper to generate fallback avatar
 const getDefaultAvatar = (userId: string) => {
-  const timestamp = Date.now();
-  return `https://api.dicebear.com/7.x/notionists/svg?seed=${userId}&t=${timestamp}`;
+  return `https://api.dicebear.com/7.x/notionists/svg?seed=${userId}`;
 };
 
 // Helper to map conversation data to UI
 function mapConversationToChatItem(participant: any, currentUserId?: string) {
   const conv = participant.conversation;
   const lastMsg = participant.lastMessage;
-  const isTrip = conv.conversation_type === "trip_group";
+  const isTrip = Boolean(conv.trip_id || conv.trip?.id);
   const conversationId = conv.id;
 
   let name = "Direct Chat";
@@ -41,7 +40,7 @@ function mapConversationToChatItem(participant: any, currentUserId?: string) {
   
   if (isTrip) {
     name = conv.trip?.title || conv.name || "Trip Group";
-    imageUrl = conv.trip?.cover_image;
+    imageUrl = conv.trip?.cover_image || "/default-trip-photo.jpeg";
     id = conv.trip_id; // Use trip ID for trip chats - this is needed for TripHub routing
   } else {
     // Direct chat: show the other user's name, fallback to 'Unknown'
@@ -102,11 +101,20 @@ export default function Chat() {
   // Persist search in URL so it survives navigation away and back
   const searchQuery = searchParams.get("q") ?? "";
   const setSearchQuery = (val: string) =>
-    setSearchParams((prev) => { const p = new URLSearchParams(prev); val ? p.set("q", val) : p.delete("q"); return p; }, { replace: true });
+    setSearchParams((prev) => {
+      const p = new URLSearchParams(prev);
+      if (val) {
+        p.set("q", val);
+      } else {
+        p.delete("q");
+      }
+      return p;
+    }, { replace: true });
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; type: "trip" | "direct"; name: string } | null>(null);
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const deletedTripNotifiedConversationsRef = useRef<Set<string>>(new Set());
+  const lastBlockedRefreshAtRef = useRef(0);
   const [blockedUserIds, setBlockedUserIds] = useState<Set<string>>(new Set());
 
   // Fetch conversations with React Query
@@ -127,6 +135,9 @@ export default function Chat() {
     }
 
     const loadBlockedUsers = async () => {
+      const now = Date.now();
+      if (now - lastBlockedRefreshAtRef.current < 2 * 60 * 1000) return;
+      lastBlockedRefreshAtRef.current = now;
       const ids = await getBlockedUsers();
       if (mounted) {
         setBlockedUserIds(new Set(ids));
@@ -151,15 +162,15 @@ export default function Chat() {
       console.warn('Participants is not an array:', participants);
       return [];
     }
-    return participants
+    const mapped = participants
       .filter((p: any) => {
         const conv = p?.conversation;
         if (!conv) return false;
         // Safety guard: hide orphaned trip chats when trip was deleted.
-        if (conv.conversation_type === 'trip_group' && !conv.trip) return false;
+        if ((conv.trip_id || conv.trip?.id) && !conv.trip) return false;
 
         // Hide direct conversations for users I have blocked.
-        if (conv.conversation_type === 'direct' && user?.id) {
+        if (!conv.trip_id && user?.id) {
           const otherUserId = conv.user1?.id === user.id ? conv.user2?.id : conv.user1?.id;
           if (otherUserId && blockedUserIds.has(otherUserId)) return false;
         }
@@ -167,14 +178,45 @@ export default function Chat() {
         return true;
       })
       .map((p: any) => mapConversationToChatItem(p, user?.id));
+
+    // Recovery/migration safety: collapse duplicate trip-group conversations for same trip.
+    const deduped = new Map<string, (typeof mapped)[number]>();
+    for (const chat of mapped) {
+      const key = chat.type === 'trip' ? `trip:${chat.id}` : `direct:${chat.conversationId}`;
+      const existing = deduped.get(key);
+      if (!existing) {
+        deduped.set(key, chat);
+        continue;
+      }
+
+      const existingTime = existing.lastMessageCreatedAt ? new Date(existing.lastMessageCreatedAt).getTime() : 0;
+      const nextTime = chat.lastMessageCreatedAt ? new Date(chat.lastMessageCreatedAt).getTime() : 0;
+      if (nextTime > existingTime) {
+        deduped.set(key, chat);
+      }
+    }
+
+    return Array.from(deduped.values());
   }, [participants, user?.id, blockedUserIds]);
+
+  const realtimeConversationIds = useMemo(() => {
+    if (!Array.isArray(participants)) return [] as string[];
+    return participants
+      .map((p: any) => p?.conversation?.id)
+      .filter((id: string | undefined): id is string => Boolean(id));
+  }, [participants]);
+
+  const realtimeConversationIdsKey = useMemo(
+    () => [...new Set(realtimeConversationIds)].sort().join(','),
+    [realtimeConversationIds],
+  );
 
   useEffect(() => {
     if (!participants || !Array.isArray(participants)) return;
 
     const deletedTripParticipants = participants.filter((p: any) => {
       const conv = p?.conversation;
-      return conv && conv.conversation_type === "trip_group" && !conv.trip;
+      return conv && (conv.trip_id || conv.trip?.id) && !conv.trip;
     });
 
     deletedTripParticipants.forEach((p: any) => {
@@ -188,88 +230,72 @@ export default function Chat() {
     });
   }, [participants]);
 
-  // Subscribe to new messages for real-time updates with optimistic UI updates
+  // Subscribe only to active chat-list conversations to reduce websocket traffic.
   useEffect(() => {
-    if (!user) return;
+    if (!user?.id || realtimeConversationIds.length === 0) return;
 
     const channel = supabase
-      .channel('chat-list')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, async (payload) => {
-        // OPTIMISTIC: Update the chat list immediately with the new message
-        // instead of waiting for a full refetch. This makes the UI feel instant (like WhatsApp).
-        const newMsg = payload.new as any;
-        
-        // Try to fetch sender profile if not available
-        let senderProfile = null;
-        if (newMsg.sender_id) {
-          try {
-            const { data } = await supabase
-              .from('profiles')
-              .select('id, full_name, username, avatar_url')
-              .eq('id', newMsg.sender_id)
-              .maybeSingle();
-            senderProfile = data;
-          } catch (err) {
-            console.warn('[chat-list] Failed to fetch sender profile:', err);
-          }
-        }
-        
-        queryClient.setQueryData(['conversations', user.id], (oldData: any[] | undefined) => {
-          if (!Array.isArray(oldData)) {
-            // If data not in cache, invalidate to refetch
-            setTimeout(() => {
-              queryClient.invalidateQueries({ queryKey: ['conversations', user.id] });
-            }, 100);
-            return oldData;
-          }
+      .channel(`chat-list:${user.id}`);
 
-          // Find the conversation this message belongs to and update it
-          const updated = oldData
-            .map((participant: any) => {
-              if (participant?.conversation?.id !== newMsg.conversation_id) return participant;
+    [...new Set(realtimeConversationIds)].forEach((conversationId) => {
+      channel.on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        (payload) => {
+          const newMsg = payload.new as any;
+          const senderProfile = profileCache.get(newMsg.sender_id) || null;
 
-              // Update last message with sender profile if available
-              return {
-                ...participant,
-                lastMessage: {
-                  id: newMsg.id,
-                  sender_id: newMsg.sender_id,
-                  content: newMsg.content,
-                  attachments: newMsg.attachments,
-                  created_at: newMsg.created_at,
-                  type: newMsg.type,
-                  sender: senderProfile || participant.lastMessage?.sender || { id: newMsg.sender_id },
-                },
-              };
-            })
-            .sort((a: any, b: any) => {
-              // Re-sort: conversations with latest messages float to top
-              const aTime = a.lastMessage?.created_at
-                ? new Date(a.lastMessage.created_at).getTime()
-                : new Date(a.created_at ?? 0).getTime();
-              const bTime = b.lastMessage?.created_at
-                ? new Date(b.lastMessage.created_at).getTime()
-                : new Date(b.created_at ?? 0).getTime();
-              return bTime - aTime;
-            });
-          
-          return updated;
-        });
-        
-        // After optimistic update, refetch full data after 300ms to ensure everything is synced
-        // This handles edge cases where the optimistic update was incomplete
-        setTimeout(() => {
-          queryClient.refetchQueries({ 
-            queryKey: ['conversations', user.id],
+          queryClient.setQueryData(['conversations', user.id], (oldData: any[] | undefined) => {
+            if (!Array.isArray(oldData)) return oldData;
+
+            const updated = oldData
+              .map((participant: any) => {
+                if (participant?.conversation?.id !== newMsg.conversation_id) return participant;
+
+                const unreadIncrement = newMsg.sender_id && newMsg.sender_id !== user.id ? 1 : 0;
+
+                return {
+                  ...participant,
+                  lastMessage: {
+                    id: newMsg.id,
+                    sender_id: newMsg.sender_id,
+                    content: newMsg.content,
+                    attachments: Array.isArray(newMsg.attachments) ? newMsg.attachments : [],
+                    created_at: newMsg.created_at,
+                    type: newMsg.type,
+                    sender: senderProfile || participant.lastMessage?.sender || { id: newMsg.sender_id },
+                  },
+                  unreadCount: Math.max(0, Number(participant.unreadCount || 0) + unreadIncrement),
+                };
+              })
+              .sort((a: any, b: any) => {
+                const aTime = a.lastMessage?.created_at
+                  ? new Date(a.lastMessage.created_at).getTime()
+                  : new Date(a.created_at ?? 0).getTime();
+                const bTime = b.lastMessage?.created_at
+                  ? new Date(b.lastMessage.created_at).getTime()
+                  : new Date(b.created_at ?? 0).getTime();
+                return bTime - aTime;
+              });
+
+            return updated;
           });
-        }, 300);
-      })
+        },
+      );
+    });
+
+    channel
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [user, queryClient]);
+  }, [user?.id, queryClient, realtimeConversationIds, realtimeConversationIdsKey]);
 
   const filteredChats = useMemo(() => {
     return chats.filter((chat) => {
@@ -292,7 +318,7 @@ export default function Chat() {
   }, [chatFilter, searchParams, setSearchParams]);
 
 
-  const handleDeleteChat = useCallback(async (chat: { id: string; type: "trip" | "direct" }) => {
+  const handleDeleteChat = useCallback(async (chat: { id: string; type: "trip" | "direct"; name?: string }) => {
     if (chat.type !== "direct") {
       toast.error("Trip chats can't be deleted");
       return;
@@ -309,7 +335,8 @@ export default function Chat() {
     try {
       await deleteDirectConversation(chat.id);
       await queryClient.invalidateQueries({ queryKey });
-      toast.success("Chat deleted");
+      const targetName = chat.name?.trim() || "this person";
+      toast.success(`Chat with ${targetName} has been deleted.`);
     } catch (err) {
       console.error("Failed to delete chat:", err);
       queryClient.setQueryData(queryKey, previous);
@@ -378,7 +405,7 @@ export default function Chat() {
           <div className="space-y-2">
             {filteredChats.map((chat) => (
               <SwipeableChatItem
-                key={chat.id}
+                key={chat.conversationId}
                 onDelete={() => requestDeleteChat(chat)}
                 onMarkAsRead={() => handleMarkAsRead(chat.conversationId)}
                 hasUnread={chat.unread > 0}
