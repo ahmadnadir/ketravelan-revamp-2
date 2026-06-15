@@ -153,19 +153,36 @@ export default function CreateTrip() {
 
       const parsedStops = tripData.stops ? JSON.parse(tripData.stops) : [];
       // Load travelStyles and expectations from separate fields
-      const travelStyleTags = tripData.travel_styles || [];
-      const expectationTags = tripData.tags || [];
+      const travelStyleTags = Array.isArray(tripData.travel_styles) ? tripData.travel_styles : [];
+      const expectationTags = Array.isArray(tripData.tags) ? tripData.tags : [];
 
-      const budgetCategories = tripData.budget_breakdown?.categories || [];
-      const roughTotal = tripData.budget_breakdown?.total || 0;
+      // budget_breakdown may be null, an array, or an object with various shapes
+      const budgetBreakdownRaw = tripData.budget_breakdown ?? {};
+      const budgetCategories = Array.isArray(budgetBreakdownRaw?.categories)
+        ? budgetBreakdownRaw.categories
+        : [];
+      const roughTotal = typeof budgetBreakdownRaw?.total === 'number' ? budgetBreakdownRaw.total : 0;
+      // For detailed budget: extract only plain numeric key→value pairs (skip meta keys like 'categories'/'total')
+      const detailedBudgetResolved = (() => {
+        if (tripData.budget_mode !== 'detailed') return {};
+        if (!budgetBreakdownRaw || typeof budgetBreakdownRaw !== 'object' || Array.isArray(budgetBreakdownRaw)) return {};
+        const result: Record<string, number> = {};
+        for (const [key, val] of Object.entries(budgetBreakdownRaw)) {
+          if (key === 'categories' || key === 'total') continue;
+          if (typeof val === 'number') result[key] = val;
+        }
+        return result;
+      })();
 
-      const itineraryData = tripData.itinerary || [];
-      const simpleNotes = itineraryData[0]?.notes || '';
+      const itineraryData = Array.isArray(tripData.itinerary) ? tripData.itinerary : [];
+      const simpleNotes = typeof itineraryData[0]?.notes === 'string' ? itineraryData[0].notes : '';
       const dayByDayPlan = tripData.itinerary_type === 'dayByDay'
-        ? itineraryData.map((item: any) => ({
-            day: item.day,
-            activities: item.activities || []
-          }))
+        ? itineraryData
+            .filter((item: any) => item && typeof item.day === 'number')
+            .map((item: any) => ({
+              day: item.day,
+              activities: Array.isArray(item.activities) ? item.activities : [],
+            }))
         : [];
 
       const editDraft: TripDraft = {
@@ -185,7 +202,7 @@ export default function CreateTrip() {
         budgetType: tripData.budget_mode || 'skip',
         roughBudgetTotal: roughTotal,
         roughBudgetCategories: budgetCategories,
-        detailedBudget: tripData.budget_mode === 'detailed' ? tripData.budget_breakdown : {},
+        detailedBudget: detailedBudgetResolved,
         itineraryType: tripData.itinerary_type || 'skip',
         simpleNotes: simpleNotes,
         dayByDayPlan: dayByDayPlan,

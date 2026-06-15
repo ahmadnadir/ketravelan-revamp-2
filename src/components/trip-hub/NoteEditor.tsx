@@ -43,10 +43,13 @@ export function NoteEditor({
   const [content, setContent] = useState("");
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [showLinkDialog, setShowLinkDialog] = useState(false);
+  const [pendingLinkUrl, setPendingLinkUrl] = useState<string | null>(null);
   
-  const saveTimeoutRef = useRef<NodeJS.Timeout>();
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const titleRef = useRef<HTMLInputElement>(null);
   const contentRef = useRef<HTMLTextAreaElement>(null);
+  const contentMirrorRef = useRef<HTMLDivElement>(null);
   const isInitialMount = useRef(true);
   const lastSavedContent = useRef({ title: "", content: "" });
 
@@ -204,6 +207,88 @@ export function NoteEditor({
     onClose();
   };
 
+  const linkPattern = /(https?:\/\/[^\s]+|(?:www\.)[^\s]+)/gi;
+
+  const normalizeExternalUrl = (rawUrl: string): string | null => {
+    const trimmed = rawUrl.trim();
+    if (!trimmed) return null;
+
+    const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+    try {
+      const parsed = new URL(withProtocol);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+      return parsed.toString();
+    } catch {
+      return null;
+    }
+  };
+
+  const requestOpenLink = (rawUrl: string) => {
+    const normalized = normalizeExternalUrl(rawUrl);
+    if (!normalized) return;
+    setPendingLinkUrl(normalized);
+    setShowLinkDialog(true);
+  };
+
+  const confirmOpenLink = () => {
+    if (!pendingLinkUrl) return;
+    window.open(pendingLinkUrl, "_blank", "noopener,noreferrer");
+    setShowLinkDialog(false);
+    setPendingLinkUrl(null);
+  };
+
+  const cancelOpenLink = () => {
+    setShowLinkDialog(false);
+    setPendingLinkUrl(null);
+  };
+
+  const renderLinkifiedLine = (line: string, lineIndex: number) => {
+    const parts = line.split(linkPattern);
+    return parts.map((part, partIndex) => {
+      const isLink = linkPattern.test(part);
+      linkPattern.lastIndex = 0;
+
+      if (!isLink) {
+        return <span key={`text-${lineIndex}-${partIndex}`}>{part}</span>;
+      }
+
+      return (
+        <button
+          key={`link-${lineIndex}-${partIndex}`}
+          type="button"
+          onPointerDown={(e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            requestOpenLink(part);
+          }}
+          className="pointer-events-auto relative z-30 cursor-pointer text-sky-600 underline underline-offset-2 hover:text-sky-700"
+        >
+          {part}
+        </button>
+      );
+    });
+  };
+
+  const getLinkAtCursor = (text: string, cursorPos: number): string | null => {
+    const isBoundary = (char: string) => /\s/.test(char);
+    let start = cursorPos;
+    let end = cursorPos;
+
+    while (start > 0 && !isBoundary(text[start - 1])) start--;
+    while (end < text.length && !isBoundary(text[end])) end++;
+
+    const candidate = text.slice(start, end);
+    if (!candidate) return null;
+    const singleTokenLinkPattern = /^(https?:\/\/[^\s]+|(?:www\.)[^\s]+)$/i;
+    return singleTokenLinkPattern.test(candidate) ? candidate : null;
+  };
+
+  const handleContentScroll = () => {
+    if (!contentRef.current || !contentMirrorRef.current) return;
+    contentMirrorRef.current.scrollTop = contentRef.current.scrollTop;
+    contentMirrorRef.current.scrollLeft = contentRef.current.scrollLeft;
+  };
+
   // Handle title Enter key - move focus to body
   const handleTitleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
@@ -249,15 +334,21 @@ export function NoteEditor({
     const line = value.slice(lineStart, lineEnd);
 
     const match = line.match(/^(\s*)(?:☐|☑)/);
-    if (!match) return;
+    if (match) {
+      const tokenStart = lineStart + match[1].length;
+      const tokenLen = 1;
+      const tokenEnd = tokenStart + tokenLen;
 
-    const tokenStart = lineStart + match[1].length;
-    const tokenLen = 1;
-    const tokenEnd = tokenStart + tokenLen;
+      if (pos >= tokenStart && pos <= tokenEnd) {
+        const lineIndex = value.slice(0, lineStart).split("\n").length - 1;
+        toggleCheckbox(lineIndex, pos);
+        return;
+      }
+    }
 
-    if (pos >= tokenStart && pos <= tokenEnd) {
-      const lineIndex = value.slice(0, lineStart).split("\n").length - 1;
-      toggleCheckbox(lineIndex, pos);
+    const maybeLink = getLinkAtCursor(value, pos);
+    if (maybeLink) {
+      requestOpenLink(maybeLink);
     }
   };
 
@@ -479,15 +570,35 @@ export function NoteEditor({
                 className="w-full text-2xl sm:text-3xl font-semibold bg-transparent border-none outline-none placeholder:text-muted-foreground/50"
               />
 
-              <textarea
-                ref={contentRef}
-                value={content}
-                onChange={handleContentChange}
-                onClick={handleContentClick}
-                onKeyDown={handleContentKeyDown}
-                placeholder="Start typing..."
-                className="w-full min-h-[50vh] text-base sm:text-lg bg-transparent border-none outline-none resize-none placeholder:text-muted-foreground/50 leading-relaxed"
-              />
+              <div className="relative min-h-[50vh]">
+                {content.length > 0 && (
+                  <div
+                    ref={contentMirrorRef}
+                    aria-hidden="true"
+                    className="pointer-events-none absolute inset-0 z-20 overflow-hidden whitespace-pre-wrap break-words text-base sm:text-lg leading-relaxed text-foreground"
+                  >
+                    {content.split("\n").map((line, lineIndex) => (
+                      <div key={`line-${lineIndex}`}>
+                        {renderLinkifiedLine(line, lineIndex)}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <textarea
+                  ref={contentRef}
+                  value={content}
+                  onChange={handleContentChange}
+                  onClick={handleContentClick}
+                  onKeyDown={handleContentKeyDown}
+                  onScroll={handleContentScroll}
+                  placeholder="Start typing..."
+                  className={cn(
+                    "relative z-10 w-full min-h-[50vh] border-none outline-none resize-none leading-relaxed bg-transparent text-base sm:text-lg placeholder:text-muted-foreground/50",
+                    content.length > 0 && "text-transparent caret-foreground selection:bg-primary/25"
+                  )}
+                />
+              </div>
             </div>
           </div>
         </DrawerContent>
@@ -510,6 +621,29 @@ export function NoteEditor({
             >
               Delete
             </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={showLinkDialog}
+        onOpenChange={(open) => {
+          if (!open) cancelOpenLink();
+          else setShowLinkDialog(true);
+        }}
+      >
+        <AlertDialogContent className="z-[300]">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Open External Link?</AlertDialogTitle>
+            <AlertDialogDescription>
+              You are about to open this link in your browser:
+              <br />
+              <span className="break-all text-foreground">{pendingLinkUrl}</span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={cancelOpenLink}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmOpenLink}>Open Link</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

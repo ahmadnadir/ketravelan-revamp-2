@@ -15,42 +15,6 @@ import { AuthProvider } from "./contexts/AuthContext";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { ExpenseProvider } from "./contexts/ExpenseContext";
 import { CommunityProvider } from "./contexts/CommunityContext";
-import Home from "./pages/Home";
-import Explore from "./pages/Explore";
-import MainPage from "./pages/MainPage";
-import TripDetails from "./pages/TripDetails";
-import TripHub from "./pages/TripHub";
-import CreateTrip from "./pages/CreateTrip";
-import MyTrips from "./pages/MyTrips";
-import Chat from "./pages/Chat";
-import Expenses from "./pages/Expenses";
-import DirectChat from "./pages/DirectChat";
-import Profile from "./pages/Profile";
-import EditProfile from "./pages/EditProfile";
-import Install from "./pages/Install";
-import NotFound from "./pages/NotFound";
-import UserProfileView from "./pages/UserProfileView";
-import Favourites from "./pages/Favourites";
-import Approvals from "./pages/Approvals";
-import MyStories from "./pages/MyStories";
-import Auth from "./pages/Auth";
-import AuthCallback from "./pages/AuthCallback";
-import ForgotPassword from "./pages/ForgotPassword";
-import ResetPassword from "./pages/ResetPassword";
-import Community from "./pages/Community";
-import StoryDetail from "./pages/StoryDetail";
-import DiscussionDetail from "./pages/DiscussionDetail";
-import CreateStory from "./pages/CreateStory";
-import Feedback from "./pages/Feedback";
-import Settings from "./pages/Settings";
-import BlockedUsers from "./pages/BlockedUsers";
-import ModerationReports from "./pages/ModerationReports";
-import PrivacyPolicy from "./pages/PrivacyPolicy";
-import TermsOfService from "./pages/TermsOfService";
-import Contact from "./pages/Contact";
-import About from "./pages/About";
-import HelpCenter from "./pages/HelpCenter";
-import HelpArticleDetail from "./pages/HelpArticleDetail";
 import { classifyRequestError } from "@/lib/requestErrors";
 import { getPendingAuthIntent, normalizeOAuthErrorMessage, persistAuthError } from "@/lib/authFlow";
 
@@ -59,6 +23,51 @@ import { NetworkStatusProvider } from "./contexts/NetworkStatusContext";
 import { AppInitializer } from "./components/AppInitializer";
 import { TermsAcceptanceModal } from "./components/modals/TermsAcceptanceModal";
 import React, { Suspense, useEffect, useRef, useState } from "react";
+
+const routeFallback = (
+  <div className="min-h-[60vh] flex items-center justify-center px-4">
+    <div className="rounded-2xl border border-border/50 bg-card px-6 py-4 text-sm text-muted-foreground shadow-sm">
+      Loading...
+    </div>
+  </div>
+);
+
+const Home = React.lazy(() => import("./pages/Home"));
+const Explore = React.lazy(() => import("./pages/Explore"));
+const MainPage = React.lazy(() => import("./pages/MainPage"));
+const TripDetails = React.lazy(() => import("./pages/TripDetails"));
+const TripHub = React.lazy(() => import("./pages/TripHub"));
+const CreateTrip = React.lazy(() => import("./pages/CreateTrip"));
+const MyTrips = React.lazy(() => import("./pages/MyTrips"));
+const Chat = React.lazy(() => import("./pages/Chat"));
+const Expenses = React.lazy(() => import("./pages/Expenses"));
+const DirectChat = React.lazy(() => import("./pages/DirectChat"));
+const Profile = React.lazy(() => import("./pages/Profile"));
+const EditProfile = React.lazy(() => import("./pages/EditProfile"));
+const Install = React.lazy(() => import("./pages/Install"));
+const NotFound = React.lazy(() => import("./pages/NotFound"));
+const UserProfileView = React.lazy(() => import("./pages/UserProfileView"));
+const Favourites = React.lazy(() => import("./pages/Favourites"));
+const Approvals = React.lazy(() => import("./pages/Approvals"));
+const MyStories = React.lazy(() => import("./pages/MyStories"));
+const Auth = React.lazy(() => import("./pages/Auth"));
+const AuthCallback = React.lazy(() => import("./pages/AuthCallback"));
+const ForgotPassword = React.lazy(() => import("./pages/ForgotPassword"));
+const ResetPassword = React.lazy(() => import("./pages/ResetPassword"));
+const Community = React.lazy(() => import("./pages/Community"));
+const StoryDetail = React.lazy(() => import("./pages/StoryDetail"));
+const DiscussionDetail = React.lazy(() => import("./pages/DiscussionDetail"));
+const CreateStory = React.lazy(() => import("./pages/CreateStory"));
+const Feedback = React.lazy(() => import("./pages/Feedback"));
+const Settings = React.lazy(() => import("./pages/Settings"));
+const BlockedUsers = React.lazy(() => import("./pages/BlockedUsers"));
+const ModerationReports = React.lazy(() => import("./pages/ModerationReports"));
+const PrivacyPolicy = React.lazy(() => import("./pages/PrivacyPolicy"));
+const TermsOfService = React.lazy(() => import("./pages/TermsOfService"));
+const Contact = React.lazy(() => import("./pages/Contact"));
+const About = React.lazy(() => import("./pages/About"));
+const HelpCenter = React.lazy(() => import("./pages/HelpCenter"));
+const HelpArticleDetail = React.lazy(() => import("./pages/HelpArticleDetail"));
 
 const VerificationPending = React.lazy(() => import("./pages/VerificationPending"));
 const Onboarding = React.lazy(() => import("./pages/Onboarding"));
@@ -467,7 +476,7 @@ const App = () => (
             <ScrollToTop />
           <AuthDeepLinkHandler />
             <RecoveryBootstrap />
-          <Suspense fallback={null}>
+          <Suspense fallback={routeFallback}>
             <Routes>
               <Route path="/" element={<MainPage />} />
               <Route path="/explore" element={<Explore />} />

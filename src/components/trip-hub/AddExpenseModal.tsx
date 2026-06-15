@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { X, Upload, Receipt, Users, UserCheck, Pencil, Info, Calendar as CalendarIcon } from "lucide-react";
 import { expenseCategories } from "@/lib/expenseCategories";
 import { 
@@ -77,7 +77,7 @@ const getOrdinalSuffix = (day: number): string => {
   }
 };
 
-const formatDateForStorage = (dateInput: string): string => {
+const formatDateForDisplay = (dateInput: string): string => {
   if (!dateInput) {
     const now = new Date();
     const month = now.toLocaleDateString("en-US", { month: "long" });
@@ -90,6 +90,11 @@ const formatDateForStorage = (dateInput: string): string => {
   const monthLabel = parsed.toLocaleDateString("en-US", { month: "long" });
   const dayNumber = parsed.getDate();
   return `${monthLabel} ${dayNumber}${getOrdinalSuffix(dayNumber)}, ${parsed.getFullYear()}`;
+};
+
+const formatDateForPayload = (dateInput: string): string => {
+  if (!dateInput) return getTodayDateInput();
+  return /^\d{4}-\d{2}-\d{2}$/.test(dateInput) ? dateInput : getTodayDateInput();
 };
 
 const sanitizeAmountInput = (value: string): string => {
@@ -186,11 +191,17 @@ export function AddExpenseModal({
   const homeCurrency: CurrencyCode = (user && 'homeCurrency' in user && (user as any).homeCurrency) ? (user as any).homeCurrency : "MYR";
   
   // Build available currencies: home currency + allowed travel currencies
-  const homeCurrencyInfo = { code: homeCurrency, symbol: homeCurrency === "MYR" ? "RM" : homeCurrency, name: "Home Currency" };
-  const filteredTravelCurrencies = Array.isArray(allowedCurrencies)
-    ? travelCurrencies.filter(c => allowedCurrencies.includes(c.code))
-    : travelCurrencies;
-  const availableCurrencies = [homeCurrencyInfo, ...filteredTravelCurrencies.filter(c => c.code !== homeCurrency)];
+  const availableCurrencies = useMemo(() => {
+    const homeCurrencyInfo = {
+      code: homeCurrency,
+      symbol: homeCurrency === "MYR" ? "RM" : homeCurrency,
+      name: "Home Currency",
+    };
+    const filteredTravelCurrencies = Array.isArray(allowedCurrencies)
+      ? travelCurrencies.filter(c => allowedCurrencies.includes(c.code))
+      : travelCurrencies;
+    return [homeCurrencyInfo, ...filteredTravelCurrencies.filter(c => c.code !== homeCurrency)];
+  }, [allowedCurrencies, homeCurrency]);
   
   // Helper: find member ID by name
   const getMemberIdByName = useCallback((name: string) => {
@@ -202,7 +213,7 @@ export function AddExpenseModal({
     return members.find((m) => m.id === id)?.name || "Unknown";
   }, [members]);
 
-  const getLastUsedCurrency = (): CurrencyCode => {
+  const getLastUsedCurrency = useCallback((): CurrencyCode => {
     try {
       const saved = localStorage.getItem("lastUsedExpenseCurrency");
       if (saved && availableCurrencies.some(c => c.code === saved)) {
@@ -212,7 +223,7 @@ export function AddExpenseModal({
       console.error("Error reading localStorage:", e);
     }
     return homeCurrency;
-  };
+  }, [availableCurrencies, homeCurrency]);
 
   const [title, setTitle] = useState("");
   const [amount, setAmount] = useState("");
@@ -392,7 +403,7 @@ export function AddExpenseModal({
       receiptFile: receiptFile || undefined,
       // Preserve existing receipt URL when editing and no new file uploaded
       existingReceiptUrl: (isEditMode && !receiptFile && receiptPreview) ? receiptPreview : undefined,
-      date: formatDateForStorage(expenseDate),
+      date: formatDateForPayload(expenseDate),
       // Multi-currency fields
       originalCurrency: currency,
       fxRateToHome: conversion.available ? conversion.rate : undefined,
@@ -585,7 +596,7 @@ export function AddExpenseModal({
                     variant="outline"
                     className="h-12 w-full rounded-xl justify-between font-normal"
                   >
-                    <span>{formatDateForStorage(expenseDate)}</span>
+                    <span>{formatDateForDisplay(expenseDate)}</span>
                     <CalendarIcon className="h-4 w-4 text-muted-foreground" />
                   </Button>
                 </PopoverTrigger>
