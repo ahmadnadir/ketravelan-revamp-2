@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { CheckCircle, XCircle, Loader, AlertCircle, Home } from 'lucide-react';
 import { confirmPayment, handlePaymentFailure, handlePaymentCancellation } from '../../services/paymentService';
 import { confirmBookingAfterPayment } from '../../services/bookingService';
+import { buildGuidedPaymentGatewayPath, GUIDED_ROUTES } from '@/lib/guidedRoutes';
 
 type PaymentStatus = 'success' | 'failed' | 'cancelled';
 
@@ -87,13 +88,19 @@ export default function PaymentResult() {
       const pendingBooking = JSON.parse(pendingBookingStr);
       const urlParams = new URLSearchParams(window.location.search);
       const paymentIntentId = urlParams.get('payment_intent');
-      window.location.href = `/payment-gateway?payment_intent=${paymentIntentId}&booking_reference=${pendingBooking.bookingReference}`;
+      if (!paymentIntentId || !pendingBooking.bookingReference) {
+        return;
+      }
+      window.location.href = buildGuidedPaymentGatewayPath({
+        paymentIntentId,
+        bookingReference: pendingBooking.bookingReference,
+      });
     }
   };
 
   const handleGoHome = () => {
     localStorage.removeItem('pending_booking');
-    window.location.href = '/';
+    window.location.href = GUIDED_ROUTES.home;
   };
 
   if (processing) {

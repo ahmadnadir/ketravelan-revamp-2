@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { buildGuidedPaymentGatewayPath } from '@/lib/guidedRoutes';
 
 export interface InitiatePaymentInput {
   bookingId: string;
@@ -51,7 +52,10 @@ export async function initiatePayment(
       };
     }
 
-    const redirectUrl = `${window.location.origin}/payment-gateway?payment_intent=${paymentIntentId}&booking_reference=${input.bookingReference}`;
+    const redirectUrl = `${window.location.origin}${buildGuidedPaymentGatewayPath({
+      paymentIntentId,
+      bookingReference: input.bookingReference,
+    })}`;
 
     return {
       success: true,

@@ -17,46 +17,7 @@ import { ExpenseProvider } from "./contexts/ExpenseContext";
 import { CommunityProvider } from "./contexts/CommunityContext";
 import { classifyRequestError } from "@/lib/requestErrors";
 import { getPendingAuthIntent, normalizeOAuthErrorMessage, persistAuthError } from "@/lib/authFlow";
-
-import Home from "./pages/Home";
-import Explore from "./pages/Explore";
-import MainPage from "./pages/MainPage";
-import TripDetails from "./pages/TripDetails";
-import TripHub from "./pages/TripHub";
-import CreateTrip from "./pages/CreateTrip";
-import MyTrips from "./pages/MyTrips";
-import Chat from "./pages/Chat";
-import Expenses from "./pages/Expenses";
-import DirectChat from "./pages/DirectChat";
-import Profile from "./pages/Profile";
-import EditProfile from "./pages/EditProfile";
-import Install from "./pages/Install";
-import NotFound from "./pages/NotFound";
-import UserProfileView from "./pages/UserProfileView";
-import Favourites from "./pages/Favourites";
-import Approvals from "./pages/Approvals";
-import MyStories from "./pages/MyStories";
-import Auth from "./pages/Auth";
-import AuthCallback from "./pages/AuthCallback";
-import ForgotPassword from "./pages/ForgotPassword";
-import ResetPassword from "./pages/ResetPassword";
-import Community from "./pages/Community";
-import StoryDetail from "./pages/StoryDetail";
-import DiscussionDetail from "./pages/DiscussionDetail";
-import CreateStory from "./pages/CreateStory";
-import Feedback from "./pages/Feedback";
-import Settings from "./pages/Settings";
-import PrivacyPolicy from "./pages/PrivacyPolicy";
-import TermsOfService from "./pages/TermsOfService";
-import Contact from "./pages/Contact";
-import About from "./pages/About";
-import HelpCenter from "./pages/HelpCenter";
-import HelpArticleDetail from "./pages/HelpArticleDetail";
-import GuidedRevamp from "./pages/GuidedRevamp";
-import GuidedPaymentGateway from "./guided-revamp/components/Payment/PaymentGateway";
-import GuidedPaymentResult from "./guided-revamp/components/Payment/PaymentResult";
-
-import { PageTransition } from "./components/layout/PageTransition";
+import { GUIDED_ROUTES, isValidGuidedPaymentStatus } from "@/lib/guidedRoutes";
 import { OfflineBanner } from "./components/layout/OfflineBanner";
 import { NetworkStatusProvider } from "./contexts/NetworkStatusContext";
 import { AppInitializer } from "./components/AppInitializer";
@@ -107,6 +68,9 @@ const Contact = React.lazy(() => import("./pages/Contact"));
 const About = React.lazy(() => import("./pages/About"));
 const HelpCenter = React.lazy(() => import("./pages/HelpCenter"));
 const HelpArticleDetail = React.lazy(() => import("./pages/HelpArticleDetail"));
+const GuidedRevamp = React.lazy(() => import("./pages/GuidedRevamp"));
+const GuidedPaymentGateway = React.lazy(() => import("./guided-revamp/components/Payment/PaymentGateway"));
+const GuidedPaymentResult = React.lazy(() => import("./guided-revamp/components/Payment/PaymentResult"));
 
 const VerificationPending = React.lazy(() => import("./pages/VerificationPending"));
 const Onboarding = React.lazy(() => import("./pages/Onboarding"));
@@ -154,6 +118,34 @@ function TripChatRedirect() {
   const search = location.search || "";
   if (!id) return <Navigate to="/" replace />;
   return <Navigate to={`/trip/${id}/hub${search}`} replace />;
+}
+
+function GuidedRouteAliasRedirect({ to }: { to: string }) {
+  const location = useLocation();
+  return <Navigate to={`${to}${location.search}`} replace />;
+}
+
+function GuidedPaymentQueryGuard({
+  mode,
+  children,
+}: {
+  mode: "gateway" | "result";
+  children: React.ReactElement;
+}) {
+  const location = useLocation();
+  const query = new URLSearchParams(location.search);
+  const paymentIntentId = query.get("payment_intent");
+  const bookingReference = query.get("booking_reference");
+  const status = query.get("status");
+
+  const hasBaseParams = !!paymentIntentId && !!bookingReference;
+  const isResultValid = mode === "result" ? isValidGuidedPaymentStatus(status) : true;
+
+  if (!hasBaseParams || !isResultValid) {
+    return <Navigate to={GUIDED_ROUTES.home} replace />;
+  }
+
+  return children;
 }
 
 function AuthDeepLinkHandler() {
@@ -564,9 +556,31 @@ const App = () => (
               <Route path="/terms-of-service" element={<TermsOfService />} />
               <Route path="/contact" element={<Contact />} />
               <Route path="/about" element={<About />} />
-              <Route path="/guided-revamp" element={<ProtectedRoute><GuidedRevamp /></ProtectedRoute>} />
-              <Route path="/payment-gateway" element={<GuidedPaymentGateway />} />
-              <Route path="/payment-result" element={<GuidedPaymentResult />} />
+              <Route path={GUIDED_ROUTES.home} element={<ProtectedRoute><GuidedRevamp /></ProtectedRoute>} />
+              <Route
+                path={GUIDED_ROUTES.paymentGateway}
+                element={
+                  <GuidedPaymentQueryGuard mode="gateway">
+                    <GuidedPaymentGateway />
+                  </GuidedPaymentQueryGuard>
+                }
+              />
+              <Route
+                path={GUIDED_ROUTES.paymentResult}
+                element={
+                  <GuidedPaymentQueryGuard mode="result">
+                    <GuidedPaymentResult />
+                  </GuidedPaymentQueryGuard>
+                }
+              />
+              <Route
+                path={GUIDED_ROUTES.paymentGatewayScoped}
+                element={<GuidedRouteAliasRedirect to={GUIDED_ROUTES.paymentGateway} />}
+              />
+              <Route
+                path={GUIDED_ROUTES.paymentResultScoped}
+                element={<GuidedRouteAliasRedirect to={GUIDED_ROUTES.paymentResult} />}
+              />
               <Route path="/help-center" element={<HelpCenter />} />
               <Route path="/help-center/:slug" element={<HelpArticleDetail />} />
               <Route path="/install" element={<Install />} />

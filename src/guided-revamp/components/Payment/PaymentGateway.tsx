@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { CheckCircle, XCircle, Loader, CreditCard, AlertTriangle } from 'lucide-react';
 import { getPaymentRecord } from '../../services/paymentService';
 import { getBookingByReference } from '../../services/bookingService';
+import { buildGuidedPaymentResultPath } from '@/lib/guidedRoutes';
 
 export default function PaymentGateway() {
   const [loading, setLoading] = useState(true);
@@ -42,19 +43,32 @@ export default function PaymentGateway() {
     setProcessing(true);
     setTimeout(() => {
       const transactionRef = `txn_${Date.now()}`;
-      window.location.href = `/payment-result?status=success&payment_intent=${paymentIntentId}&transaction_reference=${transactionRef}&booking_reference=${bookingReference}`;
+      window.location.href = buildGuidedPaymentResultPath({
+        status: 'success',
+        paymentIntentId,
+        bookingReference,
+        transactionReference: transactionRef,
+      });
     }, 2000);
   };
 
   const handlePaymentFailure = () => {
     setProcessing(true);
     setTimeout(() => {
-      window.location.href = `/payment-result?status=failed&payment_intent=${paymentIntentId}&booking_reference=${bookingReference}`;
+      window.location.href = buildGuidedPaymentResultPath({
+        status: 'failed',
+        paymentIntentId,
+        bookingReference,
+      });
     }, 1500);
   };
 
   const handlePaymentCancel = () => {
-    window.location.href = `/payment-result?status=cancelled&payment_intent=${paymentIntentId}&booking_reference=${bookingReference}`;
+    window.location.href = buildGuidedPaymentResultPath({
+      status: 'cancelled',
+      paymentIntentId,
+      bookingReference,
+    });
   };
 
   if (loading) {
