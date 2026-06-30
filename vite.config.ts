@@ -58,9 +58,29 @@ export default defineConfig(({ mode }) => ({
         ],
       },
       workbox: {
-        globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
+        cleanupOutdatedCaches: true,
+        clientsClaim: true,
+        skipWaiting: true,
+        globPatterns: ["**/*.{js,css,ico,png,svg,woff2,jpg,jpeg,webmanifest}"],
         maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
         runtimeCaching: [
+          {
+            urlPattern: ({ request }) => request.mode === "navigate",
+            handler: "NetworkFirst",
+            options: {
+              cacheName: "app-shell",
+              networkTimeoutSeconds: 4,
+              expiration: {
+                maxEntries: 10,
+                maxAgeSeconds: 60 * 60 * 24,
+              },
+            },
+          },
+          {
+            // Keep API responses fresh and avoid stale DB content from SW cache.
+            urlPattern: /^https:\/\/sspvqhleqlycsiniywkg\.supabase\.co\/.*/i,
+            handler: "NetworkOnly",
+          },
           {
             urlPattern: /^https:\/\/images\.unsplash\.com\/.*/i,
             handler: "CacheFirst",

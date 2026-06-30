@@ -1,6 +1,7 @@
 import { createRoot } from "react-dom/client";
 import { HelmetProvider } from "react-helmet-async";
 import { Capacitor } from "@capacitor/core";
+import { registerSW } from "virtual:pwa-register";
 import App from "./App.tsx";
 import "./index.css";
 
@@ -19,6 +20,16 @@ if (typeof window !== "undefined" && window.location.hostname === "localhost" &&
       });
     });
   }
+}
+
+if (typeof window !== "undefined" && window.location.hostname !== "localhost") {
+  // Register SW in non-local environments and auto-activate fresh builds.
+  const updateSW = registerSW({
+    immediate: true,
+    onNeedRefresh() {
+      void updateSW(true);
+    },
+  });
 }
 
 // Aborted browser operations (for example canceled share dialogs) can surface
