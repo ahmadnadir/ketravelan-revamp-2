@@ -501,6 +501,7 @@ const App = () => (
               <Route path="/chat/new/:userId" element={<ProtectedRoute><DirectChat /></ProtectedRoute>} />
               <Route path="/community" element={<Community />} />
               <Route path="/community/stories/:slug" element={<StoryDetail />} />
+              <Route path="/share/story/:slug" element={<StoryDetail />} />
               <Route path="/community/discussions/:id" element={<DiscussionDetail />} />
               <Route path="/expenses" element={<ProtectedRoute><Expenses /></ProtectedRoute>} />
               <Route path="/chat/:id" element={<ProtectedRoute><DirectChat /></ProtectedRoute>} />

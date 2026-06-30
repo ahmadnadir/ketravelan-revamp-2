@@ -25,7 +25,7 @@ interface NoteEditorProps {
   open: boolean;
   onClose: () => void;
   onSave: (note: TripNoteDB) => Promise<void>;
-  onDelete: (id: string) => void;
+  onDelete: (id: string) => Promise<void>;
   tripId: string;
 }
 
@@ -201,10 +201,14 @@ export function NoteEditor({
     onClose();
   };
 
-  const handleDelete = () => {
-    onDelete(note.id);
-    setShowDeleteDialog(false);
-    onClose();
+  const handleDelete = async () => {
+    try {
+      await onDelete(note.id);
+      setShowDeleteDialog(false);
+      onClose();
+    } catch {
+      setShowDeleteDialog(false);
+    }
   };
 
   const linkPattern = /(https?:\/\/[^\s]+|(?:www\.)[^\s]+)/gi;
@@ -605,7 +609,7 @@ export function NoteEditor({
       </Drawer>
 
       <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-        <AlertDialogContent>
+        <AlertDialogContent className="z-[300]">
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Note</AlertDialogTitle>
             <AlertDialogDescription>

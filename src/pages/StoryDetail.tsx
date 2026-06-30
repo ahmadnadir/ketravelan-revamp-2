@@ -391,7 +391,8 @@ export default function StoryDetail() {
 
   const handleShare = async () => {
     if (!story) return;
-    const storyUrl = buildPublicUrl(`/community/stories/${story.slug}`);
+    const cacheBust = Date.now().toString(36);
+    const storyUrl = buildPublicUrl(`/share/story/${story.slug}?v=${cacheBust}`);
     const shareData = {
       title: story.title || "Check out this story",
       text: story.excerpt || "",

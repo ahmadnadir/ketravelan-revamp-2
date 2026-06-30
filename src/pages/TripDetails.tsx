@@ -596,7 +596,7 @@ export default function TripDetails() {
   const handleLightboxTouchStart = (event: React.TouchEvent) => {
     if (event.touches.length === 2) {
       const distance = getTouchDistance(event.touches);
-      if (distance != null) {
+      if (distance != null) { 
         pinchStartDistanceRef.current = distance;
         pinchStartScaleRef.current = lightboxScale;
       }
@@ -2370,8 +2370,8 @@ export default function TripDetails() {
 
       {/* Message Organizer Modal */}
       <Dialog open={showMessageModal} onOpenChange={setShowMessageModal}>
-        <DialogContent className="max-w-md w-[calc(100%-2rem)] sm:w-full rounded-2xl p-0 max-h-[calc(100dvh-1rem)] sm:max-h-[85vh] overflow-y-auto top-[6%] translate-y-0 sm:top-[50%] sm:-translate-y-1/2 [&>button]:hidden">
-          <DialogHeader className="p-4 pb-3 border-b border-border/50">
+        <DialogContent className="max-w-md w-[calc(100%-2rem)] sm:w-full rounded-2xl p-0 max-h-[min(90dvh,720px)] overflow-hidden flex flex-col [&>button]:hidden">
+          <DialogHeader className="shrink-0 p-4 pb-3 border-b border-border/50">
             <div className="flex items-center justify-between">
               <DialogTitle>Message Trip Organizer</DialogTitle>
               <button 
@@ -2386,7 +2386,7 @@ export default function TripDetails() {
             </DialogDescription>
           </DialogHeader>
           
-          <div className="p-4 space-y-4">
+          <div className="flex-1 overflow-y-auto overscroll-contain p-4 space-y-4">
             {/* Organizer preview */}
             <div className="flex items-center gap-3 p-3 rounded-xl bg-secondary/50">
               <img 
@@ -2411,7 +2411,7 @@ export default function TripDetails() {
                 onChange={(e) => setInitialMessage(e.target.value.slice(0, 500))}
                 onFocus={(e) => {
                   setTimeout(() => {
-                    e.currentTarget.scrollIntoView({ block: "center", behavior: "smooth" });
+                    e.currentTarget.scrollIntoView({ block: "nearest", behavior: "auto" });
                   }, 120);
                 }}
                 placeholder={`Hi ${organizer.name}, I'm interested in joining your ${tripData.destination} trip...`}

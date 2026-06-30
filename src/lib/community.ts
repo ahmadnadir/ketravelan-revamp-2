@@ -3,6 +3,7 @@ import { countries, Discussion, Story, StoryType, DiscussionTopic, StoryVisibili
 import type { StoryDraft } from "@/hooks/useStoryDraft";
 import { getTravelStyleByIdOrLabel } from "@/data/travelStyles";
 import { filterItemsByBlockedRelationship } from "@/lib/moderation";
+import { uploadImageFromDataUrl } from "@/lib/imageStorage";
 
 const FALLBACK_FLAG = "🌍";
 const FALLBACK_AVATAR = "";
@@ -179,6 +180,18 @@ const estimateReadingTime = (text: string) => {
   if (!text) return 1;
   const words = text.split(/\s+/).filter(Boolean).length;
   return Math.max(1, Math.ceil(words / WORDS_PER_MINUTE));
+};
+
+const resolveStoryCoverImageUrl = async (coverImage?: string | null) => {
+  const raw = String(coverImage || "").trim();
+  if (!raw) return null;
+
+  // Persist local/base64 covers to public storage so og:image is crawlable.
+  if (raw.startsWith("data:image/")) {
+    return uploadImageFromDataUrl(raw, { folder: "stories/covers" });
+  }
+
+  return raw;
 };
 
 const slugify = (value: string) =>
@@ -1064,6 +1077,7 @@ export async function publishStoryFromDraft(draft: StoryDraft) {
   const normalizedStoryTypes = storyTypes.length ? storyTypes : [deriveStoryTypeLegacy(draft)];
   const travelStyles = deriveTravelStyles(draft);
   const tags = await upsertTags(buildStoryTagSlugs(draft));
+  const coverImageUrl = await resolveStoryCoverImageUrl(draft.coverImage);
 
   // If this is an edit (has story ID), update instead of insert
   if (draft.storyId) {
@@ -1086,7 +1100,7 @@ export async function publishStoryFromDraft(draft: StoryDraft) {
       .update({
         title: draft.title,
         slug,
-        cover_image_url: draft.coverImage,
+        cover_image_url: coverImageUrl,
         content,
         excerpt,
         status: "published",
@@ -1133,7 +1147,7 @@ export async function publishStoryFromDraft(draft: StoryDraft) {
       author_id: user.id,
       title: draft.title,
       slug,
-      cover_image_url: draft.coverImage,
+      cover_image_url: coverImageUrl,
       content,
       excerpt,
       status: "published",

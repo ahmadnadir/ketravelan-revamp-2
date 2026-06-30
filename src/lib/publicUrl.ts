@@ -60,14 +60,7 @@ export const buildTripShareUrl = ({
   const cleanSlug = String(slug || "").trim();
   const titleSlug = slugify(String(title || ""));
   const identifier = cleanSlug || titleSlug || cleanTripId;
-  const shortDescription = String(description || "").trim();
-  const params = new URLSearchParams();
-  if (shortDescription) {
-    params.set("d", shortDescription.slice(0, 180));
-  }
-  const query = params.toString();
-  const path = query
-    ? `/share/trip/${encodeURIComponent(identifier)}?${query}`
-    : `/share/trip/${encodeURIComponent(identifier)}`;
+  void description;
+  const path = `/share/trip/${encodeURIComponent(identifier)}`;
   return buildPublicUrl(path);
 };

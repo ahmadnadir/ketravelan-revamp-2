@@ -1547,6 +1547,39 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
     setSettlementConfirmModalOpen(true);
   };
 
+  // Upload receipt file inside the Confirm Settlement modal
+  const handleSettlementReceiptUpload = async (file: File) => {
+    if (!settlementToConfirm || !currentUserId) return;
+
+    // Find first pending expense where current user owes money (to upload against)
+    const { owedToReceiver } = getContributingExpenses(settlementToConfirm);
+    const firstPending = owedToReceiver.find(e => e.status === "pending");
+    const expenseId = firstPending?.expenseId ?? owedToReceiver[0]?.expenseId;
+
+    if (!expenseId) {
+      toast({ title: "No expense found", description: "Could not attach receipt to any expense.", variant: "destructive" });
+      return;
+    }
+
+    try {
+      const data = await uploadReceipt(expenseId, currentUserId, file);
+      const url = data.receipt_url as string;
+
+      // Patch local settlement state so modal shows the uploaded image immediately
+      setSettlementToConfirm(prev => prev ? { ...prev, receiptUrl: url } : prev);
+
+      toast({ title: "Receipt uploaded", description: "Your payment receipt has been attached." });
+    } catch (err) {
+      console.error("Settlement receipt upload failed:", err);
+      toast({ title: "Upload failed", description: "Could not upload receipt. Please try again.", variant: "destructive" });
+    }
+  };
+
+  // Remove receipt from the confirm modal (local state only)
+  const handleSettlementReceiptRemove = () => {
+    setSettlementToConfirm(prev => prev ? { ...prev, receiptUrl: undefined } : prev);
+  };
+
   // Handler for confirming settlement from unified modal
   const handleConfirmSettlement = async () => {
     if (settlementToConfirm) {
@@ -3301,6 +3334,8 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
               });
               setReceiptViewerOpen(true);
             }}
+            onUploadReceipt={handleSettlementReceiptUpload}
+            onRemoveReceipt={handleSettlementReceiptRemove}
             onConfirm={handleConfirmSettlement}
           />
         );

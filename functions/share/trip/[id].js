@@ -2,8 +2,6 @@ const DEFAULT_OG_IMAGE = "https://ketravelan.com/ketravelan_icon.jpeg";
 const DEFAULT_SUPABASE_URL = "https://sspvqhleqlycsiniywkg.supabase.co";
 const DEFAULT_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNzcHZxaGxlcWx5Y3Npbml5d2tnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MDU4NjEsImV4cCI6MjA4Mjk4MTg2MX0.yMDAvpxbvfhcCXNtiPnMg8z5DL-yNixNND4naGPZBXw";
 
-const BOT_UA_PATTERN = /(facebookexternalhit|twitterbot|linkedinbot|slackbot|discordbot|telegrambot|skypeuripreview|googlebot|bingbot|applebot)/i;
-
 function escapeHtml(value) {
   return String(value || "")
     .replace(/&/g, "&amp;")
@@ -111,6 +109,16 @@ function titleFromIdentifier(value) {
     .join(" ") || "Ketravelan Trip";
 }
 
+function normalizeImageUrl(image, origin) {
+  const raw = String(image || "").trim();
+  if (!raw) return DEFAULT_OG_IMAGE;
+
+  if (/^https?:\/\//i.test(raw)) return raw;
+  if (raw.startsWith("/")) return `${origin}${raw}`;
+
+  return DEFAULT_OG_IMAGE;
+}
+
 export async function onRequest(context) {
   const requestUrl = new URL(context.request.url);
   const origin = requestUrl.origin;
@@ -127,19 +135,11 @@ export async function onRequest(context) {
   const title = String(tripMeta?.title || "").trim() || titleFromIdentifier(baseIdentifier);
   const description = descriptionFromQuery || String(tripMeta?.description || "").trim() ||
     (destination ? `Trip to ${destination}.` : "Trip details and itinerary.");
-  const image = String(tripMeta?.cover_image || "").trim() || DEFAULT_OG_IMAGE;
+  const image = normalizeImageUrl(tripMeta?.cover_image, origin);
 
   const canonicalIdentifier = String(tripMeta?.slug || resolvedId || baseIdentifier || "").trim();
   const tripPath = buildTripPath(canonicalIdentifier);
   const tripUrl = `${origin}${tripPath}`;
-
-  const userAgent = context.request.headers.get("user-agent") || "";
-  const isBot = BOT_UA_PATTERN.test(userAgent);
-
-  if (!isBot) {
-    // Let React Router handle /share/trip/:id directly for human users.
-    return context.next();
-  }
 
   const html = `<!doctype html>
 <html lang="en">
@@ -155,13 +155,21 @@ export async function onRequest(context) {
     <meta property="og:description" content="${escapeHtml(description)}" />
     <meta property="og:url" content="${escapeHtml(tripUrl)}" />
     <meta property="og:image" content="${escapeHtml(image)}" />
+    <meta property="og:image:secure_url" content="${escapeHtml(image)}" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="${escapeHtml(title)}" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="${escapeHtml(title)}" />
     <meta name="twitter:description" content="${escapeHtml(description)}" />
     <meta name="twitter:image" content="${escapeHtml(image)}" />
+    <meta http-equiv="refresh" content="0; url=${escapeHtml(tripUrl)}" />
+    <script>
+      window.location.replace(${JSON.stringify(tripUrl)});
+    </script>
   </head>
   <body>
-    <p>Open this trip: <a href="${escapeHtml(tripUrl)}">${escapeHtml(tripUrl)}</a></p>
+    <p>Redirecting to <a href="${escapeHtml(tripUrl)}">${escapeHtml(tripUrl)}</a></p>
   </body>
 </html>`;
 
