@@ -1,22 +1,60 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useMemo } from 'react';
+import { useMemo, useEffect } from 'react';
 import { useQuery, UseQueryOptions } from '@tanstack/react-query';
 import { fetchConversationsWithLastMessages, fetchConversationMessages, fetchConversationWithTripDetails } from '@/lib/conversations';
+
+const conversationsCacheKey = (userId: string) => `ketravelan:conversations:${userId}`;
+
+function readConversationsCache(userId: string | undefined): any[] | undefined {
+  if (!userId || typeof window === 'undefined') return undefined;
+
+  try {
+    const raw = window.localStorage.getItem(conversationsCacheKey(userId));
+    if (!raw) return undefined;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function writeConversationsCache(userId: string | undefined, data: any[] | undefined) {
+  if (!userId || typeof window === 'undefined' || !Array.isArray(data)) return;
+
+  try {
+    window.localStorage.setItem(conversationsCacheKey(userId), JSON.stringify(data));
+  } catch {
+    // Ignore storage write failures (quota/private mode).
+  }
+}
 
 export function useConversations(
   userId: string | undefined,
   options?: Omit<UseQueryOptions<any[], Error>, 'queryKey' | 'queryFn'>
 ) {
-  return useQuery<any[], Error>({
+  const query = useQuery<any[], Error>({
     queryKey: ['conversations', userId],
     queryFn: fetchConversationsWithLastMessages,
     enabled: !!userId,
-    staleTime: 1000 * 10,       // Show cached list instantly; re-fetch in background after 10s
+    initialData: () => readConversationsCache(userId),
+    placeholderData: (previousData) => previousData,
+    staleTime: 1000 * 5,        // Fresh for 5s (was 20s) — faster updates on chat list
     gcTime: 1000 * 60 * 5,
-    refetchOnWindowFocus: true,
-    refetchInterval: 5000,
+    refetchOnWindowFocus: false,
+    refetchInterval: () => {
+      if (typeof navigator !== 'undefined' && !navigator.onLine) return false;
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return 60000;
+      return 20000;             // Keep fallback freshness while reducing redundant polling traffic.
+    },
+    refetchIntervalInBackground: false,
     ...options,
   });
+
+  useEffect(() => {
+    writeConversationsCache(userId, query.data);
+  }, [userId, query.data]);
+
+  return query;
 }
 
 export function useUnreadChatCount(userId: string | undefined): number {

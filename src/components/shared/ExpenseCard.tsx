@@ -64,6 +64,26 @@ const formatCurrency = (value: number, curr: string = "RM"): string => {
   return `${curr}${value.toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 
+const formatAmount = (value: number): string => {
+  return value.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+};
+
+const getCurrencySymbol = (currencyCode?: string): string => {
+  const code = (currencyCode || "").toUpperCase();
+  const symbolMap: Record<string, string> = {
+    USD: "$",
+    MYR: "RM",
+    SGD: "S$",
+    EUR: "€",
+    GBP: "£",
+    JPY: "¥",
+    THB: "฿",
+    IDR: "Rp",
+    AUD: "A$",
+  };
+  return symbolMap[code] || code || "$";
+};
+
 export function ExpenseCard({
   title,
   amount,
@@ -109,6 +129,10 @@ export function ExpenseCard({
 
   const [cardViewCurrency, setCardViewCurrency] = React.useState<"original" | "home">(initialViewCurrency);
 
+  React.useEffect(() => {
+    setCardViewCurrency(initialViewCurrency);
+  }, [initialViewCurrency]);
+
   const useHomeView =
     canToggleCurrency && cardViewCurrency === "home" && typeof homeAmount === "number" && !!homeCurrency;
   const displayAmount = useHomeView
@@ -117,6 +141,16 @@ export function ExpenseCard({
   const displayCurrency = useHomeView
     ? (homeCurrency as string)
     : (originalCurrency ?? currency);
+  const secondaryCurrency = useHomeView ? normalizedOriginalCurrency : normalizedHomeCurrency;
+  const secondaryAmount = canToggleCurrency
+    ? (useHomeView
+      ? (typeof originalAmount === "number" ? originalAmount : amount)
+      : (homeAmount as number))
+    : undefined;
+  const travelCurrencySymbol = getCurrencySymbol(normalizedOriginalCurrency);
+  const homeCurrencySymbol = getCurrencySymbol(normalizedHomeCurrency);
+  const leftCurrencySymbol = useHomeView ? travelCurrencySymbol : homeCurrencySymbol;
+  const rightCurrencySymbol = useHomeView ? homeCurrencySymbol : travelCurrencySymbol;
   const effectiveCustomSplits = useHomeView
     ? (homeCustomSplitAmounts ?? customSplitAmounts)
     : (originalCustomSplitAmounts ?? customSplitAmounts);
@@ -165,12 +199,12 @@ export function ExpenseCard({
     if (personalShare.status === "pending") {
       return { 
         label: "View & Settle", 
-        icon: <Upload className="h-4 w-4 mr-2" /> 
+        icon: <Upload className="h-3.5 w-3.5 mr-1.5" /> 
       };
     }
     return { 
       label: "View Details", 
-      icon: <FileText className="h-4 w-4 mr-2" /> 
+      icon: <FileText className="h-3.5 w-3.5 mr-1.5" /> 
     };
   };
 
@@ -189,108 +223,121 @@ export function ExpenseCard({
   return (
     <Card 
       className={cn(
-        "group p-3 sm:p-4 border-border/50 cursor-pointer hover:border-primary/50 hover:shadow-md active:scale-[0.98] transition-all",
+        "group p-4 sm:p-5 border-border/60 rounded-3xl cursor-pointer hover:border-primary/50 hover:shadow-md active:scale-[0.98] transition-all",
         isHighlighted && "ring-2 ring-stat-green/50 animate-settle-pulse"
       )}
       onClick={handleCardClick}
     >
-      <div className="space-y-2">
-          {/* Header: Title and Amount */}
-          <div className="flex items-start justify-between gap-2">
+      <div className="space-y-4">
+          <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <h4 className="font-semibold text-[15px] sm:text-sm md:text-base text-foreground truncate">{title}</h4>
-              <p className="text-[13px] leading-relaxed sm:text-xs sm:leading-normal text-muted-foreground">
+              <h4 className="font-semibold text-[12px] sm:text-[14px] text-foreground truncate">{title}</h4>
+              <p className="text-[14px] leading-none sm:text-[22px] font-semibold text-foreground mt-2">
+                {displayCurrency} {formatAmount(displayAmount)}
+              </p>
+              <p className="text-[13px] sm:text-[15px] text-muted-foreground mt-1">
                 Paid by {paidBy} · {formatDisplayDate(date)}
               </p>
             </div>
-            <div className="flex items-start gap-1 shrink-0">
-              <span className="text-base sm:text-lg font-semibold text-foreground">
-                {displayCurrency} {displayAmount.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            {(canToggleCurrency || canManage) && (
+              <div className="flex items-center gap-1.5 shrink-0 rounded-full bg-muted/60 px-2 py-1">
+                {canToggleCurrency && (
+                  <span className="text-xs font-medium text-muted-foreground pl-1">
+                    {leftCurrencySymbol}
+                  </span>
+                )}
+                {canToggleCurrency && (
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className="h-7 w-7 rounded-full"
+                    onClick={(e) => { e.stopPropagation(); setCardViewCurrency(cardViewCurrency === "home" ? "original" : "home"); }}
+                    title={`Switch to ${cardViewCurrency === "home" ? "original" : "home"} currency`}
+                  >
+                    <ArrowLeftRight className="h-3.5 w-3.5" />
+                  </Button>
+                )}
+                {canToggleCurrency && (
+                  <span className="text-base font-semibold text-foreground pr-1">
+                    {rightCurrencySymbol}
+                  </span>
+                )}
+                {canManage && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="h-7 w-7 rounded-full"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <MoreVertical className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onEdit?.(); }}>Edit</DropdownMenuItem>
+                      <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onDelete?.(); }} className="text-destructive">
+                        Delete
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center justify-between">
+            <span className="text-[16px] sm:text-[18px] font-semibold text-foreground">Your share</span>
+            <div className="flex items-center gap-2">
+              <span className="text-[18px] sm:text-[20px] font-semibold text-foreground">
+                {displayCurrency} {formatAmount(personalShare.amount)}
               </span>
-              {canToggleCurrency && (
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="h-8 w-8 -mt-1"
-                  onClick={(e) => { e.stopPropagation(); setCardViewCurrency(cardViewCurrency === "home" ? "original" : "home"); }}
-                  title={`Switch to ${cardViewCurrency === "home" ? "original" : "home"} currency`}
-                >
-                  <ArrowLeftRight className="h-4 w-4" />
-                </Button>
-              )}
-              {canManage && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button 
-                      variant="ghost" 
-                      size="icon" 
-                      className="h-8 w-8 -mt-1"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <MoreVertical className="h-4 w-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onEdit?.(); }}>Edit</DropdownMenuItem>
-                    <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onDelete?.(); }} className="text-destructive">
-                      Delete
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
+              <StatusBadge 
+                status={personalShare.status} 
+                className="text-[11px] px-3 py-1 rounded-full"
+              />
             </div>
           </div>
 
-          {/* Group Settlement Progress - Informational, not alarming */}
-          <div className="space-y-1.5">
+          <div className="border-t border-border/70 pt-3 space-y-2">
             <div className="flex items-center justify-between">
               <span className={cn(
-                "text-[13px] leading-relaxed sm:text-xs sm:leading-normal font-medium",
+                "text-[13px] sm:text-[14px]",
                 isFullySettled ? "text-stat-green" : "text-muted-foreground"
               )}>
                 Group settlement: {paymentProgress}%
               </span>
             </div>
-                <Progress 
-                  value={paymentProgress} 
-                  className="h-1.5"
-                  autoVariant
-                  animate
-                  animationDelay={animationDelay}
-                />
+            <Progress 
+              value={paymentProgress} 
+              className="h-2"
+              autoVariant
+              animate
+              animationDelay={animationDelay}
+            />
+            {canToggleCurrency && typeof secondaryAmount === "number" && secondaryCurrency && (
+              <p className="text-[12px] sm:text-[13px] text-muted-foreground">
+                ≈ {secondaryCurrency} {formatAmount(secondaryAmount)} (est.)
+              </p>
+            )}
           </div>
 
-          {/* Personal Impact Row - Primary Focus */}
-          <div className="flex items-center justify-between pt-1">
-            <span className="text-[14px] sm:text-xs font-medium text-foreground">Your share:</span>
-            <div className="flex items-center gap-1.5">
-              <span className="text-[15px] sm:text-xs font-semibold">{formatCurrency(personalShare.amount, displayCurrency)}</span>
-              <StatusBadge 
-                status={personalShare.status} 
-                className="text-[12px] sm:text-[10px] px-2.5 sm:px-2 py-1 sm:py-0.5"
-              />
-            </div>
-          </div>
-
-          {/* Primary Action Button - Always visible */}
-          <div className="pt-2">
-            <Button
-              size="sm"
-              onClick={(e) => {
-                e.stopPropagation();
-                onPrimaryAction();
-              }}
-              className={cn(
-                "w-full h-9 text-[14px] sm:text-xs font-medium transition-all duration-150",
-                personalShare.status === "pending" 
-                  ? "bg-foreground text-background hover:bg-foreground/90"
-                  : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
-              )}
-            >
-              {buttonConfig.icon}
-              {buttonConfig.label}
-            </Button>
-          </div>
+          <Button
+            size="sm"
+            onClick={(e) => {
+              e.stopPropagation();
+              onPrimaryAction();
+            }}
+            className={cn(
+              "w-full h-10 rounded-2xl text-[14px] font-medium transition-all duration-150",
+              personalShare.status === "pending" 
+                ? "bg-foreground text-background hover:bg-foreground/90"
+                : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
+            )}
+          >
+            {buttonConfig.icon}
+            {buttonConfig.label}
+          </Button>
         </div>
     </Card>
   );

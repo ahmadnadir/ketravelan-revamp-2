@@ -7,7 +7,7 @@ declare const Deno: { env: { get(name: string): string | undefined } };
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const SITE_URL = Deno.env.get("SITE_URL") ?? "https://ketravelan.xyz";
+const SITE_URL = Deno.env.get("SITE_URL") ?? "https://ketravelan.com";
 const FIREBASE_SERVICE_ACCOUNT_JSON = Deno.env.get("FIREBASE_SERVICE_ACCOUNT_JSON") ?? "";
 const APPLE_TEAM_ID = Deno.env.get("APPLE_TEAM_ID") ?? "";
 const APPLE_KEY_ID = Deno.env.get("APPLE_KEY_ID") ?? "";
@@ -26,7 +26,7 @@ function buildCorsHeaders(req: Request): Record<string, string> {
     "http://127.0.0.1:8080",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-    "https://ketravelan.xyz",
+    "https://ketravelan.com",
     "http://10.0.2.2:5173",
     "capacitor://localhost",
   ]);
@@ -51,13 +51,18 @@ function getSiteOrigin() {
     return new URL(SITE_URL).origin;
   } catch {
     const match = SITE_URL.match(/^(https?:\/\/[^/]+)/);
-    return match ? match[1] : "https://ketravelan.xyz";
+    return match ? match[1] : "https://ketravelan.com";
   }
 }
 
 function truncate(text: string, max = 160) {
   if (text.length <= max) return text;
   return `${text.slice(0, max - 1)}…`;
+}
+
+function isTripNotificationEnabled(tripSettings: any, key: "new_members_join" | "expense_updates" | "chat_activity", fallback: boolean) {
+  const rawValue = tripSettings?.notifications?.[key];
+  return typeof rawValue === "boolean" ? rawValue : fallback;
 }
 
 function pemToArrayBuffer(pem: string) {
@@ -305,9 +310,17 @@ serve(async (req: Request) => {
     if (conversation?.trip_id) {
       const { data: trip } = await admin
         .from("trips")
-        .select("id, title")
+        .select("id, title, trip_settings")
         .eq("id", conversation.trip_id)
         .maybeSingle();
+
+      if (conversation.conversation_type === "trip_group" && !isTripNotificationEnabled(trip?.trip_settings, "chat_activity", false)) {
+        return new Response(JSON.stringify({ ok: true, skipped: true, reason: "Trip setting disabled chat notifications" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json", ...corsHeaders },
+        });
+      }
+
       tripTitle = trip?.title || null;
     }
 
@@ -329,10 +342,46 @@ serve(async (req: Request) => {
       });
     }
 
+    // Respect blocks: do not notify users who blocked the sender.
+    // Primary schema uses user_id -> blocker, blocked_user_id -> blocked user.
+    let blockedRecipientIds = new Set<string>();
+    try {
+      const { data: blockedRows } = await admin
+        .from("blocked_users")
+        .select("user_id")
+        .in("user_id", recipientIds)
+        .eq("blocked_user_id", message.sender_id);
+
+      blockedRecipientIds = new Set((blockedRows || []).map((r: any) => r.user_id));
+    } catch {
+      // Backward-compatible fallback for blocker_user_id naming.
+      try {
+        const { data: blockedRowsFallback } = await admin
+          .from("blocked_users")
+          .select("blocker_user_id")
+          .in("blocker_user_id", recipientIds)
+          .eq("blocked_user_id", message.sender_id);
+
+        blockedRecipientIds = new Set((blockedRowsFallback || []).map((r: any) => r.blocker_user_id));
+      } catch {
+        // If blocked_users schema is unavailable, fail open to avoid breaking chat delivery.
+        blockedRecipientIds = new Set<string>();
+      }
+    }
+
+    const eligibleRecipientIds = recipientIds.filter((id) => !blockedRecipientIds.has(id));
+
+    if (eligibleRecipientIds.length === 0) {
+      return new Response(JSON.stringify({ ok: true, skipped: true, reason: "All recipients blocked sender" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json", ...corsHeaders },
+      });
+    }
+
     const { data: recipientProfiles } = await admin
       .from("profiles")
       .select("id, push_notifications")
-      .in("id", recipientIds);
+      .in("id", eligibleRecipientIds);
 
     const pushEnabledIds = (recipientProfiles || [])
       .filter((p) => p.push_notifications !== false)
@@ -359,9 +408,9 @@ serve(async (req: Request) => {
       ? (isSystemMessage ? (contentText || fallbackBody) : `${senderName}: ${contentText || fallbackBody}`)
       : (contentText || fallbackBody);
 
-    if (recipientIds.length > 0) {
+    if (eligibleRecipientIds.length > 0) {
       await admin.from("notifications").insert(
-        recipientIds.map((userId) => ({
+        eligibleRecipientIds.map((userId) => ({
           user_id: userId,
           type: "new_message",
           title,
@@ -384,15 +433,14 @@ serve(async (req: Request) => {
       });
     }
 
-    // Fetch each recipient's unread notification count (excluding chat types,
-    // matching the frontend fetchUnreadCount behaviour) so we can set aps.badge
-    // to the backend source-of-truth value for every notification sent.
+    // Fetch each recipient's total unread notification count (including chat messages)
+    // so we can set aps.badge to the backend source-of-truth value for every notification sent.
+    // This includes both system notifications and chat messages for WhatsApp-style badge.
     const { data: unreadRows } = await admin
       .from("notifications")
       .select("user_id")
-      .in("user_id", recipientIds)
-      .eq("read", false)
-      .not("type", "in", "(new_message,message)");
+      .in("user_id", eligibleRecipientIds)
+      .eq("read", false);
 
     const unreadCountMap = new Map<string, number>();
     for (const row of unreadRows ?? []) {
@@ -445,8 +493,15 @@ serve(async (req: Request) => {
       const fcmPayload = {
         ...payload,
         apns: {
+          headers: {
+            "apns-push-type": "alert",
+            "apns-priority": "10",
+          },
           payload: {
-            aps: { badge: badgeCount },
+            aps: {
+              badge: badgeCount,
+              sound: "default",
+            },
           },
         },
       };
@@ -480,7 +535,7 @@ serve(async (req: Request) => {
       sent: success,
       failed,
       total: tokens.length,
-      recipients: recipientIds.length,
+      recipients: eligibleRecipientIds.length,
       push_enabled_recipients: pushEnabledIds.length,
       token_routing: {
         ios: tokens.filter((t) => String((t as { platform?: string }).platform || "").toLowerCase() === "ios").length,

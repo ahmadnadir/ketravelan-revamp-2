@@ -107,11 +107,16 @@ export default function Expenses() {
     if (!rawOverview) return {};
 
     const { expenses, owed, credited } = rawOverview;
+    const round2 = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 
-    // expense_id → { tripId, currency, amount }
-    const expenseMap: Record<string, { tripId: string; currency: string; amount: number }> = {};
+    // expense_id -> metadata + computed home amount
+    const expenseMap: Record<string, { tripId: string; currency: string; amountHome: number }> = {};
     expenses.forEach((e: any) => {
-      expenseMap[e.id] = { tripId: e.trip_id, currency: e.currency || "MYR", amount: Number(e.amount) };
+      expenseMap[e.id] = {
+        tripId: e.trip_id,
+        currency: e.currency || "MYR",
+        amountHome: round2(getExpenseHomeAmount(e)),
+      };
     });
 
     const perTrip: Record<string, TripBalance> = {};
@@ -132,20 +137,44 @@ export default function Expenses() {
       }
     });
 
-    // You owe: unpaid participant rows for the current user
+    // Aggregate unpaid rows per expense first, then cap each expense contribution
+    // to the expense's own total to prevent duplicate-row overcounting.
+    const owedByExpense: Record<string, number> = {};
     owed.forEach((row: any) => {
       if (row.is_paid) return;
       const exp = expenseMap[row.expense_id];
-      if (!exp || !perTrip[exp.tripId]) return;
-      perTrip[exp.tripId].youOwed += toHome(Number(row.amount_owed), exp.currency);
+      if (!exp) return;
+      const amountHome = toHome(Number(row.amount_owed) || 0, exp.currency);
+      owedByExpense[row.expense_id] = (owedByExpense[row.expense_id] || 0) + amountHome;
     });
 
-    // You are owed: other participants' unpaid shares on expenses the user paid for
+    Object.entries(owedByExpense).forEach(([expenseId, sum]) => {
+      const exp = expenseMap[expenseId];
+      if (!exp || !perTrip[exp.tripId]) return;
+      const capped = Math.min(round2(sum), exp.amountHome);
+      perTrip[exp.tripId].youOwed += capped;
+    });
+
+    const creditedByExpense: Record<string, number> = {};
     credited.forEach((row: any) => {
       if (row.is_paid) return;
       const exp = expenseMap[row.expense_id];
+      if (!exp) return;
+      const amountHome = toHome(Number(row.amount_owed) || 0, exp.currency);
+      creditedByExpense[row.expense_id] = (creditedByExpense[row.expense_id] || 0) + amountHome;
+    });
+
+    Object.entries(creditedByExpense).forEach(([expenseId, sum]) => {
+      const exp = expenseMap[expenseId];
       if (!exp || !perTrip[exp.tripId]) return;
-      perTrip[exp.tripId].youAreOwed += toHome(Number(row.amount_owed), exp.currency);
+      const capped = Math.min(round2(sum), exp.amountHome);
+      perTrip[exp.tripId].youAreOwed += capped;
+    });
+
+    Object.values(perTrip).forEach((trip) => {
+      trip.totalExpenses = round2(trip.totalExpenses);
+      trip.youOwed = round2(trip.youOwed);
+      trip.youAreOwed = round2(trip.youAreOwed);
     });
 
     return perTrip;
@@ -237,9 +266,14 @@ export default function Expenses() {
         {/* Balance Overview */}
         {!isLoading && hasActivity && (
           <div className="space-y-3">
-            <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-              Your Balance
-            </h2>
+            <div className="space-y-1">
+              <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+                Your Balance
+              </h2>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                You owe: your unpaid shares. You&apos;re owed: others&apos; unpaid shares on expenses you paid. All values are converted to your home currency and each expense is capped to its total amount.
+              </p>
+            </div>
             {/* Total Expenses pill */}
             <Card className="p-4 rounded-2xl border border-border/50 bg-card shadow-sm">
               <div className="flex items-center justify-between">

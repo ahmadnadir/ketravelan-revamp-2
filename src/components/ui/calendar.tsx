@@ -8,6 +8,7 @@ import { buttonVariants } from "@/components/ui/button";
 export type CalendarProps = React.ComponentProps<typeof DayPicker>;
 
 function Calendar({ className, classNames, showOutsideDays = true, ...props }: CalendarProps) {
+  const isDropdown = props.captionLayout?.startsWith("dropdown");
   return (
     <DayPicker
       showOutsideDays={showOutsideDays}
@@ -15,15 +16,21 @@ function Calendar({ className, classNames, showOutsideDays = true, ...props }: C
       classNames={{
         months: "flex flex-col sm:flex-row space-y-4 sm:space-x-4 sm:space-y-0",
         month: "space-y-4",
-        caption: "flex justify-center pt-1 relative items-center",
-        caption_label: "text-sm font-medium",
+        caption: "flex justify-center pt-1 relative items-center w-full px-12",
+        caption_label: isDropdown ? "hidden" : "text-sm font-medium",
+        caption_dropdowns: "flex items-center gap-2",
+        vhidden: "sr-only",
+        dropdown_month:
+          "rounded-lg border border-input bg-muted/50 hover:bg-muted transition-colors [&>select]:cursor-pointer [&>select]:bg-transparent [&>select]:border-0 [&>select]:outline-none [&>select]:py-1.5 [&>select]:pl-3 [&>select]:pr-2 [&>select]:text-sm [&>select]:font-medium",
+        dropdown_year:
+          "rounded-lg border border-input bg-muted/50 hover:bg-muted transition-colors [&>select]:cursor-pointer [&>select]:bg-transparent [&>select]:border-0 [&>select]:outline-none [&>select]:py-1.5 [&>select]:pl-3 [&>select]:pr-2 [&>select]:text-sm [&>select]:font-medium",
         nav: "space-x-1 flex items-center",
         nav_button: cn(
           buttonVariants({ variant: "outline" }),
           "h-7 w-7 bg-transparent p-0 opacity-50 hover:opacity-100",
         ),
-        nav_button_previous: "absolute left-1",
-        nav_button_next: "absolute right-1",
+        nav_button_previous: "absolute left-2",
+        nav_button_next: "absolute right-2",
         table: "w-full border-collapse space-y-1",
         head_row: "flex",
         head_cell: "text-muted-foreground rounded-md w-9 font-normal text-[0.8rem]",

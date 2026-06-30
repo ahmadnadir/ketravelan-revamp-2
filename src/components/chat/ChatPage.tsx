@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef, useMemo } from "react";
-import { ChevronLeft, Check, Clock, ChevronDown } from "lucide-react";
+import { useState, useEffect, useRef, useMemo, type ReactNode } from "react";
+import { ChevronLeft, Check, Clock, ArrowDown, ChevronDown, Pencil, Trash2, Undo2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -8,9 +8,18 @@ import { cn } from "@/lib/utils";
 import { ChatComposer, type TripMember } from "@/components/chat/ChatComposer";
 import type { ChatAttachment } from "@/lib/conversations";
 import { MessageAttachments } from "@/components/chat/MessageAttachments";
-import { fetchConversationMessages, subscribeToMessages, sendMessage, updateLastRead } from "@/lib/conversations";
+import { fetchConversationMessages, fetchConversationMessagesAfter, subscribeToMessages, sendMessage, editOwnMessage, unsendOwnMessage, deleteOwnMessage } from "@/lib/conversations";
 import { parseMessageForDisplay } from "@/lib/chatMentions";
 import { supabase } from "@/lib/supabase";
+import { markConversationReadOptimistically } from "@/lib/chatReadService";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { toast } from "sonner";
+import { Textarea } from "@/components/ui/textarea";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Label } from "@/components/ui/label";
+import { REPORT_REASON_OPTIONS, submitReport, blockUserViaApi, type ReportReasonValue } from "@/lib/moderation";
 
 export interface ChatPageMessage {
   id: string;
@@ -21,16 +30,35 @@ export interface ChatPageMessage {
   client_id?: string;
   status?: 'sending' | 'sent' | 'failed';
   attachments?: ChatAttachment[];
+  is_edited?: boolean;
+  edited_at?: string | null;
   type?: 'user' | 'system';
   systemData?: { action: string; details?: string };
 }
 
+type ConversationListItem = {
+  created_at?: string;
+  unreadCount?: number;
+  conversation?: {
+    id?: string;
+    created_at?: string;
+  };
+  lastMessage?: {
+    id?: string;
+    created_at?: string;
+    sender?: { id?: string; full_name?: string; username?: string; avatar_url?: string };
+  };
+  [key: string]: unknown;
+};
+
 interface ChatPageProps {
   conversationId: string;
+  ensureConversationId?: () => Promise<string>;
   headerTitle?: string;
   headerSubtitle?: string;
   headerImageUrl?: string;
   headerImageFallback?: string;
+  headerActions?: ReactNode;
   onHeaderClick?: () => void;
   showBackButton?: boolean;
   onBackClick?: () => void;
@@ -39,15 +67,20 @@ interface ChatPageProps {
   showSenderInfo?: boolean;
   tripMembers?: TripMember[];
   tripId?: string;
+  canSend?: boolean;
+  blockedMessage?: string;
+  messageReportType?: 'TRIP_CHAT' | 'DIRECT_CHAT';
   scrollContainerRef?: React.RefObject<HTMLElement | null>;
 }
 
 export function ChatPage({
   conversationId,
+  ensureConversationId,
   headerTitle = "Chat",
   headerSubtitle,
   headerImageUrl,
   headerImageFallback,
+  headerActions,
   onHeaderClick,
   showBackButton = true,
   onBackClick,
@@ -56,8 +89,30 @@ export function ChatPage({
   showSenderInfo = true,
   tripMembers = [],
   tripId,
+  canSend = true,
+  blockedMessage,
+  messageReportType,
   scrollContainerRef,
 }: ChatPageProps) {
+  const MESSAGE_ACTION_WINDOW_MS = 60 * 1000;
+  const MAX_RENDERED_MESSAGES = 220;
+  const LOAD_MORE_STEP = 120;
+  const REFRESH_THROTTLE_MS = 30000;
+  const LONG_PRESS_MS = 450;
+
+  const canUseMessageActions = (message: ChatPageMessage): boolean => {
+    if (message.sender_id !== currentUserId) return false;
+    if (message.type === 'system') return false;
+    if (message.status === 'sending') return false;
+    const createdAt = new Date(message.created_at).getTime();
+    if (!Number.isFinite(createdAt)) return false;
+    return Date.now() - createdAt <= MESSAGE_ACTION_WINDOW_MS;
+  };
+
+  const isUnsentMessage = (message: ChatPageMessage): boolean => {
+    return message.content === 'This message was unsent';
+  };
+
   const formatSystemMessageContent = (content: string): string => {
     return content.replace(/\b(RM|[A-Z]{3})\s+(\d[\d,]*(?:\.\d+)?)/g, (_, code: string, rawAmount: string) => {
       const parsed = Number(rawAmount.replace(/,/g, ""));
@@ -73,13 +128,115 @@ export function ChatPage({
     });
   };
 
+  const getLocalDayKey = (date: Date): string => {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, "0");
+    const d = String(date.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  };
+
+  const parseMessageDate = (value: string | null | undefined): Date | null => {
+    if (!value) return null;
+    const raw = String(value).trim();
+    if (!raw) return null;
+
+    let parsed = new Date(raw);
+    if (Number.isFinite(parsed.getTime())) return parsed;
+
+    // Fallback for SQL-style timestamps like "2026-05-21 18:20:00+00"
+    if (raw.includes(" ")) {
+      parsed = new Date(raw.replace(" ", "T"));
+      if (Number.isFinite(parsed.getTime())) return parsed;
+    }
+
+    return null;
+  };
+
+  const getWeekStart = (date: Date): Date => {
+    const start = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    const localeName = Intl.DateTimeFormat().resolvedOptions().locale;
+    const localeObj = typeof Intl.Locale === "function"
+      ? (new Intl.Locale(localeName) as unknown as { weekInfo?: { firstDay?: number } })
+      : null;
+    const firstDay = localeObj?.weekInfo?.firstDay ?? 1;
+    const currentDay = start.getDay();
+    const normalizedFirstDay = firstDay % 7;
+    const daysSinceWeekStart = (currentDay - normalizedFirstDay + 7) % 7;
+    start.setDate(start.getDate() - daysSinceWeekStart);
+    return start;
+  };
+
+  const formatDateSeparatorLabel = (isoDate: string): string => {
+    const messageDate = parseMessageDate(isoDate);
+    if (!messageDate) return "";
+
+    const today = new Date();
+    const messageDay = new Date(messageDate.getFullYear(), messageDate.getMonth(), messageDate.getDate());
+    const todayDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+
+    const messageDayKey = getLocalDayKey(messageDay);
+    const todayKey = getLocalDayKey(todayDay);
+    if (messageDayKey === todayKey) return "Today";
+
+    const yesterday = new Date(todayDay);
+    yesterday.setDate(yesterday.getDate() - 1);
+    if (messageDayKey === getLocalDayKey(yesterday)) return "Yesterday";
+
+    const messageWeekStart = getWeekStart(messageDay).getTime();
+    const currentWeekStart = getWeekStart(todayDay).getTime();
+    if (messageWeekStart === currentWeekStart) {
+      return new Intl.DateTimeFormat(undefined, { weekday: "long" }).format(messageDate);
+    }
+
+    return new Intl.DateTimeFormat(undefined, {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    }).format(messageDate);
+  };
+
+  const renderDateSeparator = (label: string, isFirst: boolean) => {
+    if (!label) return null;
+    return (
+      <div
+        data-date-label={label}
+        className={cn("relative z-10 flex justify-center pointer-events-none", isFirst ? "mt-1 mb-3" : "my-2")}
+      >
+        <span className="rounded-lg border border-[#d6d6d6] bg-white px-3 py-1 text-[11px] font-medium tracking-[0.01em] text-[#5f6368] shadow-[0_1px_2px_rgba(0,0,0,0.08)]">
+          {label}
+        </span>
+      </div>
+    );
+  };
+
   const [confirmedMessages, setConfirmedMessages] = useState<ChatPageMessage[]>([]);
   const [pendingMessages, setPendingMessages] = useState<ChatPageMessage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
+  const [scrollDateLabel, setScrollDateLabel] = useState("");
+  const scrollDateTimeoutRef = useRef<number | null>(null);
+  const [actionMenu, setActionMenu] = useState<{ messageId: string; x: number; y: number } | null>(null);
+  const [hoveredMessageId, setHoveredMessageId] = useState<string | null>(null);
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editingValue, setEditingValue] = useState('');
+  const [confirmAction, setConfirmAction] = useState<{ type: 'unsend' | 'delete'; messageId: string } | null>(null);
+  const [reportTarget, setReportTarget] = useState<{ messageId: string; reportedUserId: string } | null>(null);
+  const [reportReason, setReportReason] = useState<ReportReasonValue>('spam');
+  const [reportDescription, setReportDescription] = useState('');
+  const [confirmReport, setConfirmReport] = useState(false);
+  const [isSubmittingAction, setIsSubmittingAction] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(MAX_RENDERED_MESSAGES);
+  const [activeConversationId, setActiveConversationId] = useState(conversationId);
   const queryClient = useQueryClient();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const unsubscribeRef = useRef<(() => void) | null>(null);
+  const pollInFlightRef = useRef(false);
+  const latestSnapshotRef = useRef<string>('');
+  const lastRealtimeAtRef = useRef(0);
+  const lastSyncCreatedAtRef = useRef<string | null>(null);
+  const lastListRefreshAtRef = useRef(0);
+  const lastThreadRefreshAtRef = useRef(0);
+  const longPressTimerRef = useRef<number | null>(null);
   const mentionUserIdByUsername = useMemo(() => {
     const map = new Map<string, string>();
     tripMembers.forEach((member) => {
@@ -90,8 +247,22 @@ export function ChatPage({
     return map;
   }, [tripMembers]);
 
+  useEffect(() => {
+    setVisibleCount(MAX_RENDERED_MESSAGES);
+    setActiveConversationId(conversationId);
+  }, [conversationId]);
+
   // Combine messages for display (confirmed + pending)
   const allMessages = useMemo(() => [...confirmedMessages, ...pendingMessages], [confirmedMessages, pendingMessages]);
+  const renderedMessages = useMemo(
+    () => (allMessages.length > visibleCount ? allMessages.slice(-visibleCount) : allMessages),
+    [allMessages, visibleCount],
+  );
+  const hiddenMessagesCount = Math.max(0, allMessages.length - renderedMessages.length);
+  const actionMessage = useMemo(
+    () => (actionMenu ? allMessages.find((msg) => msg.id === actionMenu.messageId) || null : null),
+    [actionMenu, allMessages],
+  );
 
   // Memoize avatar URLs per user to prevent re-generation and blinking
   const avatarCache = useRef<Map<string, string>>(new Map());
@@ -122,6 +293,28 @@ export function ChatPage({
     );
   };
 
+  const getSnapshot = (messages: ChatPageMessage[]) => {
+    const last = messages[messages.length - 1];
+    return `${messages.length}:${last?.id || 'none'}:${last?.created_at || 'none'}`;
+  };
+
+  const applyServerMessages = (incomingRaw: unknown[]) => {
+    const normalizedMsgs = normalizeMessages(incomingRaw);
+    if (normalizedMsgs.length > 0) {
+      const newest = normalizedMsgs[normalizedMsgs.length - 1];
+      if (newest?.created_at) {
+        lastSyncCreatedAtRef.current = newest.created_at;
+      }
+    }
+    const nextSnapshot = getSnapshot(normalizedMsgs);
+    if (nextSnapshot === latestSnapshotRef.current) return false;
+
+    latestSnapshotRef.current = nextSnapshot;
+    setConfirmedMessages((prev) => mergeById(prev, normalizedMsgs));
+    queryClient.setQueryData(['messages', activeConversationId], normalizedMsgs);
+    return true;
+  };
+
   // Track scroll position to show/hide scroll-to-bottom button
   useEffect(() => {
     const container = scrollContainerRef?.current;
@@ -134,6 +327,57 @@ export function ChatPage({
     return () => container.removeEventListener('scroll', onScroll);
   }, [scrollContainerRef, isLoading]);
 
+  // WhatsApp-style: show sticky date chip at top while scrolling
+  useEffect(() => {
+    const container = scrollContainerRef?.current;
+    if (!container) return;
+
+    const onScroll = () => {
+      const separators = container.querySelectorAll<HTMLElement>('[data-date-label]');
+      if (!separators.length) return;
+
+      const containerTop = container.getBoundingClientRect().top;
+      let activeLabel = "";
+
+      separators.forEach((el) => {
+        const elTop = el.getBoundingClientRect().top;
+        if (elTop <= containerTop + 56) {
+          activeLabel = el.dataset.dateLabel || "";
+        }
+      });
+
+      // If no separator has scrolled past yet, show the first one
+      if (!activeLabel) {
+        activeLabel = (separators[0] as HTMLElement)?.dataset?.dateLabel || "";
+      }
+
+      setScrollDateLabel(activeLabel);
+
+      if (scrollDateTimeoutRef.current) clearTimeout(scrollDateTimeoutRef.current);
+      scrollDateTimeoutRef.current = window.setTimeout(() => {
+        setScrollDateLabel("");
+      }, 1500);
+    };
+
+    container.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      container.removeEventListener('scroll', onScroll);
+      if (scrollDateTimeoutRef.current) clearTimeout(scrollDateTimeoutRef.current);
+    };
+  }, [scrollContainerRef, isLoading]);
+
+  useEffect(() => {
+    const closeMenu = () => setActionMenu(null);
+    window.addEventListener('click', closeMenu);
+    window.addEventListener('scroll', closeMenu, true);
+    window.addEventListener('resize', closeMenu);
+    return () => {
+      window.removeEventListener('click', closeMenu);
+      window.removeEventListener('scroll', closeMenu, true);
+      window.removeEventListener('resize', closeMenu);
+    };
+  }, []);
+
   // Scroll to bottom helper
   const scrollToBottom = (instant = false) => {
     requestAnimationFrame(() => {
@@ -143,24 +387,33 @@ export function ChatPage({
 
   // Initialize: fetch messages and setup realtime subscription
   useEffect(() => {
-    if (!conversationId) return;
+    if (!activeConversationId) {
+      setIsLoading(false);
+      setConfirmedMessages([]);
+      setPendingMessages([]);
+      latestSnapshotRef.current = '';
+      return;
+    }
 
     let isMounted = true;
 
     const setupChat = async () => {
       try {
         // Cache-then-network: show cached messages instantly, skip skeleton on revisit
-        const cached = queryClient.getQueryData<ChatPageMessage[]>(['messages', conversationId]);
+        const cached = queryClient.getQueryData<ChatPageMessage[]>(['messages', activeConversationId]);
         if (cached && cached.length > 0) {
+          lastSyncCreatedAtRef.current = cached[cached.length - 1]?.created_at || null;
           setConfirmedMessages(cached);
+          latestSnapshotRef.current = getSnapshot(cached);
           setIsLoading(false);
         } else {
           setIsLoading(true);
         }
 
         // Start subscription immediately in parallel — don't await
-        subscribeToMessages(conversationId, (newMsg: ChatPageMessage) => {
+        subscribeToMessages(activeConversationId, (newMsg: ChatPageMessage) => {
           if (!isMounted) return;
+          lastRealtimeAtRef.current = Date.now();
 
           const normalizedIncoming: ChatPageMessage = {
             ...newMsg,
@@ -179,7 +432,9 @@ export function ChatPage({
 
           setConfirmedMessages((prev) => {
             const merged = mergeById(prev, [normalizedIncoming]);
-            queryClient.setQueryData(['messages', conversationId], merged);
+            lastSyncCreatedAtRef.current = merged[merged.length - 1]?.created_at || lastSyncCreatedAtRef.current;
+            latestSnapshotRef.current = getSnapshot(merged);
+            queryClient.setQueryData(['messages', activeConversationId], merged);
             return merged;
           });
 
@@ -190,12 +445,9 @@ export function ChatPage({
         });
 
         // Fetch fresh messages
-        const msgs = await fetchConversationMessages(conversationId);
+        const msgs = await fetchConversationMessages(activeConversationId);
         if (!isMounted) return;
-
-        const normalizedMsgs = normalizeMessages(msgs as unknown[]);
-        setConfirmedMessages(normalizedMsgs);
-        queryClient.setQueryData(['messages', conversationId], normalizedMsgs);
+        applyServerMessages(msgs as unknown[]);
       } catch (err) {
         console.error('Error setting up chat:', err);
       } finally {
@@ -211,29 +463,49 @@ export function ChatPage({
         unsubscribeRef.current();
       }
     };
-  }, [conversationId]);
+  }, [activeConversationId]);
 
-  // Mark conversation as read — fully fire-and-forget, no query invalidation on open
+  // Mark conversation as read optimistically so unread badges disappear instantly.
   useEffect(() => {
-    if (!conversationId) return;
-    updateLastRead(conversationId).catch(() => {});
-  }, [conversationId]);
+    if (!activeConversationId || !currentUserId) return;
+
+    markConversationReadOptimistically({
+      queryClient,
+      userId: currentUserId,
+      conversationId: activeConversationId,
+    });
+  }, [activeConversationId, currentUserId, queryClient]);
 
   useEffect(() => {
-    if (!conversationId) return;
+    if (!activeConversationId) return;
 
     const interval = setInterval(async () => {
+      if (pollInFlightRef.current) return;
+      // Skip polling when realtime has been active recently.
+      if (Date.now() - lastRealtimeAtRef.current < 20000) return;
+
       try {
-        const msgs = await fetchConversationMessages(conversationId);
-        const normalizedMsgs = normalizeMessages(msgs as unknown[]);
-        setConfirmedMessages((prev) => mergeById(prev, normalizedMsgs));
+        pollInFlightRef.current = true;
+        const after = lastSyncCreatedAtRef.current;
+        if (!after) {
+          const msgs = await fetchConversationMessages(activeConversationId);
+          applyServerMessages(msgs as unknown[]);
+          return;
+        }
+
+        const delta = await fetchConversationMessagesAfter(activeConversationId, after, 120);
+        if (delta.length > 0) {
+          applyServerMessages(delta as unknown[]);
+        }
       } catch (err) {
         console.error('Polling messages failed:', err);
+      } finally {
+        pollInFlightRef.current = false;
       }
-    }, 10000);
+    }, 35000);
 
     return () => clearInterval(interval);
-  }, [conversationId]);
+  }, [activeConversationId]);
 
   // Auto-scroll when messages change
   useEffect(() => {
@@ -251,9 +523,330 @@ export function ChatPage({
     }
   }, [pendingMessages.length]);
 
+  const clearLongPress = () => {
+    if (longPressTimerRef.current) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  const openActionMenu = (messageId: string, x: number, y: number) => {
+    setActionMenu({
+      messageId,
+      x: Math.max(12, Math.min(window.innerWidth - 180, x)),
+      y: Math.max(12, Math.min(window.innerHeight - 180, y)),
+    });
+  };
+
+  const handleMessageContextMenu = (event: React.MouseEvent, message: ChatPageMessage) => {
+    const canOpen = canUseMessageActions(message) || (!canUseMessageActions(message) && message.sender_id !== currentUserId && Boolean(messageReportType));
+    if (!canOpen) return;
+    event.preventDefault();
+    event.stopPropagation();
+    openActionMenu(message.id, event.clientX, event.clientY);
+  };
+
+  const openActionMenuNearElement = (messageId: string, anchor: HTMLElement) => {
+    const rect = anchor.getBoundingClientRect();
+    openActionMenu(messageId, rect.right - 8, rect.bottom + 8);
+  };
+
+  const sortConversationsByLatest = (items: ConversationListItem[]) => {
+    return [...items].sort((a, b) => {
+      const aTime = a.lastMessage?.created_at
+        ? new Date(a.lastMessage.created_at).getTime()
+        : new Date(a.created_at ?? a.conversation?.created_at ?? 0).getTime();
+      const bTime = b.lastMessage?.created_at
+        ? new Date(b.lastMessage.created_at).getTime()
+        : new Date(b.created_at ?? b.conversation?.created_at ?? 0).getTime();
+      return bTime - aTime;
+    });
+  };
+
+  const updateConversationListPreview = (message: ChatPageMessage, targetConversationId?: string) => {
+    const conversationIdToUpdate = targetConversationId || activeConversationId;
+    if (!currentUserId || !conversationIdToUpdate) return;
+
+    queryClient.setQueryData(['conversations', currentUserId], (oldData: ConversationListItem[] | undefined) => {
+      if (!Array.isArray(oldData) || oldData.length === 0) return oldData;
+
+      let foundConversation = false;
+      const nextData = oldData.map((participant) => {
+        if (participant?.conversation?.id !== conversationIdToUpdate) return participant;
+
+        foundConversation = true;
+        return {
+          ...participant,
+          lastMessage: {
+            id: message.id,
+            sender_id: message.sender_id,
+            content: message.content,
+            attachments: message.attachments || [],
+            created_at: message.created_at,
+            type: message.type || 'user',
+            sender: message.sender || participant.lastMessage?.sender || { id: message.sender_id },
+          },
+          unreadCount: 0,
+        };
+      });
+
+      if (!foundConversation) return oldData;
+      return sortConversationsByLatest(nextData);
+    });
+  };
+
+  const refreshConversationListInBackground = () => {
+    if (!currentUserId) return;
+
+    const now = Date.now();
+    if (now - lastListRefreshAtRef.current < REFRESH_THROTTLE_MS) return;
+    lastListRefreshAtRef.current = now;
+
+    void queryClient.invalidateQueries({
+      queryKey: ['conversations', currentUserId],
+      type: 'all',
+    });
+  };
+
+  const refreshMessagesInBackground = () => {
+    if (!activeConversationId) return;
+
+    const now = Date.now();
+    if (now - lastThreadRefreshAtRef.current < REFRESH_THROTTLE_MS) return;
+    lastThreadRefreshAtRef.current = now;
+
+    void queryClient.invalidateQueries({
+      queryKey: ['messages', activeConversationId],
+      type: 'all',
+    });
+  };
+
+  const updateMessageThreadCache = (updater: (messages: ChatPageMessage[]) => ChatPageMessage[]) => {
+    if (!activeConversationId) return;
+
+    queryClient.setQueryData(['messages', activeConversationId], (oldData: ChatPageMessage[] | undefined) => {
+      if (!Array.isArray(oldData)) return oldData;
+      return updater(oldData);
+    });
+  };
+
+  const removeConversationListPreviewForMessage = (messageId: string) => {
+    if (!currentUserId || !activeConversationId) return;
+
+    queryClient.setQueryData(['conversations', currentUserId], (oldData: ConversationListItem[] | undefined) => {
+      if (!Array.isArray(oldData) || oldData.length === 0) return oldData;
+
+      return oldData.map((participant) => {
+        if (participant?.conversation?.id !== activeConversationId) return participant;
+        if (participant?.lastMessage?.id !== messageId) return participant;
+
+        return {
+          ...participant,
+          lastMessage: null,
+        };
+      });
+    });
+  };
+
+  const handleMessageTouchStart = (event: React.TouchEvent, message: ChatPageMessage) => {
+    const canOpen = canUseMessageActions(message) || (!canUseMessageActions(message) && message.sender_id !== currentUserId && Boolean(messageReportType));
+    if (!canOpen) return;
+    const touch = event.touches[0];
+    if (!touch) return;
+
+    clearLongPress();
+    longPressTimerRef.current = window.setTimeout(() => {
+      openActionMenu(message.id, touch.clientX, touch.clientY);
+    }, LONG_PRESS_MS);
+  };
+
+  const submitReportAction = async () => {
+    if (!reportTarget || !messageReportType) return;
+    setIsSubmittingAction(true);
+    try {
+      await submitReport({
+        reportType: messageReportType,
+        targetId: reportTarget.messageId,
+        reportedUserId: reportTarget.reportedUserId,
+        reason: reportReason,
+        description: reportDescription,
+      });
+      toast.success('Thank you. This report has been submitted.');
+      setConfirmReport(false);
+      setReportTarget(null);
+      setReportReason('spam');
+      setReportDescription('');
+    } catch (error) {
+      console.error('Failed to report message:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to submit report');
+    } finally {
+      setIsSubmittingAction(false);
+    }
+  };
+
+  const blockUserFromMessage = async (targetUserId: string) => {
+    setIsSubmittingAction(true);
+    try {
+      await blockUserViaApi(targetUserId);
+      toast.success('User blocked');
+      setActionMenu(null);
+    } catch (error) {
+      console.error('Failed to block user:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to block user');
+    } finally {
+      setIsSubmittingAction(false);
+    }
+  };
+
+  const beginEditMessage = (message: ChatPageMessage | null) => {
+    if (!message) return;
+    if (!canUseMessageActions(message)) {
+      toast.error('You can only edit within 1 minute');
+      return;
+    }
+    if (Array.isArray(message.attachments) && message.attachments.length > 0) {
+      toast.error('Editing attachment messages is not supported');
+      return;
+    }
+    if (isUnsentMessage(message)) {
+      toast.error('You cannot edit an unsent message');
+      return;
+    }
+
+    setEditingMessageId(message.id);
+    setEditingValue(message.content);
+    setActionMenu(null);
+  };
+
+  const submitEditMessage = async () => {
+    if (!editingMessageId) return;
+    const nextContent = editingValue.trim();
+    if (!nextContent) {
+      toast.error('Message cannot be empty');
+      return;
+    }
+
+    const existingMessage = allMessages.find((message) => message.id === editingMessageId);
+
+    setIsSubmittingAction(true);
+    try {
+      const updated = await editOwnMessage(editingMessageId, nextContent);
+      const nextEditedAt = updated?.edited_at || new Date().toISOString();
+      const nextMessagesUpdater = (messages: ChatPageMessage[]) =>
+        messages.map((msg) =>
+          msg.id === editingMessageId
+            ? {
+                ...msg,
+                content: updated?.content || nextContent,
+                is_edited: true,
+                edited_at: nextEditedAt,
+              }
+            : msg,
+        );
+
+      setConfirmedMessages(nextMessagesUpdater);
+      updateMessageThreadCache(nextMessagesUpdater);
+      updateConversationListPreview({
+        id: editingMessageId,
+        content: updated?.content || nextContent,
+        sender_id: existingMessage?.sender_id || currentUserId || '',
+        sender: existingMessage?.sender,
+        created_at: existingMessage?.created_at || new Date().toISOString(),
+        attachments: existingMessage?.attachments || [],
+        is_edited: true,
+        edited_at: nextEditedAt,
+      });
+      refreshMessagesInBackground();
+      refreshConversationListInBackground();
+      setEditingMessageId(null);
+      setEditingValue('');
+      toast.success('Message edited');
+    } catch (error) {
+      console.error('Failed to edit message:', error);
+      toast.error(error instanceof Error ? error.message : 'Unable to edit message');
+    } finally {
+      setIsSubmittingAction(false);
+    }
+  };
+
+  const runConfirmAction = async () => {
+    if (!confirmAction) return;
+
+    setIsSubmittingAction(true);
+    try {
+      if (confirmAction.type === 'unsend') {
+        const existingMessage = allMessages.find((message) => message.id === confirmAction.messageId);
+        const updated = await unsendOwnMessage(confirmAction.messageId);
+        const nextMessagesUpdater = (messages: ChatPageMessage[]) =>
+          messages.map((msg) =>
+            msg.id === confirmAction.messageId
+              ? {
+                  ...msg,
+                  content: updated?.content || 'This message was unsent',
+                  attachments: [],
+                  is_edited: false,
+                  edited_at: null,
+                }
+              : msg,
+          );
+
+        setConfirmedMessages(nextMessagesUpdater);
+        updateMessageThreadCache(nextMessagesUpdater);
+        updateConversationListPreview({
+          id: confirmAction.messageId,
+          content: updated?.content || 'This message was unsent',
+          sender_id: existingMessage?.sender_id || currentUserId || '',
+          sender: existingMessage?.sender,
+          created_at: existingMessage?.created_at || new Date().toISOString(),
+          attachments: [],
+          is_edited: false,
+          edited_at: null,
+        });
+        refreshMessagesInBackground();
+        refreshConversationListInBackground();
+        toast.success('Message unsent');
+      } else {
+        await deleteOwnMessage(confirmAction.messageId);
+        setConfirmedMessages((prev) => prev.filter((msg) => msg.id !== confirmAction.messageId));
+        setPendingMessages((prev) => prev.filter((msg) => msg.id !== confirmAction.messageId));
+        updateMessageThreadCache((messages) => messages.filter((msg) => msg.id !== confirmAction.messageId));
+        removeConversationListPreviewForMessage(confirmAction.messageId);
+        refreshMessagesInBackground();
+        refreshConversationListInBackground();
+        toast.success('Message deleted');
+      }
+    } catch (error) {
+      console.error('Message action failed:', error);
+      toast.error(error instanceof Error ? error.message : 'Action failed');
+    } finally {
+      setIsSubmittingAction(false);
+      setConfirmAction(null);
+    }
+  };
+
   // Handle sending messages
   const handleSend = async (message: string, atts?: ChatAttachment[], mentionedUserIds?: string[]) => {
     if (!currentUserId) return;
+
+    let targetConversationId = activeConversationId;
+    if (!targetConversationId) {
+      if (!ensureConversationId) {
+        toast.error('Unable to start chat. Please try again.');
+        return;
+      }
+      try {
+        targetConversationId = await ensureConversationId();
+        if (!targetConversationId) {
+          toast.error('Unable to start chat. Please try again.');
+          return;
+        }
+        setActiveConversationId(targetConversationId);
+      } catch (err) {
+        console.error('Failed to create conversation:', err);
+        toast.error(err instanceof Error ? err.message : 'Unable to start chat');
+        return;
+      }
+    }
 
     // Generate a client_id for optimistic UI
     const clientId = window.crypto?.randomUUID ? window.crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now();
@@ -273,10 +866,11 @@ export function ChatPage({
 
     // Add to pending immediately
     setPendingMessages((prev) => [...prev, optimisticMessage]);
+    updateConversationListPreview(optimisticMessage, targetConversationId);
 
     // Send in background - subscription will move it from pending to confirmed
     try {
-      const saved = await sendMessage(conversationId, message, clientId, atts || []);
+      const saved = await sendMessage(targetConversationId, message, clientId, atts || []);
       const normalizedSaved: ChatPageMessage = {
         ...(saved as ChatPageMessage),
         sender: Array.isArray(saved?.sender) ? (saved.sender as unknown[])[0] as ChatPageMessage["sender"] : saved?.sender,
@@ -285,6 +879,12 @@ export function ChatPage({
 
       setPendingMessages((prev) => prev.filter(m => m.client_id !== clientId && m.id !== tempId));
       setConfirmedMessages((prev) => mergeById(prev, [normalizedSaved]));
+      queryClient.setQueryData(['messages', targetConversationId], (oldData: ChatPageMessage[] | undefined) => {
+        if (!Array.isArray(oldData)) return [normalizedSaved];
+        return mergeById(oldData, [normalizedSaved]);
+      });
+      updateConversationListPreview(normalizedSaved, targetConversationId);
+      refreshConversationListInBackground();
 
       // Send mention notifications if there are mentioned users and trip context
       if (mentionedUserIds && mentionedUserIds.length > 0 && tripId && normalizedSaved.id) {
@@ -313,6 +913,7 @@ export function ChatPage({
       setPendingMessages((prev) =>
         prev.map(m => m.id === tempId ? { ...m, status: "failed" } : m)
       );
+      refreshConversationListInBackground();
     }
   };
 
@@ -320,7 +921,7 @@ export function ChatPage({
   const headerContent = (
     <header className="h-full glass border-b border-border/50 safe-x">
       <div className="h-[var(--safe-top)]" />
-      <div className="container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto px-3 sm:px-4">
+      <div className="w-full px-3 sm:px-4 lg:px-6 xl:px-8">
         <div className="flex items-center gap-3 h-[var(--header-height)]">
           {showBackButton && (
             <Button variant="ghost" size="icon" className="h-9 w-9" onClick={onBackClick}>
@@ -358,6 +959,7 @@ export function ChatPage({
               </>
             )}
           </button>
+          {headerActions}
         </div>
       </div>
     </header>
@@ -366,7 +968,12 @@ export function ChatPage({
   // Footer component
   const footerContent = (
     <div className="bg-background/95 backdrop-blur-sm border-t border-border/50 w-full">
-      <ChatComposer onSend={handleSend} tripMembers={tripMembers} />
+      <ChatComposer
+        onSend={handleSend}
+        tripMembers={tripMembers}
+        disabled={!canSend}
+        placeholder={canSend ? "Type a message..." : (blockedMessage || "Messaging is disabled for this user")}
+      />
     </div>
   );
 
@@ -420,11 +1027,44 @@ export function ChatPage({
     </div>
   ) : (
     <>
-      {allMessages.map((msg) => {
+      {/* WhatsApp-style sticky scroll date overlay */}
+      <div className="sticky top-2 z-30 flex justify-center pointer-events-none">
+        <span
+          className={cn(
+            "rounded-lg border border-[#d6d6d6] bg-white px-3 py-1 text-[11px] font-medium tracking-[0.01em] text-[#5f6368] shadow-[0_1px_2px_rgba(0,0,0,0.08)] transition-opacity duration-300",
+            scrollDateLabel ? "opacity-100" : "opacity-0"
+          )}
+        >
+          {scrollDateLabel || "\u00A0"}
+        </span>
+      </div>
+
+      {hiddenMessagesCount > 0 && (
+        <div className="mb-3 flex justify-center">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setVisibleCount((prev) => prev + LOAD_MORE_STEP)}
+          >
+            Load earlier messages ({hiddenMessagesCount})
+          </Button>
+        </div>
+      )}
+
+      {renderedMessages.map((msg, index) => {
+        const previous = index > 0 ? renderedMessages[index - 1] : null;
+        const currentDate = parseMessageDate(msg.created_at);
+        const previousDate = parseMessageDate(previous?.created_at);
+        const currentDayKey = currentDate ? getLocalDayKey(currentDate) : "";
+        const previousDayKey = previousDate ? getLocalDayKey(previousDate) : "";
+        const showDateSeparator = index === 0 || currentDayKey !== previousDayKey;
+        const dateSeparatorLabel = msg.created_at ? formatDateSeparatorLabel(String(msg.created_at)) : "";
         const isOwn = msg.sender_id === currentUserId;
         const isSystem = msg.type === 'system';
-        const timeLabel = msg.created_at
-          ? new Date(String(msg.created_at)).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+        const canOpenMenuForMessage = canUseMessageActions(msg) || (msg.sender_id !== currentUserId && Boolean(messageReportType));
+        const timeLabel = currentDate
+          ? currentDate.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
           : "";
         
         // Get sender info for group chats
@@ -434,98 +1074,344 @@ export function ChatPage({
         // Render system messages
         if (isSystem) {
           return (
-            <div key={String(msg.id)} className="flex justify-center py-3">
-              <p className="text-xs sm:text-sm text-muted-foreground text-center px-4">
-                {formatSystemMessageContent(msg.content)}
-              </p>
+            <div key={String(msg.id)}>
+              {showDateSeparator && dateSeparatorLabel && (
+                renderDateSeparator(dateSeparatorLabel, index === 0)
+              )}
+              <div className="flex justify-center py-3">
+                <p className="text-xs sm:text-sm text-muted-foreground text-center px-4">
+                  {formatSystemMessageContent(msg.content)}
+                </p>
+              </div>
             </div>
           );
         }
 
         return (
-          <div
-            key={String(msg.id)}
-            className={cn("flex gap-2 py-1.0", isOwn ? "justify-end" : "justify-start")}
-          >
-            {/* Avatar for other users' messages (left side) */}
-            {!isOwn && showSenderInfo && (
-              <Avatar className="h-6 w-6 shrink-0 mt-5 bg-white border border-border">
-                <AvatarImage 
-                  src={senderAvatar || getDefaultAvatar(msg.sender_id)} 
-                  alt={senderName} 
-                />
-                <AvatarFallback className="text-[8px] bg-white">
-                  {senderName.charAt(0).toUpperCase()}
-                </AvatarFallback>
-              </Avatar>
+          <div key={String(msg.id)}>
+            {showDateSeparator && dateSeparatorLabel && (
+              renderDateSeparator(dateSeparatorLabel, index === 0)
             )}
-            
+
             <div
-              className={cn("flex flex-col gap-0.5", isOwn ? "items-end" : "items-start")}
-              style={{ maxWidth: isOwn ? "75%" : "75%" }}
+              className={cn("flex gap-2 py-1.0", isOwn ? "justify-end" : "justify-start")}
+              onMouseEnter={() => setHoveredMessageId(String(msg.id))}
+              onMouseLeave={() => setHoveredMessageId((current) => (current === String(msg.id) ? null : current))}
             >
-              {/* Sender name - always show for group chats */}
+              {/* Avatar for other users' messages (left side) */}
               {!isOwn && showSenderInfo && (
-                <span className="text-xs font-medium text-foreground">{senderName}</span>
+                <Avatar className="h-6 w-6 shrink-0 mt-5 bg-white border border-border">
+                  <AvatarImage
+                    src={senderAvatar || getDefaultAvatar(msg.sender_id)}
+                    alt={senderName}
+                  />
+                  <AvatarFallback className="text-[8px] bg-white">
+                    {senderName.charAt(0).toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
               )}
-              
-              <div
-                className={cn(
-                  "relative px-4 py-2 rounded-2xl border shadow-sm",
-                  isOwn
-                    ? "bg-black text-white border-black rounded-br-sm"
-                    : "bg-white text-foreground border-border rounded-bl-sm"
-                )}
-                style={{ wordBreak: "break-word", overflowWrap: "anywhere" }}
-              >
-                <div className="text-sm sm:text-base leading-snug whitespace-pre-wrap">
-                  {(() => {
-                    const parts = parseMessageForDisplay(msg.content);
-                    return parts.map((part, idx) => 
-                      part.type === 'mention' ? (() => {
-                        const mentionUserId = part.username
-                          ? mentionUserIdByUsername.get(part.username.toLowerCase())
-                          : undefined;
-                        const mentionClassName = cn(
-                          "font-semibold text-emerald-400",
-                          mentionUserId ? "hover:underline" : ""
-                        );
-                        return (
-                          mentionUserId ? (
-                            <Link key={idx} to={`/user/${mentionUserId}`} className="cursor-pointer">
-                              <span className={mentionClassName}>{part.value}</span>
-                            </Link>
-                          ) : (
-                            <span key={idx} className={mentionClassName}>{part.value}</span>
+
+              <div className="flex items-start gap-1.5" style={{ maxWidth: isOwn ? "75%" : "75%" }}>
+                <div className={cn("flex flex-col gap-0.5", isOwn ? "items-end" : "items-start")}>
+                  {!isOwn && showSenderInfo && (
+                    <span className="text-xs font-medium text-foreground">{senderName}</span>
+                  )}
+
+                  <div
+                    className={cn(
+                      "relative px-4 py-2 rounded-2xl border shadow-sm",
+                      isOwn
+                        ? "bg-black text-white border-black rounded-br-sm"
+                        : "bg-white text-foreground border-border rounded-bl-sm"
+                    )}
+                    style={{ wordBreak: "break-word", overflowWrap: "anywhere" }}
+                    onContextMenu={(event) => handleMessageContextMenu(event, msg)}
+                    onTouchStart={(event) => handleMessageTouchStart(event, msg)}
+                    onTouchMove={clearLongPress}
+                    onTouchEnd={clearLongPress}
+                    onTouchCancel={clearLongPress}
+                  >
+                    {canOpenMenuForMessage && (
+                      <button
+                        type="button"
+                        aria-label="Message actions"
+                        className={cn(
+                          "absolute right-1.5 top-1.5 hidden h-5 w-5 items-center justify-center rounded-full transition md:flex",
+                          hoveredMessageId === String(msg.id) ? "opacity-100" : "opacity-0 pointer-events-none",
+                          isOwn
+                            ? "text-white/75 hover:bg-white/15 hover:text-white"
+                            : "text-muted-foreground hover:bg-black/10 hover:text-foreground"
+                        )}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          openActionMenuNearElement(String(msg.id), event.currentTarget);
+                        }}
+                      >
+                        <ChevronDown className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+
+                    <div className={cn(
+                      "pr-5 text-sm sm:text-base leading-snug whitespace-pre-wrap",
+                      isUnsentMessage(msg) && "italic opacity-80"
+                    )}>
+                      {(() => {
+                        const parts = parseMessageForDisplay(msg.content);
+                        return parts.map((part, idx) =>
+                          part.type === 'mention' ? (() => {
+                            const mentionUserId = part.username
+                              ? mentionUserIdByUsername.get(part.username.toLowerCase())
+                              : undefined;
+                            const mentionClassName = cn(
+                              "font-semibold text-emerald-400",
+                              mentionUserId ? "hover:underline" : ""
+                            );
+                            return mentionUserId ? (
+                              <Link key={idx} to={`/user/${mentionUserId}`} className="cursor-pointer">
+                                <span className={mentionClassName}>{part.value}</span>
+                              </Link>
+                            ) : (
+                              <span key={idx} className={mentionClassName}>{part.value}</span>
+                            );
+                          })() : (
+                            <span key={idx}>{part.value}</span>
                           )
                         );
-                      })() : (
-                        <span key={idx}>{part.value}</span>
-                      )
-                    );
-                  })()}
+                      })()}
+                    </div>
+                    {Array.isArray(msg.attachments) && msg.attachments.length > 0 && (
+                      <MessageAttachments attachments={msg.attachments} isOwn={isOwn} />
+                    )}
+                  </div>
+                  <div className={cn(
+                    "flex items-center gap-1 text-[10px] sm:text-[11px] px-2 mt-0.5",
+                    isOwn ? "justify-end text-muted-foreground/80" : "text-muted-foreground/80"
+                  )}>
+                    {msg.is_edited && !isUnsentMessage(msg) && <span>Edited</span>}
+                    <span>{timeLabel}</span>
+                    {isOwn && (
+                      <>
+                        {msg.status === "sending" && <Clock className="h-3 w-3" />}
+                        {(msg.status === "sent" || !msg.status) && <Check className="h-3 w-3" />}
+                        {msg.status === "failed" && <span className="text-red-500">!</span>}
+                      </>
+                    )}
+                  </div>
                 </div>
-                {Array.isArray(msg.attachments) && msg.attachments.length > 0 && (
-                  <MessageAttachments attachments={msg.attachments} isOwn={isOwn} />
-                )}
-              </div>
-              <div className={cn(
-                "flex items-center gap-1 text-[10px] sm:text-[11px] px-2 mt-0.5",
-                isOwn ? "justify-end text-muted-foreground/80" : "text-muted-foreground/80"
-              )}>
-                <span>{timeLabel}</span>
-                {isOwn && (
-                  <>
-                    {msg.status === "sending" && <Clock className="h-3 w-3" />}
-                    {(msg.status === "sent" || !msg.status) && <Check className="h-3 w-3" />}
-                    {msg.status === "failed" && <span className="text-red-500">!</span>}
-                  </>
-                )}
+
               </div>
             </div>
           </div>
         );
       })}
+
+      {actionMenu && actionMessage && (
+        <div
+          className="fixed z-[70] min-w-[164px] rounded-xl border border-border bg-popover p-1.5 shadow-2xl"
+          style={{ left: actionMenu.x, top: actionMenu.y }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          {canUseMessageActions(actionMessage) ? (
+            <>
+              {!isUnsentMessage(actionMessage) && (
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-accent"
+                  onClick={() => beginEditMessage(actionMessage)}
+                >
+                  <Pencil className="h-4 w-4" />
+                  Edit
+                </button>
+              )}
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-accent"
+                onClick={() => {
+                  setConfirmAction({ type: 'unsend', messageId: actionMessage.id });
+                  setActionMenu(null);
+                }}
+              >
+                <Undo2 className="h-4 w-4" />
+                Unsend
+              </button>
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-destructive hover:bg-accent"
+                onClick={() => {
+                  setConfirmAction({ type: 'delete', messageId: actionMessage.id });
+                  setActionMenu(null);
+                }}
+              >
+                <Trash2 className="h-4 w-4" />
+                Delete
+              </button>
+            </>
+          ) : (
+            actionMessage.sender_id !== currentUserId && messageReportType && (
+              <>
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-accent"
+                  onClick={() => {
+                    setReportTarget({
+                      messageId: String(actionMessage.id),
+                      reportedUserId: String(actionMessage.sender_id),
+                    });
+                    setActionMenu(null);
+                  }}
+                >
+                  Report Message
+                </button>
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-destructive hover:bg-accent"
+                  onClick={() => void blockUserFromMessage(String(actionMessage.sender_id))}
+                  disabled={isSubmittingAction}
+                >
+                  Block User
+                </button>
+              </>
+            )
+          )}
+        </div>
+      )}
+
+      <Dialog
+        open={Boolean(editingMessageId)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditingMessageId(null);
+            setEditingValue('');
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit message</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Input
+              value={editingValue}
+              onChange={(event) => setEditingValue(event.target.value)}
+              placeholder="Update your message"
+              autoFocus
+              maxLength={2000}
+            />
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setEditingMessageId(null);
+                  setEditingValue('');
+                }}
+                disabled={isSubmittingAction}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                onClick={() => void submitEditMessage()}
+                disabled={isSubmittingAction || !editingValue.trim()}
+              >
+                Save
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(reportTarget)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setReportTarget(null);
+            setReportReason('spam');
+            setReportDescription('');
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Report Message</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <RadioGroup value={reportReason} onValueChange={(value) => setReportReason(value as ReportReasonValue)}>
+              {REPORT_REASON_OPTIONS.map((option) => (
+                <div key={option.value} className="flex items-center gap-2">
+                  <RadioGroupItem id={`reason-${option.value}`} value={option.value} />
+                  <Label htmlFor={`reason-${option.value}`}>{option.label}</Label>
+                </div>
+              ))}
+            </RadioGroup>
+            <Textarea
+              value={reportDescription}
+              onChange={(event) => setReportDescription(event.target.value)}
+              placeholder="Add details (optional)"
+              rows={3}
+            />
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setReportTarget(null);
+                  setReportReason('spam');
+                  setReportDescription('');
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                onClick={() => setConfirmReport(true)}
+                disabled={isSubmittingAction}
+              >
+                Continue
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={confirmReport} onOpenChange={setConfirmReport}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you sure you want to report this content?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This report will be submitted to moderators for review.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isSubmittingAction}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void submitReportAction()} disabled={isSubmittingAction}>
+              Submit Report
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={Boolean(confirmAction)} onOpenChange={(open) => !open && setConfirmAction(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {confirmAction?.type === 'unsend' ? 'Unsend this message?' : 'Delete this message?'}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {confirmAction?.type === 'unsend'
+                ? 'This will replace it with an unsent notice for everyone in this chat.'
+                : 'This will remove the message from this chat for everyone.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isSubmittingAction}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void runConfirmAction()} disabled={isSubmittingAction}>
+              Confirm
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 
@@ -539,10 +1425,10 @@ export function ChatPage({
       <button
         type="button"
         onClick={() => scrollToBottom()}
-        className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+5.5rem)] right-4 z-50 flex h-8 w-8 items-center justify-center rounded-full bg-background border border-border shadow-lg hover:bg-muted transition-colors"
+        className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+5.2rem)] right-4 z-50 flex h-10 w-10 items-center justify-center rounded-full bg-zinc-500 text-white shadow-[0_8px_22px_rgba(0,0,0,0.28)] ring-2 ring-white/70 hover:bg-zinc-600 active:scale-95 transition"
         aria-label="Scroll to bottom"
       >
-        <ChevronDown className="h-5 w-5 text-foreground" />
+        <ArrowDown className="h-5 w-5" />
       </button>
     ) : null,
   };

@@ -1,0 +1,2 @@
+-- Remote history placeholder for migration version 20260410081000
+-- Intentionally empty to align local migration directory with remote history.

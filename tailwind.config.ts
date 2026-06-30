@@ -149,7 +149,7 @@ export default {
         "slide-down": "slide-down 0.3s ease-out",
         "fade-in": "fade-in 0.2s ease-out",
         "settle-pulse": "settle-pulse 1s ease-in-out 3",
-        "page-enter": "page-enter 0.3s ease-out forwards",
+        "page-enter": "page-enter 1s ease-out forwards",
       },
     },
   },

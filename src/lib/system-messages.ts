@@ -1,6 +1,11 @@
 import { supabase } from "@/lib/supabase";
 
-export type SystemMessageAction = "expense_added" | "member_joined" | "trip_created";
+export type SystemMessageAction =
+  | "expense_added"
+  | "expense_edited"
+  | "expense_deleted"
+  | "member_joined"
+  | "trip_created";
 
 interface SystemMessagePayload {
   conversationId: string;
@@ -26,6 +31,10 @@ export async function sendSystemMessage({
 
     if (action === "expense_added" && details) {
       content = `${senderName} added expense: ${details}`;
+    } else if (action === "expense_edited" && details) {
+      content = `${senderName} edited expense: ${details}`;
+    } else if (action === "expense_deleted" && details) {
+      content = `${senderName} deleted expense: ${details}`;
     } else if (action === "member_joined") {
       content = `${senderName} joined the trip`;
     } else if (action === "trip_created") {

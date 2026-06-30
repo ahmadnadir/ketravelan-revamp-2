@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { ChevronLeft, Mail, Send, Plane, Hotel, Map, FileText, Wallet, CalendarDays, Users, Car, Train, Camera, Utensils, ShieldCheck, MessageSquare, HelpCircle, CreditCard, Globe } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 
-const CONTACT_EMAIL = "support@ketravelan.xyz";
+const CONTACT_EMAIL = "support@ketravelan.com";
 
 const helpTopics = [
   { label: "Flight", icon: Plane },

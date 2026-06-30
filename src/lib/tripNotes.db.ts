@@ -64,10 +64,13 @@ export async function updateTripNote(
 }
 
 export async function deleteTripNote(noteId: string): Promise<void> {
-  const { error } = await supabase
+  const { count, error } = await supabase
     .from('trip_notes')
-    .delete()
+    .delete({ count: 'exact' })
     .eq('id', noteId);
   
   if (error) throw error;
+  if (!count) {
+    throw new Error('Delete failed: note not found or permission denied.');
+  }
 }

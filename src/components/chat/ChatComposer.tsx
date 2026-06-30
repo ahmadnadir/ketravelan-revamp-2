@@ -28,9 +28,10 @@ interface ChatComposerProps {
   placeholder?: string;
   onTypingChange?: (typing: boolean) => void;
   tripMembers?: TripMember[];
+  disabled?: boolean;
 }
 
-export function ChatComposer({ onSend, placeholder = "Type a message...", onTypingChange, tripMembers = [] }: ChatComposerProps) {
+export function ChatComposer({ onSend, placeholder = "Type a message...", onTypingChange, tripMembers = [], disabled = false }: ChatComposerProps) {
   const [message, setMessage] = useState("");
   const [attachmentOpen, setAttachmentOpen] = useState(false);
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
@@ -41,6 +42,7 @@ export function ChatComposer({ onSend, placeholder = "Type a message...", onTypi
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleSend = async () => {
+    if (disabled) return;
     if (!message.trim() && pendingAttachments.length === 0) return;
     setIsProcessing(true);
     // Upload files now (on send)
@@ -218,12 +220,10 @@ export function ChatComposer({ onSend, placeholder = "Type a message...", onTypi
 
   return (
     <>
-      <div 
-        className="w-full border-t border-border/30"
-      >
+      <div className="w-full">
         {/* Slim input container - WhatsApp style */}
-        <div className="px-2 sm:px-3 py-2">
-          <div className="container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto">
+        <div className="px-3 py-1.5">
+          <div>
             {/* Mention suggestions dropdown */}
             {showMentionDropdown && mentionSuggestions.length > 0 && (
               <div className="mb-1.5 max-h-32 overflow-y-auto bg-secondary border border-border/50 rounded-lg">
@@ -296,6 +296,7 @@ export function ChatComposer({ onSend, placeholder = "Type a message...", onTypi
                 size="icon" 
                 className="shrink-0 h-8 w-8 hover:bg-secondary/80"
                 onClick={() => setAttachmentOpen(true)}
+                disabled={disabled}
               >
                 <Paperclip className="h-4 w-4 text-muted-foreground" />
               </Button>
@@ -306,17 +307,18 @@ export function ChatComposer({ onSend, placeholder = "Type a message...", onTypi
                 onChange={handleInputChange}
                 onBlur={handleInputBlur}
                 onKeyDown={(e) => e.key === "Enter" && handleSend()}
-                className="flex-1 rounded-2xl bg-white text-black border-0 h-9 text-sm px-3 placeholder:text-gray-400"
+                className="flex-1 rounded-2xl bg-white text-black border border-[#d9d9d9] h-9 text-sm px-3 placeholder:text-gray-400 shadow-[0_1px_3px_rgba(0,0,0,0.14)] focus-visible:ring-2 focus-visible:ring-black/10 focus-visible:ring-offset-0"
                 style={{
                   fontSize: '16px', // Prevent iOS zoom on focus
                 }}
+                disabled={disabled}
               />
               <Button
                 size="icon"
                 className="shrink-0 rounded-full h-8 w-8 hover:opacity-80"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={handleSend}
-                disabled={(!message.trim() && pendingAttachments.length === 0) || isProcessing}
+                disabled={disabled || (!message.trim() && pendingAttachments.length === 0) || isProcessing}
               >
                 {isProcessing ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />

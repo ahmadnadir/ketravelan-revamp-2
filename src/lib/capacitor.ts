@@ -116,6 +116,25 @@ export async function initializeCapacitor() {
         // Case A: inside a fixed container – CSS handles it.
         if (!scrollParent && isInFixedContainer(activeElement)) return;
 
+        // Case D: inside a dialog – the dialog itself is the scrollable area.
+        // Scroll within the dialog content to bring the focused field into view.
+        const dialogEl = activeElement.closest<HTMLElement>('[role="dialog"]');
+        if (dialogEl) {
+          const dialogScrollParent = scrollParent ?? (
+            window.getComputedStyle(dialogEl).overflowY !== 'visible' ? dialogEl : null
+          );
+          if (dialogScrollParent) {
+            const keyboardInset = Math.max(0, keyboardHeight || 0);
+            const viewportBottom = window.innerHeight - keyboardInset;
+            const rect = activeElement.getBoundingClientRect();
+            const minVisibleBottom = viewportBottom - 20;
+            if (rect.bottom > minVisibleBottom) {
+              dialogScrollParent.scrollBy({ top: rect.bottom - minVisibleBottom + 16, behavior: "smooth" });
+            }
+          }
+          return;
+        }
+
         // Case B: in the flex footer outside the scroll area (chat composer).
         // The shell shrank so scroll the content list to the bottom.
         if (!scrollParent) {

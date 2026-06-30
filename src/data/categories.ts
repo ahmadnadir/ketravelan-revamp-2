@@ -9,6 +9,8 @@ export const tripCategories = [
   { id: "culture", label: "Culture", icon: "🏛️" },
   { id: "food", label: "Food", icon: "🍜" },
   { id: "cross-border", label: "Cross Border", icon: "🌍" },
+  { id: "runcation", label: "Runcation", icon: "🏃" },
+  { id: "umrah-diy", label: "Umrah DIY", icon: "🕌" },
 ] as const;
 
 export type TripCategory = typeof tripCategories[number];

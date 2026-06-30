@@ -6,15 +6,15 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY")!;
-const RESEND_FROM = Deno.env.get("RESEND_FROM") ?? "Ketravelan <no-reply@ketravelan.xyz>";
-const SITE_URL = Deno.env.get("SITE_URL") ?? "https://ketravelan.xyz";
+const RESEND_FROM = Deno.env.get("RESEND_FROM") ?? "Ketravelan <no-reply@ketravelan.com>";
+const SITE_URL = Deno.env.get("SITE_URL") ?? "https://ketravelan.com";
 
 const SITE_ORIGIN = (() => {
   try {
     return new URL(SITE_URL).origin;
   } catch {
     const m = SITE_URL.match(/^(https?:\/\/[^/]+)/);
-    return m ? m[1] : "https://ketravelan.xyz";
+    return m ? m[1] : "https://ketravelan.com";
   }
 })();
 
@@ -40,7 +40,7 @@ function buildCorsHeaders(req: Request): Record<string, string> {
     "http://127.0.0.1:8080",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-    "https://ketravelan.xyz",
+    "https://ketravelan.com",
     "http://10.0.2.2:5173",
     "capacitor://localhost",
   ]);
@@ -67,6 +67,11 @@ function escapeHtml(v: string) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function isTripNotificationEnabled(tripSettings: any, key: "new_members_join" | "expense_updates" | "chat_activity", fallback: boolean) {
+  const rawValue = tripSettings?.notifications?.[key];
+  return typeof rawValue === "boolean" ? rawValue : fallback;
 }
 
 async function sendResendRawEmail(opts: { to: string; subject: string; html: string; text?: string }) {
@@ -190,11 +195,18 @@ serve(async (req: Request) => {
 
     const { data: trip, error: tripErr } = await admin
       .from("trips")
-      .select("id,title,destination,creator_id,slug,cover_image")
+      .select("id,title,destination,creator_id,slug,cover_image,trip_settings")
       .eq("id", body.tripId)
       .maybeSingle();
     if (tripErr) throw tripErr;
     if (!trip) throw new Error("Trip not found");
+
+    if (!isTripNotificationEnabled(trip.trip_settings, "new_members_join", true)) {
+      return new Response(JSON.stringify({ ok: true, skipped: true, reason: "Trip setting disabled new member notifications" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json", ...corsHeaders },
+      });
+    }
 
     const { data: creatorProfile, error: creatorErr } = await admin
       .from("profiles")
@@ -238,7 +250,7 @@ serve(async (req: Request) => {
       title: "New Join Alert",
       messageHtml,
       ctaUrl: tripUrl,
-      logoUrl: "https://ketravelan.xyz/ketravelan_logo.png",
+      logoUrl: "https://ketravelan.com/ketravelan_logo.png",
       ctaLabel: "View Trip",
       coverImage: trip.cover_image,
     });

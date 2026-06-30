@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, useRef } from "react";
-import { Plus, Search, MoreVertical, FileText, Pin, PinOff } from "lucide-react";
+import { useState, useEffect, useCallback, useRef, MouseEvent } from "react";
+import { Plus, Search, MoreVertical, FileText, Pin, PinOff, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
@@ -43,6 +43,8 @@ export function TripNotes({ tripId }: TripNotesProps) {
   const [editorOpen, setEditorOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [noteToDelete, setNoteToDelete] = useState<TripNoteDB | null>(null);
+  const [linkDialogOpen, setLinkDialogOpen] = useState(false);
+  const [pendingLinkUrl, setPendingLinkUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
 
@@ -82,12 +84,17 @@ export function TripNotes({ tripId }: TripNotesProps) {
     return aPinned - bPinned;
   });
 
-  const pinJustHappened = useRef(false);
+  const noteActionJustHappened = useRef(false);
 
-  const handleTogglePin = (note: TripNoteDB, e: Event) => {
-    e.stopPropagation();
-    pinJustHappened.current = true;
-    setTimeout(() => { pinJustHappened.current = false; }, 300);
+  const markNoteAction = () => {
+    noteActionJustHappened.current = true;
+    window.setTimeout(() => {
+      noteActionJustHappened.current = false;
+    }, 300);
+  };
+
+  const handleTogglePin = (note: TripNoteDB) => {
+    markNoteAction();
     setPinnedIds(prev => {
       const next = new Set(prev);
       if (next.has(note.id)) {
@@ -114,7 +121,7 @@ export function TripNotes({ tripId }: TripNotesProps) {
   };
 
   const handleOpenNote = (note: TripNoteDB) => {
-    if (pinJustHappened.current) return;
+    if (noteActionJustHappened.current) return;
     setSelectedNote(note);
     setEditorOpen(true);
   };
@@ -145,14 +152,18 @@ export function TripNotes({ tripId }: TripNotesProps) {
       });
     } catch (error) {
       console.error("Failed to delete note:", error);
-      toast({ title: "Failed to delete note" });
+      toast({
+        title: "Failed to delete note",
+        description: "You may not have permission to delete this note.",
+      });
     }
   };
 
-  const handleDeleteFromCard = (note: TripNoteDB, e: Event) => {
-    e.stopPropagation();
+  const handleDeleteFromCard = (note: TripNoteDB) => {
+    markNoteAction();
     setNoteToDelete(note);
-    setDeleteDialogOpen(true);
+    // Let DropdownMenu close first to avoid modal transition jank.
+    window.setTimeout(() => setDeleteDialogOpen(true), 0);
   };
 
   const confirmDelete = async () => {
@@ -161,6 +172,43 @@ export function TripNotes({ tripId }: TripNotesProps) {
       setNoteToDelete(null);
       setDeleteDialogOpen(false);
     }
+  };
+
+  const normalizeExternalUrl = (rawUrl: string): string | null => {
+    const trimmed = rawUrl.trim();
+    if (!trimmed) return null;
+
+    const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+
+    try {
+      const parsed = new URL(withProtocol);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+      return parsed.toString();
+    } catch {
+      return null;
+    }
+  };
+
+  const requestOpenLink = (rawUrl: string) => {
+    const normalized = normalizeExternalUrl(rawUrl);
+    if (!normalized) {
+      toast({ title: "Invalid link", description: "This URL cannot be opened." });
+      return;
+    }
+    setPendingLinkUrl(normalized);
+    setLinkDialogOpen(true);
+  };
+
+  const confirmOpenLink = () => {
+    if (!pendingLinkUrl) return;
+    window.open(pendingLinkUrl, "_blank", "noopener,noreferrer");
+    setLinkDialogOpen(false);
+    setPendingLinkUrl(null);
+  };
+
+  const cancelOpenLink = () => {
+    setLinkDialogOpen(false);
+    setPendingLinkUrl(null);
   };
 
   const formatRelativeDate = (iso: string) => {
@@ -242,9 +290,10 @@ export function TripNotes({ tripId }: TripNotesProps) {
                         note={note}
                         isPinned={true}
                         onClick={() => handleOpenNote(note)}
-                        onDelete={(e) => handleDeleteFromCard(note, e)}
-                        onTogglePin={(e) => handleTogglePin(note, e)}
+                        onDelete={() => handleDeleteFromCard(note)}
+                        onTogglePin={() => handleTogglePin(note)}
                         formatDate={formatRelativeDate}
+                        onLinkClick={requestOpenLink}
                       />
                     ))}
                   </div>
@@ -264,9 +313,10 @@ export function TripNotes({ tripId }: TripNotesProps) {
                         note={note}
                         isPinned={false}
                         onClick={() => handleOpenNote(note)}
-                        onDelete={(e) => handleDeleteFromCard(note, e)}
-                        onTogglePin={(e) => handleTogglePin(note, e)}
+                        onDelete={() => handleDeleteFromCard(note)}
+                        onTogglePin={() => handleTogglePin(note)}
                         formatDate={formatRelativeDate}
+                        onLinkClick={requestOpenLink}
                       />
                     ))}
                   </div>
@@ -319,6 +369,30 @@ export function TripNotes({ tripId }: TripNotesProps) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* External Link Confirmation Dialog */}
+      <AlertDialog
+        open={linkDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) cancelOpenLink();
+          else setLinkDialogOpen(true);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Open External Link?</AlertDialogTitle>
+            <AlertDialogDescription>
+              You are about to open this link in your browser:
+              <br />
+              <span className="break-all text-foreground">{pendingLinkUrl}</span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={cancelOpenLink}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmOpenLink}>Open Link</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }
@@ -327,18 +401,27 @@ interface NoteCardProps {
   note: TripNoteDB;
   isPinned: boolean;
   onClick: () => void;
-  onDelete: (e: Event) => void;
-  onTogglePin: (e: Event) => void;
+  onDelete: () => void;
+  onTogglePin: () => void;
   formatDate: (iso: string) => string;
+  onLinkClick: (url: string) => void;
 }
 
-function NoteCard({ note, isPinned, onClick, onDelete, onTogglePin, formatDate }: NoteCardProps) {
+function NoteCard({ note, isPinned, onClick, onDelete, onTogglePin, formatDate, onLinkClick }: NoteCardProps) {
   // Get content preview from blocks
   const contentPreview = note.blocks
     .map((b) => b.content)
     .join(" ")
     .substring(0, 100)
     .trim();
+
+  const linkPattern = /(https?:\/\/[^\s]+|(?:www\.)[^\s]+)/gi;
+  const previewParts = contentPreview.split(linkPattern);
+
+  const handlePreviewLinkClick = (event: MouseEvent<HTMLButtonElement>, linkText: string) => {
+    event.stopPropagation();
+    onLinkClick(linkText);
+  };
 
   return (
     <Card
@@ -358,7 +441,21 @@ function NoteCard({ note, isPinned, onClick, onDelete, onTogglePin, formatDate }
           </div>
           {contentPreview && (
             <p className="text-xs sm:text-sm text-muted-foreground line-clamp-2 mt-0.5 sm:mt-1">
-              {contentPreview}
+              {previewParts.map((part, index) => {
+                const isLink = linkPattern.test(part);
+                linkPattern.lastIndex = 0;
+                if (!isLink) return <span key={`text-${index}`}>{part}</span>;
+                return (
+                  <button
+                    key={`link-${index}`}
+                    type="button"
+                    onClick={(e) => handlePreviewLinkClick(e, part)}
+                    className="underline decoration-dotted underline-offset-2 text-primary hover:text-primary/80"
+                  >
+                    {part}
+                  </button>
+                );
+              })}
             </p>
           )}
           <p className="text-[10px] sm:text-xs text-muted-foreground/70 mt-1.5 sm:mt-2">
@@ -371,16 +468,33 @@ function NoteCard({ note, isPinned, onClick, onDelete, onTogglePin, formatDate }
               <MoreVertical className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="bg-popover">
-            <DropdownMenuItem onSelect={(e) => onTogglePin(e)}>
+          <DropdownMenuContent
+            align="end"
+            className="bg-popover"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <DropdownMenuItem
+              onClick={(e) => e.stopPropagation()}
+              onSelect={(e) => {
+                e.stopPropagation();
+                onTogglePin();
+              }}
+            >
               {isPinned ? (
                 <><PinOff className="h-4 w-4 mr-2" />Unpin</>
               ) : (
                 <><Pin className="h-4 w-4 mr-2" />Pin to top</>
               )}
             </DropdownMenuItem>
-            <DropdownMenuItem onSelect={(e) => onDelete(e)} className="text-destructive">
-              Delete
+            <DropdownMenuItem
+              onClick={(e) => e.stopPropagation()}
+              onSelect={(e) => {
+                e.stopPropagation();
+                onDelete();
+              }}
+              className="text-destructive"
+            >
+              <Trash2 className="h-4 w-4 mr-2" />Delete
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

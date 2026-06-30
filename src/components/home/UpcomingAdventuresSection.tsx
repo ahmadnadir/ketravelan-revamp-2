@@ -16,7 +16,13 @@ export function UpcomingAdventuresSection() {
     try {
       setIsLoading(true);
       const data = await fetchTrips({});
-      const mappedTrips = (data || []).slice(0, 6).map((trip: any) => {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const upcomingData = (data || []).filter((trip: any) => {
+        if (!trip.end_date) return true;
+        return new Date(trip.end_date) >= today;
+      });
+      const mappedTrips = upcomingData.slice(0, 6).map((trip: any) => {
         const maxParticipants = trip.max_participants ?? 0;
         const currentParticipants = trip.current_participants ?? 0;
         let slotsLeft = maxParticipants - currentParticipants;
@@ -25,7 +31,7 @@ export function UpcomingAdventuresSection() {
           id: trip.id ?? '',
           title: trip.title ?? 'Untitled',
           destination: trip.destination ?? 'Unknown',
-          imageUrl: trip.cover_image || '/placeholder.svg',
+          imageUrl: trip.cover_image || '/default-trip-photo.jpeg',
           startDate: trip.start_date ? new Date(trip.start_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '-',
           endDate: trip.end_date ? new Date(trip.end_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '-',
           price: trip.price ?? 0,
@@ -65,7 +71,7 @@ export function UpcomingAdventuresSection() {
       </div>
 
       {/* Trip Cards - Horizontal Scroll */}
-      <div className="flex gap-3 sm:gap-4 overflow-x-auto scrollbar-hide pb-2 snap-x snap-mandatory">
+      <div className="flex items-stretch gap-3 sm:gap-4 overflow-x-auto scrollbar-hide pb-2 snap-x snap-mandatory h-[420px] sm:h-[450px]">
         {isLoading ? (
           <div className="w-full py-8 text-center text-muted-foreground text-sm">
             Loading trips...
@@ -75,7 +81,8 @@ export function UpcomingAdventuresSection() {
             <TripCard
               key={trip.id}
               {...trip}
-              className="w-[280px] sm:w-[320px] shrink-0 snap-start"
+              creatorId={trip.creator_id ?? trip.creator?.id}
+              className="w-[280px] sm:w-[320px] shrink-0 snap-start h-full"
             />
           ))
         ) : (

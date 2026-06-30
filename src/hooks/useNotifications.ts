@@ -32,7 +32,7 @@ export function useNotifications(
     queryFn: () => fetchNotifications(filters),
     staleTime: 1000 * 30, // Fresh for 30 seconds
     gcTime: 1000 * 60 * 5, // Cache for 5 minutes
-    refetchOnWindowFocus: true,
+    refetchOnWindowFocus: false,
     ...options,
   });
 }
@@ -48,7 +48,7 @@ export function useUnreadNotificationCount(
     queryFn: fetchUnreadCount,
     staleTime: 1000 * 20, // Fresh for 20 seconds
     gcTime: 1000 * 60 * 5, // Cache for 5 minutes
-    refetchOnWindowFocus: true,
+    refetchOnWindowFocus: false,
     ...options,
   });
 }
@@ -84,8 +84,8 @@ export function useMarkAllNotificationsAsRead() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['notifications'] });
       toast.success('All notifications marked as read');
-      // All read → badge must be zero.
-      resetBadgeCount().catch(() => {});
+      // Keep chat unread reflected in the app icon badge.
+      syncBadgeWithUnreadCount().catch(() => {});
     },
     onError: (error) => {
       console.error('Error marking all notifications as read:', error);
@@ -125,8 +125,8 @@ export function useDeleteAllNotifications() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['notifications'] });
       toast.success('All notifications cleared');
-      // Nothing left to notify about.
-      resetBadgeCount().catch(() => {});
+      // Keep chat unread reflected in the app icon badge.
+      syncBadgeWithUnreadCount().catch(() => {});
     },
     onError: (error) => {
       console.error('Error deleting all notifications:', error);

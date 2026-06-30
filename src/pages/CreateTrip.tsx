@@ -47,6 +47,8 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
+  DialogFooter,
 } from "@/components/ui/dialog";
 import {
   Drawer,
@@ -59,10 +61,12 @@ import {
 import { toast } from "@/hooks/use-toast";
 import { tripCategories } from "@/data/categories";
 import { createTrip, updateTrip, fetchTripDetails, deleteDraftTrip } from "@/lib/trips";
-import { uploadImageFromDataUrl, isUrl } from "@/lib/imageStorage";
+import { normalizeImageDataUrl, optimizeImageDataUrl, uploadImageFromDataUrl, isUrl } from "@/lib/imageStorage";
 import { supabase } from "@/lib/supabase";
 import { scheduleTripReminder } from "@/lib/tripReminders";
 import { useQueryClient } from "@tanstack/react-query";
+import { Calendar as DateCalendar } from "@/components/ui/calendar";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 const steps = [
   { id: 1, title: "Visibility" },
@@ -73,6 +77,7 @@ const steps = [
 
 export default function CreateTrip() {
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
   const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const [isPublishing, setIsPublishing] = useState(false);
@@ -95,6 +100,7 @@ export default function CreateTrip() {
   const [showShareModal, setShowShareModal] = useState(false);
   const [publishedTripId, setPublishedTripId] = useState<string | null>(null);
   const [showExitModal, setShowExitModal] = useState(false);
+  const [datePickerField, setDatePickerField] = useState<"start" | "end" | null>(null);
   const [isLoadingTrip, setIsLoadingTrip] = useState(false);
   const [tripStatus, setTripStatus] = useState<'draft' | 'published' | null>(null);
   // Store draft snapshot for share modal (since we clear draft before showing modal)
@@ -102,6 +108,7 @@ export default function CreateTrip() {
   // File input ref for gallery images
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const hasLoadedEditTrip = useRef(false);
+  const isEditTripLoading = Boolean(editTripId) && isLoadingTrip;
 
   useEffect(() => {
     topRef.current?.scrollIntoView({ behavior: "auto", block: "start" });
@@ -146,19 +153,36 @@ export default function CreateTrip() {
 
       const parsedStops = tripData.stops ? JSON.parse(tripData.stops) : [];
       // Load travelStyles and expectations from separate fields
-      const travelStyleTags = tripData.travel_styles || [];
-      const expectationTags = tripData.tags || [];
+      const travelStyleTags = Array.isArray(tripData.travel_styles) ? tripData.travel_styles : [];
+      const expectationTags = Array.isArray(tripData.tags) ? tripData.tags : [];
 
-      const budgetCategories = tripData.budget_breakdown?.categories || [];
-      const roughTotal = tripData.budget_breakdown?.total || 0;
+      // budget_breakdown may be null, an array, or an object with various shapes
+      const budgetBreakdownRaw = tripData.budget_breakdown ?? {};
+      const budgetCategories = Array.isArray(budgetBreakdownRaw?.categories)
+        ? budgetBreakdownRaw.categories
+        : [];
+      const roughTotal = typeof budgetBreakdownRaw?.total === 'number' ? budgetBreakdownRaw.total : 0;
+      // For detailed budget: extract only plain numeric key→value pairs (skip meta keys like 'categories'/'total')
+      const detailedBudgetResolved = (() => {
+        if (tripData.budget_mode !== 'detailed') return {};
+        if (!budgetBreakdownRaw || typeof budgetBreakdownRaw !== 'object' || Array.isArray(budgetBreakdownRaw)) return {};
+        const result: Record<string, number> = {};
+        for (const [key, val] of Object.entries(budgetBreakdownRaw)) {
+          if (key === 'categories' || key === 'total') continue;
+          if (typeof val === 'number') result[key] = val;
+        }
+        return result;
+      })();
 
-      const itineraryData = tripData.itinerary || [];
-      const simpleNotes = itineraryData[0]?.notes || '';
+      const itineraryData = Array.isArray(tripData.itinerary) ? tripData.itinerary : [];
+      const simpleNotes = typeof itineraryData[0]?.notes === 'string' ? itineraryData[0].notes : '';
       const dayByDayPlan = tripData.itinerary_type === 'dayByDay'
-        ? itineraryData.map((item: any) => ({
-            day: item.day,
-            activities: item.activities || []
-          }))
+        ? itineraryData
+            .filter((item: any) => item && typeof item.day === 'number')
+            .map((item: any) => ({
+              day: item.day,
+              activities: Array.isArray(item.activities) ? item.activities : [],
+            }))
         : [];
 
       const editDraft: TripDraft = {
@@ -178,7 +202,7 @@ export default function CreateTrip() {
         budgetType: tripData.budget_mode || 'skip',
         roughBudgetTotal: roughTotal,
         roughBudgetCategories: budgetCategories,
-        detailedBudget: tripData.budget_mode === 'detailed' ? tripData.budget_breakdown : {},
+        detailedBudget: detailedBudgetResolved,
         itineraryType: tripData.itinerary_type || 'skip',
         simpleNotes: simpleNotes,
         dayByDayPlan: dayByDayPlan,
@@ -236,10 +260,27 @@ export default function CreateTrip() {
 
     // Convert to base64 for localStorage storage
     const reader = new FileReader();
-    reader.onload = (event) => {
-      const base64 = event.target?.result as string;
-      if (base64 && draft.galleryImages.length < 5) {
-        updateDraft("galleryImages", [...draft.galleryImages, base64]);
+    reader.onload = async (event) => {
+      try {
+        const base64 = event.target?.result as string;
+        if (!base64 || draft.galleryImages.length >= 5) return;
+
+        const normalized = await normalizeImageDataUrl(base64);
+        const optimized = await optimizeImageDataUrl(normalized, {
+          maxDimension: 1920,
+          maxBytes: 1_500_000,
+          qualityStart: 0.82,
+          qualityMin: 0.58,
+        });
+
+        updateDraft("galleryImages", [...draft.galleryImages, optimized]);
+      } catch (error) {
+        console.warn("Failed to process gallery image", error);
+        toast({
+          title: "Image not supported",
+          description: "Please choose another photo or convert it to JPG/PNG.",
+          variant: "destructive",
+        });
       }
     };
     reader.readAsDataURL(file);
@@ -250,6 +291,46 @@ export default function CreateTrip() {
 
   const nextStep = () => setCurrentStep((prev) => Math.min(prev + 1, 4));
   const prevStep = () => setCurrentStep((prev) => Math.max(prev - 1, 1));
+
+  const parseDraftDate = (value: string): Date | undefined => {
+    if (!value) return undefined;
+    const [year, month, day] = value.split("-").map(Number);
+    if (!year || !month || !day) return undefined;
+    return new Date(year, month - 1, day);
+  };
+
+  const formatDateForDraft = (date: Date): string => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  };
+
+  const formatDateLabel = (value: string): string => {
+    const parsed = parseDraftDate(value);
+    if (!parsed) return "Select date";
+    return parsed.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+  };
+
+  const handleDatePick = (date?: Date) => {
+    if (!date || !datePickerField) return;
+
+    const nextDate = formatDateForDraft(date);
+    if (datePickerField === "start") {
+      updateDraft("startDate", nextDate);
+      if (draft.endDate && draft.endDate < nextDate) {
+        updateDraft("endDate", nextDate);
+      }
+    } else {
+      updateDraft("endDate", nextDate);
+    }
+
+    setDatePickerField(null);
+  };
 
   const canProceedStep2 = () => {
     return (
@@ -742,21 +823,39 @@ export default function CreateTrip() {
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1.5">
                     <label className="text-xs text-muted-foreground">Start</label>
-                    <Input
-                      type="date"
-                      value={draft.startDate}
-                      onChange={(e) => updateDraft("startDate", e.target.value)}
-                      className="rounded-xl text-sm"
-                    />
+                    <button
+                      type="button"
+                      onClick={() => setDatePickerField("start")}
+                      className={cn(
+                        "h-12 w-full rounded-xl border-2 bg-background px-3 text-left text-sm transition-colors flex items-center gap-2",
+                        draft.startDate
+                          ? "border-primary/60 text-foreground"
+                          : "border-border text-muted-foreground hover:border-primary/40"
+                      )}
+                    >
+                      <Calendar className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      <span className={cn("truncate", draft.startDate ? "text-foreground" : "text-muted-foreground")}>
+                        {formatDateLabel(draft.startDate)}
+                      </span>
+                    </button>
                   </div>
                   <div className="space-y-1.5">
                     <label className="text-xs text-muted-foreground">End</label>
-                    <Input
-                      type="date"
-                      value={draft.endDate}
-                      onChange={(e) => updateDraft("endDate", e.target.value)}
-                      className="rounded-xl text-sm"
-                    />
+                    <button
+                      type="button"
+                      onClick={() => setDatePickerField("end")}
+                      className={cn(
+                        "h-12 w-full rounded-xl border-2 bg-background px-3 text-left text-sm transition-colors flex items-center gap-2",
+                        draft.endDate
+                          ? "border-primary/60 text-foreground"
+                          : "border-border text-muted-foreground hover:border-primary/40"
+                      )}
+                    >
+                      <Calendar className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      <span className={cn("truncate", draft.endDate ? "text-foreground" : "text-muted-foreground")}>
+                        {formatDateLabel(draft.endDate)}
+                      </span>
+                    </button>
                   </div>
                 </div>
               )}
@@ -843,7 +942,7 @@ export default function CreateTrip() {
               <input
                 type="file"
                 ref={galleryInputRef}
-                accept="image/*"
+                accept="image/*,.heic,.heif"
                 onChange={handleGalleryImageUpload}
                 className="hidden"
               />
@@ -1194,7 +1293,7 @@ export default function CreateTrip() {
       </div>
 
       {/* Sticky bottom action bar for Create Trip - sits above bottom nav */}
-      <div className="fixed left-0 right-0 lg:left-60 bottom-above-nav lg:bottom-0 z-30 bg-background border-t border-border/50">
+      <div className="fixed left-0 right-0 lg:left-60 bottom-above-nav lg:bottom-0 z-[60] bg-background border-t border-border/50">
         <div className="container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto px-4 pt-3 pb-3 lg:pb-4">
           <div className="grid grid-cols-2 gap-3">
             {publishedTripId ? (
@@ -1233,13 +1332,23 @@ export default function CreateTrip() {
                     size="lg"
                     onClick={nextStep}
                     disabled={
+                      isEditTripLoading ||
                       (currentStep === 1 && !draft.visibility) ||
                       (currentStep === 2 && !canProceedStep2())
                     }
                     className="w-full rounded-xl text-sm sm:text-base gap-2"
                   >
-                    Continue
-                    <ChevronRight className="h-4 w-4" />
+                    {isEditTripLoading ? (
+                      <>
+                        <span className="animate-spin h-4 w-4 border-2 border-white/40 border-t-white rounded-full" />
+                        Loading trip...
+                      </>
+                    ) : (
+                      <>
+                        Continue
+                        <ChevronRight className="h-4 w-4" />
+                      </>
+                    )}
                   </Button>
                 ) : (
                   <Button
@@ -1472,6 +1581,87 @@ export default function CreateTrip() {
           </DrawerFooter>
         </DrawerContent>
       </Drawer>
+
+      {isMobile ? (
+        <Drawer open={datePickerField !== null} onOpenChange={(open) => !open && setDatePickerField(null)}>
+          <DrawerContent>
+            <DrawerHeader className="text-center">
+              <DrawerTitle>{datePickerField === "start" ? "Select start date" : "Select end date"}</DrawerTitle>
+              <DrawerDescription>
+                {datePickerField === "end" && draft.startDate
+                  ? `End date must be on or after ${formatDateLabel(draft.startDate)}`
+                  : "Choose the travel date from the calendar"}
+              </DrawerDescription>
+            </DrawerHeader>
+            <div className="px-4 pb-2">
+              <DateCalendar
+                mode="single"
+                captionLayout="dropdown-buttons"
+                fromYear={new Date().getFullYear()}
+                toYear={new Date().getFullYear() + 5}
+                selected={
+                  datePickerField === "start"
+                    ? parseDraftDate(draft.startDate)
+                    : parseDraftDate(draft.endDate)
+                }
+                onSelect={handleDatePick}
+                disabled={datePickerField === "end" && draft.startDate
+                  ? { before: parseDraftDate(draft.startDate) as Date }
+                  : undefined}
+                className="w-full"
+                classNames={{
+                  month: "w-full space-y-4",
+                  table: "w-full border-collapse",
+                  head_row: "flex w-full",
+                  head_cell: "flex-1 text-center text-muted-foreground font-normal text-[0.8rem]",
+                  row: "flex w-full mt-2",
+                  cell: "flex-1 h-10 text-center text-sm p-0 relative [&:has([aria-selected].day-range-end)]:rounded-r-md [&:has([aria-selected].day-outside)]:bg-accent/50 [&:has([aria-selected])]:bg-accent first:[&:has([aria-selected])]:rounded-l-md last:[&:has([aria-selected])]:rounded-r-md focus-within:relative focus-within:z-20",
+                  day: "h-10 w-full rounded-md p-0 font-normal aria-selected:opacity-100 hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground",
+                }}
+              />
+            </div>
+            <DrawerFooter className="gap-3 pb-8">
+              <Button variant="outline" onClick={() => setDatePickerField(null)} className="rounded-xl h-12">
+                Cancel
+              </Button>
+            </DrawerFooter>
+          </DrawerContent>
+        </Drawer>
+      ) : (
+        <Dialog open={datePickerField !== null} onOpenChange={(open) => !open && setDatePickerField(null)}>
+          <DialogContent className="max-w-md p-4 sm:p-5">
+            <DialogHeader>
+              <DialogTitle>{datePickerField === "start" ? "Select start date" : "Select end date"}</DialogTitle>
+              <DialogDescription>
+                {datePickerField === "end" && draft.startDate
+                  ? `End date must be on or after ${formatDateLabel(draft.startDate)}`
+                  : "Choose the travel date from the calendar"}
+              </DialogDescription>
+            </DialogHeader>
+            <DateCalendar
+              mode="single"
+              captionLayout="dropdown-buttons"
+              fromYear={new Date().getFullYear()}
+              toYear={new Date().getFullYear() + 5}
+              selected={
+                datePickerField === "start"
+                  ? parseDraftDate(draft.startDate)
+                  : parseDraftDate(draft.endDate)
+              }
+              onSelect={handleDatePick}
+              disabled={datePickerField === "end" && draft.startDate
+                ? { before: parseDraftDate(draft.startDate) as Date }
+                : undefined}
+              className="mx-auto w-fit"
+            />
+            <DialogFooter className="pt-1">
+              <Button variant="outline" onClick={() => setDatePickerField(null)} className="rounded-xl">
+                Cancel
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </AppLayout>
   );
 }

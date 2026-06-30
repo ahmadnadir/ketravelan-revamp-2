@@ -5,7 +5,7 @@ import { useCommunity } from "@/hooks/useCommunity";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { getTravelStyleEmoji, getTravelStyleLabel } from "@/data/travelStyles";
 
 interface StoryCardProps {
@@ -31,9 +31,19 @@ export function StoryCard({ story }: StoryCardProps) {
   const { toggleStoryLike, toggleStorySave } = useCommunity();
   const [isLiking, setIsLiking] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [showLikeFx, setShowLikeFx] = useState(false);
+  const [showSaveFx, setShowSaveFx] = useState(false);
+  const tapRef = useRef<{ x: number; y: number; at: number } | null>(null);
+  const dragRef = useRef<{ x: number; y: number; at: number; active: boolean } | null>(null);
+  const suppressNavigationUntilRef = useRef(0);
   const storyTypes = story.storyTypes?.length ? story.storyTypes : [story.storyType];
   const travelStyles = story.travelStyleIds || [];
   const socialLinks = (story.socialLinks?.length ? story.socialLinks : story.author.socialLinks) || [];
+
+  const isInteractiveTarget = (target: EventTarget | null) => {
+    if (!(target instanceof HTMLElement)) return false;
+    return Boolean(target.closest("button, a, input, textarea, select"));
+  };
 
   const normalizeSocialUrl = (platform: string, rawUrl: string) => {
     const value = String(rawUrl || "").trim();
@@ -69,18 +79,106 @@ export function StoryCard({ story }: StoryCardProps) {
 
   const handleLike = async () => {
     setIsLiking(true);
+    setShowLikeFx(true);
     await toggleStoryLike(story.id);
     setTimeout(() => setIsLiking(false), 300);
+    setTimeout(() => setShowLikeFx(false), 450);
   };
 
   const handleSave = async () => {
     setIsSaving(true);
+    setShowSaveFx(true);
     await toggleStorySave(story.id);
     setTimeout(() => setIsSaving(false), 300);
+    setTimeout(() => setShowSaveFx(false), 500);
+  };
+
+  const handleGestureLike = async () => {
+    // Double-tap should always trigger the like animation, even if already liked.
+    setShowLikeFx(true);
+
+    if (!story.isLiked) {
+      setIsLiking(true);
+      await toggleStoryLike(story.id);
+      setTimeout(() => setIsLiking(false), 300);
+    }
+
+    setTimeout(() => setShowLikeFx(false), 450);
+  };
+
+  const handleGestureSave = async () => {
+    // Downward drag gesture is intended to save quickly, not toggle off.
+    if (!story.isSaved) {
+      await handleSave();
+    }
+  };
+
+  const handlePointerDown = (event: React.PointerEvent<HTMLElement>) => {
+    if (isInteractiveTarget(event.target)) return;
+    dragRef.current = {
+      x: event.clientX,
+      y: event.clientY,
+      at: Date.now(),
+      active: true,
+    };
+  };
+
+  const handlePointerUp = async (event: React.PointerEvent<HTMLElement>) => {
+    if (isInteractiveTarget(event.target)) {
+      dragRef.current = null;
+      return;
+    }
+
+    const drag = dragRef.current;
+    dragRef.current = null;
+    if (!drag?.active) return;
+
+    const dx = event.clientX - drag.x;
+    const dy = event.clientY - drag.y;
+    const elapsed = Date.now() - drag.at;
+
+    // Intentional downward drag to save.
+    if (dy > 90 && Math.abs(dx) < 70 && elapsed < 900) {
+      await handleGestureSave();
+      tapRef.current = null;
+      return;
+    }
+
+    // Treat short, steady taps as candidates for double-tap like.
+    const isTap = Math.abs(dx) < 20 && Math.abs(dy) < 20 && elapsed < 350;
+    if (!isTap) return;
+
+    const now = Date.now();
+    const lastTap = tapRef.current;
+    if (lastTap && now - lastTap.at < 320) {
+      suppressNavigationUntilRef.current = now + 380;
+      tapRef.current = null;
+      await handleGestureLike();
+      return;
+    }
+
+    tapRef.current = { x: event.clientX, y: event.clientY, at: now };
   };
 
   return (
-    <article className="bg-card rounded-xl sm:rounded-2xl overflow-hidden shadow-sm border border-border/50 transition-shadow hover:shadow-md">
+    <article
+      className="bg-card rounded-xl sm:rounded-2xl overflow-hidden shadow-sm border border-border/50 transition-shadow hover:shadow-md"
+      onDoubleClick={() => {
+        void handleGestureLike();
+      }}
+      onClickCapture={(event) => {
+        if (Date.now() > suppressNavigationUntilRef.current) return;
+        const target = event.target as HTMLElement | null;
+        if (target?.closest("a")) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      }}
+      onPointerDown={handlePointerDown}
+      onPointerUp={(event) => {
+        void handlePointerUp(event);
+      }}
+    >
       {/* Cover Image */}
       <Link to={`/community/stories/${story.slug}`}>
         <div className="relative aspect-[16/10] overflow-hidden">
@@ -89,6 +187,12 @@ export function StoryCard({ story }: StoryCardProps) {
             alt={story.title}
             className="w-full h-full object-cover transition-transform hover:scale-105"
           />
+          {showLikeFx && (
+            <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
+              <span className="absolute h-20 w-20 rounded-full border-2 border-destructive/55 animate-ping" />
+              <Heart className="h-14 w-14 text-destructive fill-destructive drop-shadow-md animate-pulse" />
+            </div>
+          )}
           <div className="absolute top-2 left-2 sm:top-3 sm:left-3 flex flex-wrap gap-1 max-w-[70%]">
             {storyTypes.map((type) => (
               <Badge
@@ -103,7 +207,11 @@ export function StoryCard({ story }: StoryCardProps) {
           </div>
           <div className="absolute top-2 sm:top-3 right-2 sm:right-3 flex items-center gap-1.5 sm:gap-2">
             <button
-              onClick={handleLike}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                void handleLike();
+              }}
               disabled={isLiking}
               className={cn(
                 "h-7 w-7 sm:h-8 sm:w-8 rounded-full bg-card/80 backdrop-blur-sm flex items-center justify-center transition-transform duration-200",
@@ -118,22 +226,31 @@ export function StoryCard({ story }: StoryCardProps) {
                 )}
               />
             </button>
-            <button
-              onClick={handleSave}
-              disabled={isSaving}
-              className={cn(
-                "h-7 w-7 sm:h-8 sm:w-8 rounded-full bg-card/80 backdrop-blur-sm flex items-center justify-center transition-transform duration-200",
-                isSaving && "scale-110"
+            <div className="relative">
+              {showSaveFx && (
+                <span className="pointer-events-none absolute inset-0 rounded-full border-2 border-primary/60 animate-ping" />
               )}
-              aria-label="Save story"
-            >
-              <Bookmark
+              <button
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  void handleSave();
+                }}
+                disabled={isSaving}
                 className={cn(
-                  "h-3.5 w-3.5 sm:h-4 sm:w-4 transition-all duration-200",
-                  story.isSaved ? "fill-primary text-primary" : "text-muted-foreground"
+                  "relative h-7 w-7 sm:h-8 sm:w-8 rounded-full bg-card/80 backdrop-blur-sm flex items-center justify-center transition-transform duration-200",
+                  isSaving && "scale-110"
                 )}
-              />
-            </button>
+                aria-label="Save story"
+              >
+                <Bookmark
+                  className={cn(
+                    "h-3.5 w-3.5 sm:h-4 sm:w-4 transition-all duration-200",
+                    story.isSaved ? "fill-primary text-primary" : "text-muted-foreground"
+                  )}
+                />
+              </button>
+            </div>
           </div>
         </div>
       </Link>

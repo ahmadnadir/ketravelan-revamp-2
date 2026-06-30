@@ -38,7 +38,7 @@ import { mockExpenses as initialMockExpenses, mockMembers } from "@/data/mockDat
 import { toast } from "@/hooks/use-toast";
 import { getCategoryFromTitle } from "@/lib/expenseCategories";
 import { fetchTripExpenses, createExpense, deleteExpense, calculateTripBalances, getWhoOwesWho, fetchTripPaymentMethods, addExpensePayments, markParticipantsAsPaid, uploadPaymentQR, upsertPaymentMethod, uploadReceipt } from "@/lib/expenses";
-import { getTripCurrencySettings, updateTripCurrencySettings } from "@/lib/trips";
+import { getTripCurrencySettings, updateTripCurrencySettings, isTripNotificationEnabled } from "@/lib/trips";
 import { supabase } from "@/lib/supabase";
 import { sendSettlementReminder } from "@/lib/settlementReminders";
 import { useExpenses } from "@/contexts/ExpenseContext";
@@ -49,12 +49,21 @@ import { sendSystemMessage } from "@/lib/system-messages";
 // Category configuration with colors and emojis
 const CATEGORY_CONFIG: Record<string, { color: string; emoji: string }> = {
   "Transport": { color: "bg-stat-blue", emoji: "🚗" },
+  "transport": { color: "bg-stat-blue", emoji: "🚗" },
+  "transportation": { color: "bg-stat-blue", emoji: "🚗" },
   "Food & Drinks": { color: "bg-stat-orange", emoji: "🍴" },
+  "food & drinks": { color: "bg-stat-orange", emoji: "🍴" },
+  "food": { color: "bg-stat-orange", emoji: "🍴" },
   "Accommodation": { color: "bg-purple-500", emoji: "🏨" },
+  "accommodation": { color: "bg-purple-500", emoji: "🏨" },
   "Activities": { color: "bg-stat-green", emoji: "🎫" },
+  "activities": { color: "bg-stat-green", emoji: "🎫" },
   "Shopping": { color: "bg-pink-500", emoji: "🛍️" },
+  "shopping": { color: "bg-pink-500", emoji: "🛍️" },
   "Entertainment": { color: "bg-yellow-500", emoji: "🎭" },
+  "entertainment": { color: "bg-yellow-500", emoji: "🎭" },
   "Other": { color: "bg-gray-500", emoji: "📦" },
+  "other": { color: "bg-gray-500", emoji: "📦" },
 };
 
 // Member color palette for contribution charts
@@ -235,12 +244,15 @@ const calculateUserShare = (expense: ExpenseData, userId: string): number => {
   if (expense.splitType === "custom" && expense.customSplitAmounts) {
     const customAmount = expense.customSplitAmounts.find(c => c.memberId === userId);
     const originalShare = customAmount?.amount || 0;
+    // Scale the original-currency share to home currency when a conversion exists
     if (originalAmount > 0 && expense.convertedAmountHome) {
-      return (originalShare / originalAmount) * parseFloat(expense.convertedAmountHome.toString());
+      const converted = parseFloat(expense.convertedAmountHome.toString()) || 0;
+      return (originalShare / originalAmount) * converted;
     }
+    // No conversion available — amount_owed is already in home currency
     return originalShare;
   }
-  
+
   return baseAmount / expense.splitWith.length;
 };
 
@@ -261,6 +273,7 @@ interface TripExpensesProps {
   tripName?: string;
   allowedCurrencies?: CurrencyCode[];
   conversationId?: string;
+  canAddExpenses?: boolean;
 }
 
 const getTripCurrencyStorageKey = (tripId: string) => `trip-travel-currencies:${tripId}`;
@@ -287,7 +300,7 @@ const writeCachedTripCurrencies = (tripId: string, currencies: CurrencyCode[]) =
   }
 };
 
-export function TripExpenses({ tripId, members: providedMembers, tripName = "Trip", allowedCurrencies, conversationId }: TripExpensesProps) {
+export function TripExpenses({ tripId, members: providedMembers, tripName = "Trip", allowedCurrencies, conversationId, canAddExpenses = true }: TripExpensesProps) {
   const isMobile = useIsMobile();
   const [subTab, setSubTab] = useState("breakdown");
   const [sortOrder, setSortOrder] = useState<"latest" | "oldest">("latest");
@@ -386,6 +399,20 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
         
         // Calculate payment progress from participants
         const participants = exp.expense_participants || [];
+        const splitWith = participants.map((p: any) => p.user_id);
+        const participantCount = participants.length;
+        const totalAmount = Number(exp.amount) || 0;
+        const equalShare = participantCount > 0 ? totalAmount / participantCount : 0;
+        const hasCustomSplit = participants.some((p: any) => {
+          const owed = Number(p.amount_owed) || 0;
+          return Math.abs(owed - equalShare) > 0.01;
+        });
+        const customSplitAmounts = hasCustomSplit
+          ? participants.map((p: any) => ({
+              memberId: p.user_id,
+              amount: Number(p.amount_owed) || 0,
+            }))
+          : undefined;
         const receipts = exp.expense_receipts || [];
         const totalParticipants = participants.length;
         const paidParticipants = participants.filter((p: any) => p.is_paid).length;
@@ -403,7 +430,8 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
           imageUrl: exp.receipt_url,
           receipt_url: exp.receipt_url,
           hasReceipt: !!exp.receipt_url,
-          splitWith: exp.expense_participants?.map((p: any) => p.user_id) || [],
+          splitWith,
+          customSplitAmounts,
           notes: exp.notes,
           createdBy: exp.created_by || exp.creator?.id || null,
           // Currency conversion fields
@@ -443,7 +471,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
             };
           }) || [],
           paymentProgress,
-          splitType: 'equal', // Default, can be enhanced later
+          splitType: hasCustomSplit ? 'custom' : 'equal',
         };
       });
       
@@ -643,6 +671,142 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
       };
     };
 
+    const buildDirectionalSettlementsFromExpenses = (): Settlement[] => {
+      type DirectionalSummary = {
+        fromUserId: string;
+        toUserId: string;
+        amount: number;
+        hasPending: boolean;
+        hasAwaiting: boolean;
+        receiptUrl?: string;
+      };
+
+      const directionMap = new Map<string, DirectionalSummary>();
+
+      expenses.forEach((expense) => {
+        const payerId = expense.payer?.id;
+        if (!payerId) return;
+
+        expense.splitWith.forEach((memberId) => {
+          if (memberId === payerId) return;
+
+          const shareAmount = calculateUserShare(expense, memberId);
+          if (!Number.isFinite(shareAmount) || shareAmount <= 0) return;
+
+          const key = `${memberId}-${payerId}`;
+          const payment = expense.payments?.find((p) => p.memberId === memberId);
+          const isSettled = payment?.status === "settled" && !!payment?.confirmedByPayer;
+          const isAwaiting = !!payment?.receiptUrl && !payment?.confirmedByPayer;
+          const isPending = !isSettled && !isAwaiting;
+
+          if (!directionMap.has(key)) {
+            directionMap.set(key, {
+              fromUserId: memberId,
+              toUserId: payerId,
+              amount: 0,
+              hasPending: false,
+              hasAwaiting: false,
+            });
+          }
+
+          const summary = directionMap.get(key)!;
+          summary.amount += shareAmount;
+          summary.hasPending = summary.hasPending || isPending;
+          summary.hasAwaiting = summary.hasAwaiting || isAwaiting;
+          if (isAwaiting && !summary.receiptUrl) {
+            summary.receiptUrl = payment?.receiptUrl;
+          }
+        });
+      });
+
+      return Array.from(directionMap.values())
+        .map((summary) => {
+          const fromMember = members.find((m) => m.id === summary.fromUserId) || getFallbackMember(summary.fromUserId);
+          const toMember = members.find((m) => m.id === summary.toUserId) || getFallbackMember(summary.toUserId);
+          const settlementId = `settlement-${summary.fromUserId}-${summary.toUserId}`;
+          const qrCodeUrl = paymentMethods.find((pm) => pm.user_id === toMember.id)?.qr_code_url;
+
+          let status: Settlement["status"] = "settled";
+          if (summary.hasAwaiting) {
+            status = "awaiting";
+          } else if (summary.hasPending) {
+            status = "pending";
+          }
+
+          return {
+            id: settlementId,
+            fromUser: {
+              id: fromMember.id,
+              name: fromMember.name,
+              imageUrl: fromMember.imageUrl || "",
+            },
+            toUser: {
+              id: toMember.id,
+              name: toMember.name,
+              imageUrl: toMember.imageUrl || "",
+              ...(qrCodeUrl && { qrCodeUrl }),
+            },
+            amount: Math.round(summary.amount * 100) / 100,
+            status,
+            ...(summary.receiptUrl && { receiptUrl: summary.receiptUrl }),
+          } as Settlement;
+        })
+        .filter((s) => s.amount > 0.009);
+    };
+
+    const buildSettledSettlementsFromExpenses = (): Settlement[] => {
+      const settledMap = new Map<string, { fromUserId: string; toUserId: string; amount: number }>();
+
+      expenses.forEach((expense) => {
+        const payerId = expense.payer?.id;
+        if (!payerId) return;
+
+        expense.splitWith.forEach((memberId) => {
+          if (memberId === payerId) return;
+
+          const payment = expense.payments?.find((p) => p.memberId === memberId);
+          const isSettled = payment?.status === "settled" && !!payment?.confirmedByPayer;
+          if (!isSettled) return;
+
+          const shareAmount = calculateUserShare(expense, memberId);
+          if (!Number.isFinite(shareAmount) || shareAmount <= 0) return;
+
+          const key = `${memberId}-${payerId}`;
+          if (!settledMap.has(key)) {
+            settledMap.set(key, { fromUserId: memberId, toUserId: payerId, amount: 0 });
+          }
+
+          const summary = settledMap.get(key)!;
+          summary.amount += shareAmount;
+        });
+      });
+
+      return Array.from(settledMap.values())
+        .map((summary) => {
+          const fromMember = members.find((m) => m.id === summary.fromUserId) || getFallbackMember(summary.fromUserId);
+          const toMember = members.find((m) => m.id === summary.toUserId) || getFallbackMember(summary.toUserId);
+          const qrCodeUrl = paymentMethods.find((pm) => pm.user_id === toMember.id)?.qr_code_url;
+
+          return {
+            id: `settlement-${summary.fromUserId}-${summary.toUserId}-settled`,
+            fromUser: {
+              id: fromMember.id,
+              name: fromMember.name,
+              imageUrl: fromMember.imageUrl || "",
+            },
+            toUser: {
+              id: toMember.id,
+              name: toMember.name,
+              imageUrl: toMember.imageUrl || "",
+              ...(qrCodeUrl && { qrCodeUrl }),
+            },
+            amount: Math.round(summary.amount * 100) / 100,
+            status: "settled" as const,
+          };
+        })
+        .filter((s) => s.amount > 0.009);
+    };
+
     const computeSettlementForPair = (fromUserId: string, toUserId: string, dbAmount?: number) => {
       const fromMember = members.find(m => m.id === fromUserId) || getFallbackMember(fromUserId);
       const toMember = members.find(m => m.id === toUserId) || getFallbackMember(toUserId);
@@ -660,15 +824,19 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
         expense.payer?.id === fromUserId && expense.splitWith?.includes(toUserId)
       );
 
+      const isPaymentSettled = (payment?: { status?: string; confirmedByPayer?: boolean }) => {
+        return payment?.status === "settled" && !!payment?.confirmedByPayer;
+      };
+
       // Check if there are ANY unpaid expenses in either direction
       const hasUnpaidToUser = expensesToUserPaid.some(expense => {
         const payment = expense.payments?.find(p => p.memberId === fromUserId);
-        return payment?.status === "pending" || !payment?.confirmedByPayer;
+        return !isPaymentSettled(payment);
       });
 
       const hasUnpaidFromUser = expensesFromUserPaid.some(expense => {
         const payment = expense.payments?.find(p => p.memberId === toUserId);
-        return payment?.status === "pending" || !payment?.confirmedByPayer;
+        return !isPaymentSettled(payment);
       });
 
       // Check if there are receipts awaiting confirmation and get the receipt URL
@@ -706,7 +874,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
       const includeSettledOnly = status === "settled";
       const owedSum = expensesToUserPaid.reduce((sum, expense) => {
         const payment = expense.payments?.find(p => p.memberId === fromUserId);
-        const isSettled = payment?.status === "settled";
+        const isSettled = isPaymentSettled(payment);
         const shouldInclude = includeSettledOnly ? isSettled : !isSettled;
         if (!shouldInclude) return sum;
         return sum + calculateUserShare(expense, fromUserId);
@@ -714,7 +882,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
 
       const offsetSum = expensesFromUserPaid.reduce((sum, expense) => {
         const payment = expense.payments?.find(p => p.memberId === toUserId);
-        const isSettled = payment?.status === "settled";
+        const isSettled = isPaymentSettled(payment);
         const shouldInclude = includeSettledOnly ? isSettled : !isSettled;
         if (!shouldInclude) return sum;
         return sum + calculateUserShare(expense, toUserId);
@@ -829,7 +997,32 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
       }
     });
 
-    return Array.from(pairMap.values()).filter((s) => s.amount > 0.009);
+    const primarySettlements = Array.from(pairMap.values()).filter((s) => s.amount > 0.009);
+    const settledHistorySettlements = buildSettledSettlementsFromExpenses();
+
+    const combinedByDirectionAndStatus = new Map<string, Settlement>();
+    [...primarySettlements, ...settledHistorySettlements].forEach((settlement) => {
+      const key = `${settlement.fromUser.id}-${settlement.toUser.id}-${settlement.status}`;
+      const existing = combinedByDirectionAndStatus.get(key);
+      if (!existing || settlement.amount > existing.amount) {
+        combinedByDirectionAndStatus.set(key, settlement);
+      }
+    });
+
+    const combinedSettlements = Array.from(combinedByDirectionAndStatus.values()).map((s) => ({
+      ...s,
+      status: settlementStatuses[s.id] ? settlementStatuses[s.id] : s.status,
+    }));
+
+    if (combinedSettlements.length > 0) {
+      return combinedSettlements;
+    }
+
+    const fallbackSettlements = buildDirectionalSettlementsFromExpenses();
+    return fallbackSettlements.map((s) => ({
+      ...s,
+      status: settlementStatuses[s.id] ? settlementStatuses[s.id] : s.status,
+    }));
   }, [debts, members, expenses, paymentMethods, settlementStatuses, currentUserId]);
 
   // Get current user's name from members array
@@ -946,16 +1139,9 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
   const yourTotalExpenses = useMemo(() => {
     if (!currentUserId) return 0;
 
-    // Calculate from actual expenses instead of database balance
-    // because total_owed only counts unpaid amounts
+    // Always use calculateUserShare so foreign-currency expenses are converted to home currency
     return expenses.reduce((sum, expense) => {
-      if (!expense.splitWith.includes(currentUserId)) {
-        return sum;
-      }
-      if (expense.splitType === "custom" && expense.customSplitAmounts) {
-        const customAmount = expense.customSplitAmounts.find(c => c.memberId === currentUserId);
-        return sum + (customAmount?.amount || 0);
-      }
+      if (!expense.splitWith.includes(currentUserId)) return sum;
       return sum + calculateUserShare(expense, currentUserId);
     }, 0);
   }, [expenses, currentUserId]);
@@ -1137,15 +1323,19 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
 
   // Filter settlements based on direction and status filters - only show settlements involving current user
   const filteredSettlements = useMemo(() => {
+    const statusPriority: Record<Settlement["status"], number> = {
+      pending: 0,
+      awaiting: 1,
+      settled: 2,
+    };
+
     return settlements.filter(s => {
-      if (currentUserId) {
-        // Always filter to only show settlements involving the current user
-        const involvesCurrentUser = 
-          s.fromUser.id === currentUserId || s.toUser.id === currentUserId;
-        
-        if (!involvesCurrentUser) return false;
-        
-        // Direction filter (within settlements that involve me)
+      if (!currentUserId) return false;
+
+      const involvesCurrentUser = s.fromUser.id === currentUserId || s.toUser.id === currentUserId;
+      if (!involvesCurrentUser) return false;
+
+      if (directionFilter !== "all") {
         if (directionFilter === "owesMe" && s.toUser.id !== currentUserId) return false;
         if (directionFilter === "iOwe" && s.fromUser.id !== currentUserId) return false;
       }
@@ -1154,6 +1344,10 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
       if (statusFilter !== "all" && s.status !== statusFilter) return false;
       
       return true;
+    }).sort((a, b) => {
+      const statusDiff = statusPriority[a.status] - statusPriority[b.status];
+      if (statusDiff !== 0) return statusDiff;
+      return b.amount - a.amount;
     });
   }, [settlements, directionFilter, statusFilter, currentUserId]);
 
@@ -1353,6 +1547,39 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
     setSettlementConfirmModalOpen(true);
   };
 
+  // Upload receipt file inside the Confirm Settlement modal
+  const handleSettlementReceiptUpload = async (file: File) => {
+    if (!settlementToConfirm || !currentUserId) return;
+
+    // Find first pending expense where current user owes money (to upload against)
+    const { owedToReceiver } = getContributingExpenses(settlementToConfirm);
+    const firstPending = owedToReceiver.find(e => e.status === "pending");
+    const expenseId = firstPending?.expenseId ?? owedToReceiver[0]?.expenseId;
+
+    if (!expenseId) {
+      toast({ title: "No expense found", description: "Could not attach receipt to any expense.", variant: "destructive" });
+      return;
+    }
+
+    try {
+      const data = await uploadReceipt(expenseId, currentUserId, file);
+      const url = data.receipt_url as string;
+
+      // Patch local settlement state so modal shows the uploaded image immediately
+      setSettlementToConfirm(prev => prev ? { ...prev, receiptUrl: url } : prev);
+
+      toast({ title: "Receipt uploaded", description: "Your payment receipt has been attached." });
+    } catch (err) {
+      console.error("Settlement receipt upload failed:", err);
+      toast({ title: "Upload failed", description: "Could not upload receipt. Please try again.", variant: "destructive" });
+    }
+  };
+
+  // Remove receipt from the confirm modal (local state only)
+  const handleSettlementReceiptRemove = () => {
+    setSettlementToConfirm(prev => prev ? { ...prev, receiptUrl: undefined } : prev);
+  };
+
   // Handler for confirming settlement from unified modal
   const handleConfirmSettlement = async () => {
     if (settlementToConfirm) {
@@ -1370,14 +1597,13 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
 
         for (const [memberId, expenseIds] of Object.entries(expenseIdsByMember)) {
           await markParticipantsAsPaid(expenseIds, memberId);
-          for (const expenseId of expenseIds) {
-            try {
-              await supabase.functions.invoke('send-expense-payment-marked', {
-                body: { expenseId, participantId: memberId }
-              });
-            } catch (e) {
-              console.warn('Failed to send payment marked email', e);
-            }
+          // Send ONE batched email + notification per member instead of one per expense
+          try {
+            await supabase.functions.invoke('send-expense-payment-marked', {
+              body: { expenseIds, participantId: memberId }
+            });
+          } catch (e) {
+            console.warn('Failed to send payment marked notification', e);
           }
         }
         
@@ -1386,6 +1612,13 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
         
         // Set recently settled for visual feedback
         setRecentlySettledIds(uniqueIds);
+
+        // Ensure status pill updates immediately before data reload completes.
+        setSettlementStatuses(prev => ({
+          ...prev,
+          [`settlement-${settlementToConfirm.fromUser.id}-${settlementToConfirm.toUser.id}`]: "settled",
+          [`settlement-${settlementToConfirm.toUser.id}-${settlementToConfirm.fromUser.id}`]: "settled",
+        }));
         
         // Reload expenses to get updated data from database
         await loadExpenses();
@@ -1679,7 +1912,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
         amount: newExpense.amount,
         currency: newExpense.originalCurrency || 'MYR',
         category: newExpense.category,
-        expense_date: new Date().toISOString(),
+        expense_date: newExpense.date,
         notes: newExpense.notes,
         payer_id: payerId, // Use UUID, not name
         receipt_file: newExpense.receiptFile, // Upload receipt if provided
@@ -1697,30 +1930,34 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
         description: `${newExpense.title} - ${currencySymbol} ${newExpense.amount.toFixed(2)} saved successfully`,
       });
 
-      try {
-        await supabase.functions.invoke('send-expense-added', {
-          body: { expenseId: createdExpense.id }
-        });
-      } catch (e) {
-        console.warn('Failed to send expense added emails', e);
-      }
+      const expenseUpdatesEnabled = await isTripNotificationEnabled(tripId, 'expense_updates');
 
-      // Send system message to chat if conversationId is available
-      if (conversationId && payer) {
+      if (expenseUpdatesEnabled) {
         try {
-          const formattedSystemAmount = newExpense.amount.toLocaleString("en-US", {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2,
-          });
-          const expenseDetail = `${newExpense.title} - ${currencySymbol} ${formattedSystemAmount}`;
-          await sendSystemMessage({
-            conversationId,
-            action: "expense_added",
-            senderName: payer.name,
-            details: expenseDetail,
+          await supabase.functions.invoke('send-expense-added', {
+            body: { expenseId: createdExpense.id }
           });
         } catch (e) {
-          console.warn('Failed to send expense system message:', e);
+          console.warn('Failed to send expense added emails', e);
+        }
+
+        // Keep expense system messages aligned with the trip setting.
+        if (conversationId && payer) {
+          try {
+            const formattedSystemAmount = newExpense.amount.toLocaleString("en-US", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            });
+            const expenseDetail = `${newExpense.title} - ${currencySymbol} ${formattedSystemAmount}`;
+            await sendSystemMessage({
+              conversationId,
+              action: "expense_added",
+              senderName: payer.name,
+              details: expenseDetail,
+            });
+          } catch (e) {
+            console.warn('Failed to send expense system message:', e);
+          }
         }
       }
 
@@ -1739,8 +1976,58 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
     }
   };
 
+  const areSameMembers = (a: string[] = [], b: string[] = []) => {
+    if (a.length !== b.length) return false;
+    const setA = new Set(a);
+    return b.every((item) => setA.has(item));
+  };
+
+  const areSameCustomSplits = (
+    a: Array<{ memberId: string; amount: number }> = [],
+    b: Array<{ memberId: string; amount: number }> = [],
+  ) => {
+    if (a.length !== b.length) return false;
+    const mapA = new Map(a.map((item) => [item.memberId, Number(item.amount)]));
+    return b.every((item) => {
+      const amountA = mapA.get(item.memberId);
+      if (typeof amountA !== 'number') return false;
+      return Math.abs(amountA - Number(item.amount)) < 0.01;
+    });
+  };
+
+  const buildExpenseEditSummary = (previous: ExpenseData | undefined, updatedExpense: NewExpense) => {
+    if (!previous) return `${updatedExpense.title} - details updated`;
+
+    const changedParts: string[] = [];
+
+    if (Math.abs(Number(previous.amount || 0) - Number(updatedExpense.amount || 0)) >= 0.01) {
+      changedParts.push('amount');
+    }
+
+    if ((previous.date || '') !== (updatedExpense.date || '')) {
+      changedParts.push('date');
+    }
+
+    const splitChanged =
+      previous.splitType !== updatedExpense.splitType ||
+      !areSameMembers(previous.splitWith || [], updatedExpense.splitWith || []) ||
+      !areSameCustomSplits(previous.customSplitAmounts || [], updatedExpense.customSplitAmounts || []);
+
+    if (splitChanged) {
+      changedParts.push('split');
+    }
+
+    if (changedParts.length === 0) {
+      changedParts.push('details');
+    }
+
+    return `${updatedExpense.title} - ${changedParts.join('/')} updated`;
+  };
+
   const handleEditExpense = async (id: string, updatedExpense: NewExpense) => {
     try {
+      const existingExpense = expenses.find((expense) => expense.id === id);
+
       // Get the payer's user ID
       const payerMember = members.find(m => m.name === updatedExpense.paidBy);
       const payerId = payerMember?.id;
@@ -1795,20 +2082,24 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
         updates.receipt_url = receiptUrl;
       }
 
-      await supabase
+      const { error: updateExpenseError } = await supabase
         .from('trip_expenses')
         .update(updates)
         .eq('id', id);
 
+      if (updateExpenseError) throw updateExpenseError;
+
       // 2. Update expense_payments (who paid)
       // Delete existing payment records
-      await supabase
+      const { error: deletePaymentsError } = await supabase
         .from('expense_payments')
         .delete()
         .eq('expense_id', id);
 
+      if (deletePaymentsError) throw deletePaymentsError;
+
       // Insert new payment record
-      await supabase
+      const { error: insertPaymentError } = await supabase
         .from('expense_payments')
         .insert({
           expense_id: id,
@@ -1816,12 +2107,16 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
           amount_paid: updatedExpense.amount
         });
 
+      if (insertPaymentError) throw insertPaymentError;
+
       // 3. Update expense_participants (who owes what)
       // Delete existing participants
-      await supabase
+      const { error: deleteParticipantsError } = await supabase
         .from('expense_participants')
         .delete()
         .eq('expense_id', id);
+
+      if (deleteParticipantsError) throw deleteParticipantsError;
 
       // Calculate and insert new participants
       const participants = updatedExpense.splitWith.map(memberId => {
@@ -1846,9 +2141,11 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
       });
 
       if (participants.length > 0) {
-        await supabase
+        const { error: insertParticipantsError } = await supabase
           .from('expense_participants')
           .insert(participants);
+
+        if (insertParticipantsError) throw insertParticipantsError;
       }
 
       // Reload expenses from database to reflect changes
@@ -1861,12 +2158,28 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
         description: `${updatedExpense.title} has been updated`,
       });
 
-      try {
-        await supabase.functions.invoke('send-expense-updated', {
-          body: { expenseId: id }
-        });
-      } catch (e) {
-        console.warn('Failed to send expense updated emails', e);
+      if (await isTripNotificationEnabled(tripId, 'expense_updates')) {
+        try {
+          await supabase.functions.invoke('send-expense-updated', {
+            body: { expenseId: id }
+          });
+        } catch (e) {
+          console.warn('Failed to send expense updated emails', e);
+        }
+
+        if (conversationId) {
+          try {
+            const editSummary = buildExpenseEditSummary(existingExpense, updatedExpense);
+            await sendSystemMessage({
+              conversationId,
+              action: "expense_edited",
+              senderName: currentUserName,
+              details: editSummary,
+            });
+          } catch (e) {
+            console.warn('Failed to send expense edited system message:', e);
+          }
+        }
       }
     } catch (error) {
       console.error('Error updating expense:', error);
@@ -1880,27 +2193,47 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
 
   const handleDeleteExpense = async () => {
     if (!deletingExpense) return;
+    const expenseToDelete = deletingExpense;
     try {
       // Optimistically remove from UI
-      setExpenses(prev => prev.filter(e => e.id !== deletingExpense.id));
+      setExpenses(prev => prev.filter(e => e.id !== expenseToDelete.id));
 
       // Persist deletion to DB (soft delete via is_deleted=true)
-      await deleteExpense(deletingExpense.id);
+      await deleteExpense(expenseToDelete.id);
 
       // Reload expenses to reflect server state
       await loadExpenses();
 
       toast({
         title: "Expense deleted",
-        description: `${deletingExpense.title} has been removed`,
+        description: `${expenseToDelete.title} has been removed`,
       });
 
-      try {
-        await supabase.functions.invoke('send-expense-deleted', {
-          body: { expenseId: deletingExpense.id }
-        });
-      } catch (e) {
-        console.warn('Failed to send expense deleted emails', e);
+      if (await isTripNotificationEnabled(tripId, 'expense_updates')) {
+        try {
+          await supabase.functions.invoke('send-expense-deleted', {
+            body: { expenseId: expenseToDelete.id }
+          });
+        } catch (e) {
+          console.warn('Failed to send expense deleted emails', e);
+        }
+
+        if (conversationId) {
+          try {
+            const currencyCode = expenseToDelete.originalCurrency === 'MYR'
+              ? 'RM'
+              : (expenseToDelete.originalCurrency || homeCurrency);
+            const deleteSummary = `${expenseToDelete.title} - ${currencyCode} ${formatTwoDecimalAmount(Number(expenseToDelete.amount || 0))}`;
+            await sendSystemMessage({
+              conversationId,
+              action: "expense_deleted",
+              senderName: currentUserName,
+              details: deleteSummary,
+            });
+          } catch (e) {
+            console.warn('Failed to send expense deleted system message:', e);
+          }
+        }
       }
     } catch (error) {
       console.error('Error deleting expense:', error);
@@ -2050,10 +2383,10 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
       await markParticipantsAsPaid([expenseId], memberId);
       try {
         await supabase.functions.invoke('send-expense-payment-marked', {
-          body: { expenseId, participantId: memberId }
+          body: { expenseIds: [expenseId], participantId: memberId }
         });
       } catch (e) {
-        console.warn('Failed to send payment marked email', e);
+        console.warn('Failed to send payment marked notification', e);
       }
       
       // Update local state
@@ -2149,7 +2482,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
             <p className="text-sm text-muted-foreground">See where the money went and who's settled.</p>
           </div>
           <div className="flex gap-2">
-            {subTab === "settle" && canSwitchCurrency && (
+            {subTab === "expenses" && canSwitchCurrency && (
               <Button
                 variant="ghost"
                 size="icon"
@@ -2808,7 +3141,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
       </div>
 
       {/* Fixed Bottom Action Container - Only on Breakdown and Expenses tabs */}
-      {(subTab === "breakdown" || subTab === "expenses") && (
+      {canAddExpenses && (subTab === "breakdown" || subTab === "expenses") && (
         <div className="fixed bottom-above-nav lg:bottom-0 left-0 lg:left-60 right-0 z-40 bg-background/95 backdrop-blur-sm border-t border-border/50">
           <div className="container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto px-4 py-3 lg:py-4">
             <Button 
@@ -3001,6 +3334,8 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
               });
               setReceiptViewerOpen(true);
             }}
+            onUploadReceipt={handleSettlementReceiptUpload}
+            onRemoveReceipt={handleSettlementReceiptRemove}
             onConfirm={handleConfirmSettlement}
           />
         );

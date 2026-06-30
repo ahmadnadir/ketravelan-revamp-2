@@ -6,8 +6,8 @@ import { format } from "date-fns";
 import type { DateRange } from "react-day-picker";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { TripCard } from "@/components/shared/TripCard";
-import { TripCardLoading } from "@/components/shared/TripCardLoading";
 import { SegmentedControl } from "@/components/shared/SegmentedControl";
+import { ExplorePageSkeleton } from "@/components/skeletons/ExplorePageSkeleton";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Switch } from "@/components/ui/switch";
@@ -38,10 +38,22 @@ type DesktopPanel = "where" | "when" | "budget" | "styles" | null;
 export default function Explore() {
   const isLoading = useSimulatedLoading(600);
   const [searchParams, setSearchParams] = useSearchParams();
+  const [refreshProgress, setRefreshProgress] = useState(0);
+  const [showTopBuffering, setShowTopBuffering] = useState(false);
+  const refreshStartedAtRef = useRef<number | null>(null);
+  const hideBufferTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const swipeStartRef = useRef<{ x: number; y: number; scrollTop: number; atTop: boolean; atBottom: boolean } | null>(null);
   // Persist tab in URL so it survives navigation away and back
-  const tab = searchParams.get("tab") ?? "upcoming";
-  const setTab = (value: string) =>
-    setSearchParams((prev) => { const p = new URLSearchParams(prev); p.set("tab", value); return p; }, { replace: true });
+  const tabParam = searchParams.get("tab");
+  const tab = tabParam === "past" ? "past" : "upcoming";
+  const setTab = useCallback((value: string) =>
+    setSearchParams((prev) => {
+      const p = new URLSearchParams(prev);
+      if (p.get("tab") === value) return p;
+      p.set("tab", value);
+      return p;
+    }, { replace: true }), [setSearchParams]);
   const resultsRef = useRef<HTMLDivElement>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [convertedPrices, setConvertedPrices] = useState<Record<string, number>>({});
@@ -113,10 +125,122 @@ export default function Explore() {
   }, [appliedFilters]);
 
   // Fetch trips with React Query
-  const { data: trips = [], error, isFetching } = useTrips(queryFilters, {
-    refetchOnMount: "always",
-    staleTime: 0,
+  const { data: trips = [], error, isFetching, refetch } = useTrips(queryFilters, {
+    refetchOnMount: false,
+    staleTime: 1000 * 60 * 2,
   });
+
+  const isTripsLoading = isLoading || isFetching;
+  const showInitialSkeleton = isTripsLoading && trips.length === 0;
+  const shouldShowRefetchProgress = isFetching && trips.length > 0;
+
+  useEffect(() => {
+    if (hideBufferTimerRef.current) {
+      clearTimeout(hideBufferTimerRef.current);
+      hideBufferTimerRef.current = null;
+    }
+
+    if (shouldShowRefetchProgress) {
+      if (!showTopBuffering) {
+        setShowTopBuffering(true);
+        setRefreshProgress(12);
+        refreshStartedAtRef.current = Date.now();
+      }
+
+      const progressTimer = window.setInterval(() => {
+        setRefreshProgress((prev) => {
+          if (prev >= 92) return prev;
+          const step = prev < 50 ? 7 : prev < 75 ? 4 : 2;
+          return Math.min(92, prev + step);
+        });
+      }, 140);
+
+      return () => {
+        window.clearInterval(progressTimer);
+      };
+    }
+
+    if (showTopBuffering) {
+      const minVisibleMs = 700;
+      const elapsed = refreshStartedAtRef.current ? Date.now() - refreshStartedAtRef.current : minVisibleMs;
+      const waitMs = Math.max(0, minVisibleMs - elapsed);
+
+      setRefreshProgress(100);
+      hideBufferTimerRef.current = setTimeout(() => {
+        setShowTopBuffering(false);
+        setRefreshProgress(0);
+        refreshStartedAtRef.current = null;
+        hideBufferTimerRef.current = null;
+      }, waitMs + 220);
+    }
+
+    return () => {
+      if (hideBufferTimerRef.current) {
+        clearTimeout(hideBufferTimerRef.current);
+        hideBufferTimerRef.current = null;
+      }
+    };
+  }, [shouldShowRefetchProgress, showTopBuffering]);
+
+  const getScrollContainer = useCallback(() => {
+    return contentRef.current?.closest("main") as HTMLElement | null;
+  }, []);
+
+  const triggerSwipeRefresh = useCallback(async () => {
+    if (isFetching || isLoading) return;
+
+    try {
+      await refetch();
+    } catch (refreshError) {
+      console.error("Failed to refresh trips via swipe", refreshError);
+      toast.error("Failed to refresh trips");
+    }
+  }, [isFetching, isLoading, refetch]);
+
+  const handleSwipeStart = useCallback((event: React.TouchEvent<HTMLDivElement>) => {
+    if (event.touches.length !== 1) {
+      swipeStartRef.current = null;
+      return;
+    }
+
+    const scrollContainer = getScrollContainer();
+    if (!scrollContainer) {
+      swipeStartRef.current = null;
+      return;
+    }
+
+    const startTouch = event.touches[0];
+    const atTop = scrollContainer.scrollTop <= 8;
+    const atBottom = scrollContainer.scrollTop + scrollContainer.clientHeight >= scrollContainer.scrollHeight - 8;
+
+    swipeStartRef.current = {
+      x: startTouch.clientX,
+      y: startTouch.clientY,
+      scrollTop: scrollContainer.scrollTop,
+      atTop,
+      atBottom,
+    };
+  }, [getScrollContainer]);
+
+  const handleSwipeEnd = useCallback((event: React.TouchEvent<HTMLDivElement>) => {
+    const started = swipeStartRef.current;
+    swipeStartRef.current = null;
+    if (!started || event.changedTouches.length === 0) return;
+
+    const endTouch = event.changedTouches[0];
+    const deltaX = endTouch.clientX - started.x;
+    const deltaY = endTouch.clientY - started.y;
+
+    // Keep gesture intent vertical and deliberate.
+    if (Math.abs(deltaY) < 70 || Math.abs(deltaX) > Math.abs(deltaY)) return;
+
+    const pulledDownFromTop = started.atTop && deltaY > 0;
+    const swipedUpFromBottom = started.atBottom && deltaY < 0;
+
+    if (pulledDownFromTop || swipedUpFromBottom) {
+      void triggerSwipeRefresh();
+    }
+  }, [triggerSwipeRefresh]);
 
   // Convert prices asynchronously whenever trips or currency changes
   useEffect(() => {
@@ -161,9 +285,10 @@ export default function Explore() {
       const hasPrice = typeof trip.price === 'number' && !isNaN(trip.price);
       return {
         id: trip.id ?? '',
+        creatorId: trip.creator_id ?? trip.creator?.id ?? undefined,
         title: trip.title ?? 'Untitled',
         destination: trip.destination ?? 'Unknown',
-        imageUrl: trip.cover_image || '/placeholder.svg',
+        imageUrl: trip.cover_image || '/default-trip-photo.jpeg',
         startDate: hasStartDate ? new Date(trip.start_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'TBA',
         endDate: hasEndDate ? new Date(trip.end_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'TBA',
         rawStartDate: trip.start_date,
@@ -248,19 +373,9 @@ export default function Explore() {
   // Get trips to display based on current tab
   const displayedTrips = tab === "upcoming" ? upcomingTrips : pastTrips;
 
-  useEffect(() => {
-    const tabParam = searchParams.get("tab");
-    if (tabParam === "upcoming" || tabParam === "past") {
-      setTab(tabParam);
-    }
-  }, [searchParams]);
-
   const handleTabChange = useCallback((value: string) => {
     setTab(value);
-    const nextParams = new URLSearchParams(searchParams);
-    nextParams.set("tab", value);
-    setSearchParams(nextParams, { replace: true });
-  }, [searchParams, setSearchParams]);
+  }, [setTab]);
 
   const handleApplyFilters = useCallback((filters: FilterState) => {
     setAppliedFilters(filters);
@@ -281,9 +396,33 @@ export default function Explore() {
   // Display text for the search bar
   const searchDisplayText = appliedFilters.destination || "Where do you want to go?";
 
+  if (showInitialSkeleton) {
+    return (
+      <AppLayout wideLayout>
+        <ExplorePageSkeleton />
+      </AppLayout>
+    );
+  }
+
   return (
     <AppLayout wideLayout>
-      <div className="py-6 sm:py-6 space-y-5 sm:space-y-6">
+      <div
+        ref={contentRef}
+        className="py-6 sm:py-6 space-y-5 sm:space-y-6"
+        onTouchStart={handleSwipeStart}
+        onTouchEnd={handleSwipeEnd}
+      >
+        {showTopBuffering && (
+          <div className="sticky top-0 z-20">
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-primary/15">
+              <div
+                className="h-full rounded-full bg-primary transition-[width] duration-180 ease-out"
+                style={{ width: `${refreshProgress}%` }}
+              />
+            </div>
+          </div>
+        )}
+
         <h1 className="text-xl sm:text-2xl font-bold text-foreground">
           Discover Trips
         </h1>
@@ -622,12 +761,7 @@ export default function Explore() {
 
         {/* Trip List */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-5">
-          {isLoading || isFetching ? (
-            // Show skeletons during initial load and filter-triggered refetches
-            Array.from({ length: 6 }).map((_, i) => (
-              <TripCardLoading key={i} />
-            ))
-          ) : displayedTrips.length === 0 ? (
+          {displayedTrips.length === 0 ? (
             <div className="col-span-full flex items-center justify-center py-12">
               <div className="text-muted-foreground">No {tab} trips found</div>
             </div>
@@ -643,6 +777,7 @@ export default function Explore() {
                 endDate={trip.endDate}
                 price={typeof trip.price === 'number' ? (convertedPrices[trip.id] ?? trip.price) : (trip.price as any)}
                 displayCurrency={getCurrencySymbol(selectedCurrency)}
+                creatorId={trip.creatorId}
                 slotsLeft={trip.slotsLeft}
                 totalSlots={trip.totalSlots}
                 tags={trip.tags}

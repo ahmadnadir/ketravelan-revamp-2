@@ -1,6 +1,6 @@
 import { buildPublicUrl, buildTripShareUrl, getPublicBaseUrl } from "@/lib/publicUrl";
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   ChevronLeft,
@@ -25,6 +25,7 @@ import {
   Pencil,
   Clock,
   ZoomIn,
+  ZoomOut,
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { SegmentedControl } from "@/components/shared/SegmentedControl";
@@ -40,6 +41,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+import { ModerationMenu } from "@/components/moderation/ModerationMenu";
 import {
   Dialog,
   DialogContent,
@@ -55,7 +57,6 @@ import { tripCategories } from "@/data/categories";
 import { cn } from "@/lib/utils";
 import { createJoinRequest, fetchJoinRequests, createTripInvite, cancelTrip, deleteDraftTrip } from "@/lib/trips";
 import { useAuth } from "@/contexts/AuthContext";
-import { createDirectConversation } from "@/lib/conversations";
 import { useTripDetails, useJoinRequestStatus } from "@/hooks/useTrips";
 import { useQueryClient } from "@tanstack/react-query";
 import { TripDetailsSkeleton } from "@/components/skeletons/TripDetailsSkeleton";
@@ -68,6 +69,7 @@ import { TripSchema } from "@/components/seo/TripSchema";
 import { BreadcrumbSchema } from "@/components/seo/BreadcrumbSchema";
 import { OrganizationSchema } from "@/components/seo/OrganizationSchema";
 import { FAQSchema } from "@/components/seo/FAQSchema";
+import { getLoadErrorFeedback } from "@/lib/requestErrors";
 
 const iconMap: Record<string, any> = {
   car: Car,
@@ -154,31 +156,18 @@ const getUrgencyText = (joined: number, total: number): string => {
 
 // Parse description into bullet points
 const parseDescriptionToBullets = (description: string): string[] => {
-  // Try to extract key phrases from the description
-  const sentences = description.split(/[.!]/).filter(s => s.trim().length > 10);
-  const bullets: string[] = [];
-  
-  sentences.forEach(sentence => {
-    const trimmed = sentence.trim();
-    if (trimmed.length > 0 && bullets.length < 4) {
-      // Clean up and shorten if needed
-      let bullet = trimmed;
-      if (bullet.length > 80) {
-        bullet = bullet.substring(0, 77) + '...';
-      }
-      bullets.push(bullet);
-    }
-  });
-  
-  return bullets.length > 0 ? bullets : [description];
+  // Split by newlines to preserve the user's intended line breaks
+  const lines = description.split(/\r?\n/).map(s => s.trim()).filter(s => s.length > 0);
+  return lines.length > 0 ? lines : [description];
 };
 
 import { getExpectationIcon, getExpectationLabel } from "@/lib/expectationUtils";
 
+const DEFAULT_TRIP_IMAGE = "/default-trip-photo.jpeg";
+
 export default function TripDetails() {
   const { id } = useParams();
   const [searchParams] = useSearchParams();
-  const [currentImage, setCurrentImage] = useState(0);
   const [activeTab, setActiveTab] = useState("overview");
   const [isFavourited, setIsFavourited] = useState(false);
   const [isAnimating, setIsAnimating] = useState(false);
@@ -259,6 +248,8 @@ export default function TripDetails() {
         ? (dayByDayFromArray.length > 0 ? 'dayByDay' : (notesFromArray ? 'notes' : 'skip'))
         : (dbTrip.itinerary_type || 'skip');
 
+      const dbBudgetType = (dbTrip.budget_breakdown && typeof dbTrip.budget_breakdown === 'object' && !Array.isArray(dbTrip.budget_breakdown) && 'total' in dbTrip.budget_breakdown && Array.isArray((dbTrip.budget_breakdown as any).categories)) ? 'rough' : 'detailed';
+
       return {
         id: dbTrip.id,
         title: dbTrip.title,
@@ -267,6 +258,7 @@ export default function TripDetails() {
         tags: travelStyleTags.map((styleId: string) => categoryLookup[styleId]?.label || styleId),
         requirements: expectationTags,
         budgetBreakdown,
+        budgetType: dbBudgetType,
         price: Number(dbTrip.price) || 0,
         totalSlots: dbTrip.max_participants || 10,
         slotsLeft: (dbTrip.max_participants || 10) - (dbTrip.current_participants || 0),
@@ -317,6 +309,7 @@ export default function TripDetails() {
         tags: publishedTrip.travelStyles.map(s => categoryLookup[s]?.label || s),
         requirements: publishedTrip.expectations,
         budgetBreakdown,
+        budgetType: publishedTrip.budgetType || 'detailed',
         price: totalBudget,
         totalSlots: publishedTrip.groupSizeType === 'set' ? publishedTrip.groupSize : 10,
         slotsLeft: publishedTrip.groupSizeType === 'set' ? publishedTrip.groupSize - 1 : 9,
@@ -381,9 +374,10 @@ export default function TripDetails() {
   useEffect(() => {
     if (error) {
       console.error('Error loading trip:', error);
+      const feedback = getLoadErrorFeedback('trip details', error);
       toast({
-        title: "Error",
-        description: "Failed to load trip details",
+        title: feedback.title,
+        description: feedback.description,
         variant: "destructive",
       });
     }
@@ -469,7 +463,13 @@ export default function TripDetails() {
       .filter(Boolean);
   }, [tripData?.simpleNotes]);
 
-  const images = useMemo(() => (tripData && tripData.galleryImages ? tripData.galleryImages : []).map(normalizeImageSrc), [tripData]);
+  const images = useMemo(() => {
+    const rawImages = (tripData && Array.isArray(tripData.galleryImages) ? tripData.galleryImages : [])
+      .map(normalizeImageSrc)
+      .filter((src) => Boolean(String(src || '').trim()));
+
+    return rawImages.length > 0 ? rawImages : [DEFAULT_TRIP_IMAGE];
+  }, [tripData]);
 
   // Share modal state
   const [shareModalOpen, setShareModalOpen] = useState(false);
@@ -478,13 +478,332 @@ export default function TripDetails() {
   // Photo lightbox state
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
+  const [lightboxAnimating, setLightboxAnimating] = useState(false);
+  const [lightboxDirection, setLightboxDirection] = useState<1 | -1>(1);
+  const [lightboxScale, setLightboxScale] = useState(1);
+  const [mobileImageIndex, setMobileImageIndex] = useState(0);
   
   // Booking calendar state
   const [showCalendar, setShowCalendar] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const swipeStartXRef = useRef<number | null>(null);
+  const swipeStartYRef = useRef<number | null>(null);
+  const pinchStartDistanceRef = useRef<number | null>(null);
+  const pinchStartScaleRef = useRef(1);
+  const SWIPE_THRESHOLD_PX = 42;
+  const SWIPE_MAX_VERTICAL_DRIFT_PX = 56;
+  const MIN_LIGHTBOX_SCALE = 1;
+  const MAX_LIGHTBOX_SCALE = 3;
 
-  const nextImage = () => setCurrentImage((prev) => (prev + 1) % images.length);
-  const prevImage = () => setCurrentImage((prev) => (prev - 1 + images.length) % images.length);
+  const clampLightboxScale = (value: number) =>
+    Math.min(MAX_LIGHTBOX_SCALE, Math.max(MIN_LIGHTBOX_SCALE, value));
+
+  const resetLightboxZoom = useCallback(() => {
+    setLightboxScale(1);
+    pinchStartDistanceRef.current = null;
+    pinchStartScaleRef.current = 1;
+  }, []);
+
+  const nextLightboxImage = () => {
+    if (images.length <= 1) return;
+    setLightboxDirection(1);
+    setLightboxAnimating(true);
+    setLightboxIndex((prev) => (prev + 1) % images.length);
+  };
+
+  const prevLightboxImage = () => {
+    if (images.length <= 1) return;
+    resetLightboxZoom();
+    setLightboxDirection(-1);
+    setLightboxAnimating(true);
+    setLightboxIndex((prev) => (prev - 1 + images.length) % images.length);
+  };
+
+  useEffect(() => {
+    if (!lightboxAnimating) return;
+    const timeout = window.setTimeout(() => setLightboxAnimating(false), 220);
+    return () => window.clearTimeout(timeout);
+  }, [lightboxAnimating, lightboxIndex]);
+
+  const handleSwipeStart = (event: React.TouchEvent) => {
+    const touch = event.touches[0];
+    if (!touch) return;
+    swipeStartXRef.current = touch.clientX;
+    swipeStartYRef.current = touch.clientY;
+  };
+
+  const handleSwipeEnd = (
+    event: React.TouchEvent,
+    onSwipeLeft: () => void,
+    onSwipeRight: () => void,
+  ) => {
+    const startX = swipeStartXRef.current;
+    const startY = swipeStartYRef.current;
+    const touch = event.changedTouches[0];
+
+    swipeStartXRef.current = null;
+    swipeStartYRef.current = null;
+
+    if (startX == null || startY == null || !touch) return;
+
+    const deltaX = touch.clientX - startX;
+    const deltaY = touch.clientY - startY;
+
+    if (Math.abs(deltaY) > SWIPE_MAX_VERTICAL_DRIFT_PX) return;
+    if (Math.abs(deltaX) < SWIPE_THRESHOLD_PX) return;
+
+    if (deltaX < 0) {
+      onSwipeLeft();
+      return;
+    }
+
+    onSwipeRight();
+  };
+
+  useEffect(() => {
+    if (images.length === 0) {
+      setMobileImageIndex(0);
+      return;
+    }
+    setMobileImageIndex((prev) => Math.min(prev, images.length - 1));
+  }, [images.length]);
+
+  const nextMobileImage = () => {
+    if (images.length <= 1) return;
+    setMobileImageIndex((prev) => (prev + 1) % images.length);
+  };
+
+  const prevMobileImage = () => {
+    if (images.length <= 1) return;
+    setMobileImageIndex((prev) => (prev - 1 + images.length) % images.length);
+  };
+
+  const openLightboxAt = (index: number) => {
+    resetLightboxZoom();
+    setLightboxIndex(index);
+    setLightboxOpen(true);
+  };
+
+  const getTouchDistance = (touches: TouchList) => {
+    if (touches.length < 2) return null;
+    const [firstTouch, secondTouch] = [touches[0], touches[1]];
+    if (!firstTouch || !secondTouch) return null;
+    const deltaX = firstTouch.clientX - secondTouch.clientX;
+    const deltaY = firstTouch.clientY - secondTouch.clientY;
+    return Math.hypot(deltaX, deltaY);
+  };
+
+  const handleLightboxTouchStart = (event: React.TouchEvent) => {
+    if (event.touches.length === 2) {
+      const distance = getTouchDistance(event.touches);
+      if (distance != null) { 
+        pinchStartDistanceRef.current = distance;
+        pinchStartScaleRef.current = lightboxScale;
+      }
+      swipeStartXRef.current = null;
+      swipeStartYRef.current = null;
+      return;
+    }
+
+    if (lightboxScale > 1.02) return;
+    handleSwipeStart(event);
+  };
+
+  const handleLightboxTouchMove = (event: React.TouchEvent) => {
+    if (event.touches.length !== 2 || pinchStartDistanceRef.current == null) return;
+
+    const currentDistance = getTouchDistance(event.touches);
+    if (currentDistance == null || pinchStartDistanceRef.current === 0) return;
+
+    event.preventDefault();
+    const nextScale = pinchStartScaleRef.current * (currentDistance / pinchStartDistanceRef.current);
+    setLightboxScale(clampLightboxScale(nextScale));
+  };
+
+  const handleLightboxTouchEnd = (event: React.TouchEvent) => {
+    if (pinchStartDistanceRef.current != null) {
+      if (event.touches.length < 2) {
+        pinchStartDistanceRef.current = null;
+        pinchStartScaleRef.current = lightboxScale;
+      }
+      return;
+    }
+
+    if (lightboxScale > 1.02) {
+      swipeStartXRef.current = null;
+      swipeStartYRef.current = null;
+      return;
+    }
+
+    handleSwipeEnd(event, nextLightboxImage, prevLightboxImage);
+  };
+
+  const handleLightboxWheel = (event: React.WheelEvent) => {
+    event.preventDefault();
+    const step = event.deltaY < 0 ? 0.12 : -0.12;
+    setLightboxScale((prev) => clampLightboxScale(prev + step));
+  };
+
+  const zoomInLightbox = () => {
+    setLightboxScale((prev) => clampLightboxScale(prev + 0.25));
+  };
+
+  const zoomOutLightbox = () => {
+    setLightboxScale((prev) => clampLightboxScale(prev - 0.25));
+  };
+
+  const toggleLightboxZoom = () => {
+    setLightboxScale((prev) => (prev > 1.3 ? 1 : 2));
+  };
+
+  useEffect(() => {
+    if (!lightboxOpen) {
+      resetLightboxZoom();
+    }
+  }, [lightboxOpen, resetLightboxZoom]);
+
+  const renderCollage = () => {
+    if (images.length === 0) return null;
+
+    const collageHeightClass = "h-[18.5rem] sm:h-[21rem] md:h-[24rem] lg:h-[25rem]";
+
+    if (images.length === 1) {
+      return (
+        <button
+          type="button"
+          onClick={() => openLightboxAt(0)}
+          className={cn(
+            "group relative block w-full overflow-hidden rounded-3xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+            collageHeightClass
+          )}
+          aria-label="Open trip photo"
+        >
+          <img
+            src={images[0]}
+            alt={`${tripData.title} photo`}
+            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+          />
+          <div className="absolute inset-0 bg-black/0 transition-colors duration-300 group-hover:bg-black/20" />
+          <div className="pointer-events-none absolute bottom-4 right-4 rounded-full bg-white/85 p-2.5 text-foreground opacity-0 shadow-sm backdrop-blur transition-opacity duration-300 group-hover:opacity-100">
+            <ZoomIn className="h-4 w-4" />
+          </div>
+        </button>
+      );
+    }
+
+    if (images.length === 2) {
+      return (
+        <div className={cn("grid grid-cols-2 gap-2 md:gap-3", collageHeightClass)}>
+          {images.slice(0, 2).map((img, index) => (
+            <button
+              key={index}
+              type="button"
+              onClick={() => openLightboxAt(index)}
+              className="group relative block h-full overflow-hidden rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              aria-label={`Open photo ${index + 1}`}
+            >
+              <img
+                src={img}
+                alt={`${tripData.title} photo ${index + 1}`}
+                className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+              />
+            </button>
+          ))}
+        </div>
+      );
+    }
+
+    if (images.length === 3) {
+      return (
+        <div className={cn("grid grid-cols-1 gap-2 md:grid-cols-5 md:grid-rows-2 md:gap-3", collageHeightClass)}>
+          <button
+            type="button"
+            onClick={() => openLightboxAt(0)}
+            className="group relative block h-full min-h-[12rem] overflow-hidden rounded-2xl md:col-span-3 md:row-span-2 md:min-h-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            aria-label="Open photo 1"
+          >
+            <img
+              src={images[0]}
+              alt={`${tripData.title} photo 1`}
+              className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+            />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => openLightboxAt(1)}
+            className="group relative block h-full min-h-[8rem] overflow-hidden rounded-2xl md:col-span-2 md:min-h-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            aria-label="Open photo 2"
+          >
+            <img
+              src={images[1]}
+              alt={`${tripData.title} photo 2`}
+              className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+            />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => openLightboxAt(2)}
+            className="group relative block h-full min-h-[8rem] overflow-hidden rounded-2xl md:col-span-2 md:min-h-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            aria-label="Open photo 3"
+          >
+            <img
+              src={images[2]}
+              alt={`${tripData.title} photo 3`}
+              className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+            />
+          </button>
+        </div>
+      );
+    }
+
+    const visibleCount = Math.min(images.length, 5);
+    const hiddenCount = Math.max(images.length - visibleCount, 0);
+
+    return (
+      <div className={cn("grid grid-cols-2 gap-2 md:grid-cols-4 md:grid-rows-2 md:gap-3", collageHeightClass)}>
+        <button
+          type="button"
+          onClick={() => openLightboxAt(0)}
+          className="group relative col-span-2 row-span-2 block h-full overflow-hidden rounded-2xl md:col-span-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          aria-label="Open photo 1"
+        >
+          <img
+            src={images[0]}
+            alt={`${tripData.title} photo 1`}
+            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+          />
+        </button>
+
+        {images.slice(1, visibleCount).map((img, idx) => {
+          const imageIndex = idx + 1;
+          const isLastVisible = imageIndex === visibleCount - 1;
+
+          return (
+            <button
+              key={imageIndex}
+              type="button"
+              onClick={() => openLightboxAt(imageIndex)}
+              className="group relative block h-full min-h-[7.75rem] overflow-hidden rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primary md:min-h-0"
+              aria-label={`Open photo ${imageIndex + 1}`}
+            >
+              <img
+                src={img}
+                alt={`${tripData.title} photo ${imageIndex + 1}`}
+                className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+              />
+              {hiddenCount > 0 && isLastVisible && (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/50 text-lg font-semibold text-white">
+                  +{hiddenCount}
+                </div>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    );
+  };
 
   const tripUrl = buildPublicUrl(`/trip/${id}`);
   const shareTripId = dbTrip?.id || String(id || "");
@@ -724,18 +1043,7 @@ export default function TripDetails() {
 
   // Handler to start or open a direct conversation
   const handleMessageMember = async (memberId: string) => {
-    try {
-      const convo = await createDirectConversation(memberId);
-      if (convo && convo.id) {
-        navigate(`/chat/${convo.id}`);
-      }
-    } catch (err) {
-      toast({
-        title: "Error",
-        description: "Could not start conversation.",
-        variant: "destructive",
-      });
-    }
+    navigate(`/chat/new/${memberId}`);
   };
 
   const handleSendInvite = async () => {
@@ -922,7 +1230,13 @@ export default function TripDetails() {
       {/* Photo Lightbox Modal */}
       <Dialog open={lightboxOpen} onOpenChange={setLightboxOpen}>
         <DialogContent className="max-w-4xl w-[95vw] h-[90vh] p-0 overflow-hidden bg-black/95">
-          <div className="relative w-full h-full flex items-center justify-center">
+          <div
+            className="relative w-full h-full flex items-center justify-center"
+            onTouchStart={handleLightboxTouchStart}
+            onTouchMove={handleLightboxTouchMove}
+            onTouchEnd={handleLightboxTouchEnd}
+            onWheel={handleLightboxWheel}
+          >
             <button
               onClick={() => setLightboxOpen(false)}
               className="absolute top-4 right-4 z-50 h-10 w-10 rounded-full bg-white/10 backdrop-blur-sm flex items-center justify-center hover:bg-white/20 transition-colors"
@@ -933,14 +1247,14 @@ export default function TripDetails() {
             {images.length > 1 && (
               <>
                 <button
-                  onClick={() => setLightboxIndex((prev) => (prev - 1 + images.length) % images.length)}
-                  className="absolute left-4 h-12 w-12 rounded-full bg-white/10 backdrop-blur-sm flex items-center justify-center hover:bg-white/20 transition-colors"
+                  onClick={prevLightboxImage}
+                  className="absolute left-4 top-1/2 z-50 h-12 w-12 -translate-y-1/2 rounded-full border border-white/35 bg-black/35 backdrop-blur-md shadow-lg flex items-center justify-center hover:bg-black/50 transition-colors"
                 >
                   <ChevronLeft className="h-6 w-6 text-white" />
                 </button>
                 <button
-                  onClick={() => setLightboxIndex((prev) => (prev + 1) % images.length)}
-                  className="absolute right-4 h-12 w-12 rounded-full bg-white/10 backdrop-blur-sm flex items-center justify-center hover:bg-white/20 transition-colors"
+                  onClick={nextLightboxImage}
+                  className="absolute right-4 top-1/2 z-50 h-12 w-12 -translate-y-1/2 rounded-full border border-white/35 bg-black/35 backdrop-blur-md shadow-lg flex items-center justify-center hover:bg-black/50 transition-colors"
                 >
                   <ChevronRight className="h-6 w-6 text-white" />
                 </button>
@@ -950,8 +1264,34 @@ export default function TripDetails() {
             <img
               src={images[lightboxIndex]}
               alt={`Gallery image ${lightboxIndex + 1}`}
-              className="max-w-full max-h-full object-contain"
+              onDoubleClick={toggleLightboxZoom}
+              className={cn(
+                "max-w-full max-h-full object-contain transition-all duration-300 ease-out",
+                lightboxAnimating
+                  ? (lightboxDirection === 1 ? "opacity-0 translate-x-6" : "opacity-0 -translate-x-6")
+                  : "opacity-100 translate-x-0"
+              )}
+              style={{ transform: `scale(${lightboxScale})` }}
             />
+
+            <div className="absolute bottom-4 right-4 z-50 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={zoomOutLightbox}
+                className="h-10 w-10 rounded-full border border-white/35 bg-black/35 backdrop-blur-md shadow-lg flex items-center justify-center text-white hover:bg-black/50 transition-colors"
+                aria-label="Zoom out"
+              >
+                <ZoomOut className="h-5 w-5" />
+              </button>
+              <button
+                type="button"
+                onClick={zoomInLightbox}
+                className="h-10 w-10 rounded-full border border-white/35 bg-black/35 backdrop-blur-md shadow-lg flex items-center justify-center text-white hover:bg-black/50 transition-colors"
+                aria-label="Zoom in"
+              >
+                <ZoomIn className="h-5 w-5" />
+              </button>
+            </div>
             
             <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-white text-sm bg-black/50 px-3 py-1 rounded-full">
               {lightboxIndex + 1} / {images.length}
@@ -1157,128 +1497,253 @@ export default function TripDetails() {
 
       <AppLayout wideLayout>
         <div className="pb-36">
-        {/* Image Gallery */}
         {images.length > 0 && (
-        <div className="relative -mx-5 sm:-mx-6 lg:-mx-8">
-          <div 
-            className="aspect-[16/9] overflow-hidden cursor-pointer group"
-            onClick={() => {
-              setLightboxIndex(currentImage);
-              setLightboxOpen(true);
-            }}
-          >
-            <img
-              src={images[currentImage]}
-              alt={tripData.title}
-              className="h-full w-full object-cover transition-transform group-hover:scale-105"
-            />
-            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
-              <div className="opacity-0 group-hover:opacity-100 transition-opacity bg-white/90 backdrop-blur-sm rounded-full p-3">
-                <ZoomIn className="h-6 w-6 text-gray-800" />
-              </div>
-            </div>
-          </div>
-
-          {/* Back Button */}
-          <Link
-            to={backLink}
-            className="absolute top-3 sm:top-4 left-3 sm:left-4 h-9 w-9 sm:h-10 sm:w-10 rounded-full bg-card/80 backdrop-blur-sm flex items-center justify-center"
-          >
-            <ChevronLeft className="h-4 w-4 sm:h-5 sm:w-5 text-foreground" />
-          </Link>
-
-          {/* Actions */}
-          {!isDraftTrip && (
-            <div className="absolute top-3 sm:top-4 right-3 sm:right-4 flex gap-1.5 sm:gap-2">
-              <button 
-                onClick={handleShare}
-                className="h-9 w-9 sm:h-10 sm:w-10 rounded-full bg-card/80 backdrop-blur-sm flex items-center justify-center transition-transform active:scale-95"
+          <>
+            {/* Mobile hero - full bleed like the reference screenshot */}
+            <div className="-mx-5 overflow-hidden md:hidden sm:-mx-6">
+              <div
+                className="relative isolate"
+                onTouchStart={handleSwipeStart}
+                onTouchEnd={(event) => handleSwipeEnd(event, nextMobileImage, prevMobileImage)}
               >
-                <Share2 className="h-4 w-4 sm:h-5 sm:w-5 text-foreground" />
-              </button>
-              <button 
-                onClick={handleFavourite}
-                className={`h-9 w-9 sm:h-10 sm:w-10 rounded-full bg-card/80 backdrop-blur-sm flex items-center justify-center transition-all duration-300 ${isAnimating ? 'scale-125' : ''}`}
-              >
-                <Heart 
-                  className={`h-4 w-4 sm:h-5 sm:w-5 transition-all duration-300 ${
-                    isFavourited 
-                      ? 'fill-destructive text-destructive scale-110' 
-                      : 'fill-transparent text-foreground'
-                  }`} 
-                />
-              </button>
-              {isDbTrip && isOrganizer && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() => openLightboxAt(mobileImageIndex)}
+                  className="group relative block h-[18.5rem] w-full overflow-hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  aria-label="Open trip photo"
+                >
+                  <img
+                    src={images[mobileImageIndex]}
+                    alt={`${tripData.title} photo`}
+                    className="h-full w-full object-cover transition-transform duration-500 group-active:scale-[1.02]"
+                  />
+                </button>
+
+                <div className="pointer-events-none absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-black/45 via-black/20 to-transparent" />
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 h-36 bg-gradient-to-t from-black/55 via-black/25 to-transparent" />
+
+                {images.length > 1 && (
+                  <div className="absolute left-1/2 top-4 z-20 -translate-x-1/2 rounded-full border border-white/35 bg-black/35 px-3 py-1 text-xs font-semibold text-white backdrop-blur-md">
+                    {mobileImageIndex + 1} / {images.length}
+                  </div>
+                )}
+
+                {images.length > 1 && (
+                  <>
                     <button
-                      className="h-9 w-9 sm:h-10 sm:w-10 rounded-full bg-card/80 backdrop-blur-sm flex items-center justify-center transition-transform active:scale-95"
-                      aria-label="Trip actions"
+                      type="button"
+                      onClick={prevMobileImage}
+                      className="absolute left-3 top-1/2 z-20 -translate-y-1/2 h-11 w-11 rounded-full border border-white/40 bg-black/30 shadow-lg backdrop-blur-md flex items-center justify-center"
+                      aria-label="Previous photo"
                     >
-                      <MoreVertical className="h-4 w-4 sm:h-5 sm:w-5 text-foreground" />
+                      <ChevronLeft className="h-5 w-5 text-white" />
                     </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="min-w-[12rem]">
-                    <DropdownMenuItem onSelect={() => setShowInviteModal(true)}>
-                      Invite by email
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      onSelect={() => setShowCancelConfirm(true)}
-                      className="text-destructive focus:text-destructive"
-                      disabled={isCancellingTrip}
+                    <button
+                      type="button"
+                      onClick={nextMobileImage}
+                      className="absolute right-3 top-1/2 z-20 -translate-y-1/2 h-11 w-11 rounded-full border border-white/40 bg-black/30 shadow-lg backdrop-blur-md flex items-center justify-center"
+                      aria-label="Next photo"
                     >
-                      {isCancellingTrip ? "Cancelling..." : "Cancel trip"}
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
-            </div>
-          )}
+                      <ChevronRight className="h-5 w-5 text-white" />
+                    </button>
+                  </>
+                )}
 
-          {/* Navigation */}
-          {images.length > 1 && (
-            <>
-              <button
-                onClick={prevImage}
-                className="absolute left-2 sm:left-4 top-1/2 -translate-y-1/2 h-8 w-8 sm:h-10 sm:w-10 rounded-full bg-card/80 backdrop-blur-sm flex items-center justify-center"
-              >
-                <ChevronLeft className="h-4 w-4 sm:h-5 sm:w-5 text-foreground" />
-              </button>
-              <button
-                onClick={nextImage}
-                className="absolute right-2 sm:right-4 top-1/2 -translate-y-1/2 h-8 w-8 sm:h-10 sm:w-10 rounded-full bg-card/80 backdrop-blur-sm flex items-center justify-center"
-              >
-                <ChevronRight className="h-4 w-4 sm:h-5 sm:w-5 text-foreground" />
-              </button>
+                <Link
+                  to={backLink}
+                  className="absolute top-3 left-3 z-20 h-10 w-10 rounded-full border border-white/40 bg-black/30 backdrop-blur-md shadow-lg flex items-center justify-center"
+                >
+                  <ChevronLeft className="h-5 w-5 text-white" />
+                </Link>
 
-              {/* Thumbnails */}
-              <div className="absolute bottom-3 sm:bottom-4 left-1/2 -translate-x-1/2 flex gap-1.5 sm:gap-2 max-w-[80%] overflow-x-auto scrollbar-hide">
-                {images.map((img, index) => (
-                  <button
-                    key={index}
-                    onClick={() => setCurrentImage(index)}
-                    className={`h-10 w-14 sm:h-12 sm:w-16 rounded-lg overflow-hidden border-2 shrink-0 ${
-                      index === currentImage ? "border-white" : "border-transparent"
-                    }`}
-                  >
-                    <img src={img} alt="" className="h-full w-full object-cover" />
-                  </button>
-                ))}
+                {!isDraftTrip && (
+                  <div className="absolute top-3 right-3 z-20 flex gap-1.5">
+                    <button
+                      onClick={handleShare}
+                      className="h-10 w-10 rounded-full border border-white/40 bg-black/30 backdrop-blur-md shadow-lg flex items-center justify-center transition-transform active:scale-95"
+                    >
+                      <Share2 className="h-5 w-5 text-white" />
+                    </button>
+                    <button
+                      onClick={handleFavourite}
+                      className={`h-10 w-10 rounded-full border border-white/40 bg-black/30 backdrop-blur-md shadow-lg flex items-center justify-center transition-all duration-300 ${isAnimating ? 'scale-125' : ''}`}
+                    >
+                      <Heart
+                        className={`h-5 w-5 transition-all duration-300 ${
+                          isFavourited
+                            ? 'fill-destructive text-destructive scale-110'
+                            : 'fill-transparent text-white'
+                        }`}
+                      />
+                    </button>
+                    {isDbTrip && !isOrganizer && dbTrip?.creator_id && (
+                      <ModerationMenu
+                        reportType="TRIP"
+                        targetId={String(dbTrip.id)}
+                        reportedUserId={String(dbTrip.creator_id)}
+                        targetLabel="Trip"
+                        reportLabel="Report Trip"
+                        trigger={
+                          <button
+                            type="button"
+                            className="h-10 w-10 rounded-full border border-white/40 bg-black/30 backdrop-blur-md shadow-lg flex items-center justify-center transition-transform active:scale-95 text-white"
+                            aria-label="Trip actions"
+                          >
+                            <MoreVertical className="h-5 w-5 text-white" strokeWidth={2.5} />
+                          </button>
+                        }
+                      />
+                    )}
+                    {isDbTrip && isOrganizer && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            className="h-10 w-10 rounded-full border border-white/40 bg-black/30 backdrop-blur-md shadow-lg flex items-center justify-center transition-transform active:scale-95"
+                            aria-label="Trip actions"
+                          >
+                            <MoreVertical className="h-6 w-6 text-white scale-125" strokeWidth={3} />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="min-w-[12rem]">
+                          <DropdownMenuItem onSelect={() => setShowInviteModal(true)}>
+                            Invite by email
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            onSelect={() => setShowCancelConfirm(true)}
+                            className="text-destructive focus:text-destructive"
+                            disabled={isCancellingTrip}
+                          >
+                            {isCancellingTrip ? "Cancelling..." : "Cancel trip"}
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
+                  </div>
+                )}
+
+                {images.length > 1 && (
+                  <div className="absolute bottom-3 left-1/2 z-20 -translate-x-1/2 w-[84%] overflow-x-auto">
+                    <div className="mx-auto flex w-max items-center gap-1.5 rounded-2xl border border-white/35 bg-black/30 px-1.5 py-1.5 shadow-2xl backdrop-blur-md">
+                      {images.map((img, index) => (
+                        <button
+                          key={`mobile-trip-thumb-${index}`}
+                          type="button"
+                          onClick={() => setMobileImageIndex(index)}
+                          className={cn(
+                            "relative h-10 w-[4.3rem] overflow-hidden rounded-lg border transition-all",
+                            mobileImageIndex === index
+                              ? "border-white ring-2 ring-white/90"
+                              : "border-white/35 opacity-90"
+                          )}
+                          aria-label={`View photo ${index + 1}`}
+                        >
+                          <img
+                            src={img}
+                            alt={`${tripData.title} thumbnail ${index + 1}`}
+                            className="h-full w-full object-cover"
+                          />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
-            </>
-          )}
-        </div>
+            </div>
+
+            {/* Desktop/tablet collage */}
+            <div className="hidden md:block lg:px-[14rem] xl:px-[16rem]">
+              <div className="relative">
+                {renderCollage()}
+
+                {/* Back Button */}
+                <Link
+                  to={backLink}
+                  className="absolute top-3 left-3 h-9 w-9 rounded-full bg-card/80 backdrop-blur-sm flex items-center justify-center sm:top-4 sm:left-4 sm:h-10 sm:w-10"
+                >
+                  <ChevronLeft className="h-4 w-4 sm:h-5 sm:w-5 text-foreground" />
+                </Link>
+
+                {/* Actions */}
+                {!isDraftTrip && (
+                  <div className="absolute top-3 right-3 flex gap-1.5 sm:top-4 sm:right-4 sm:gap-2">
+                    <button
+                      onClick={handleShare}
+                      className="h-9 w-9 sm:h-10 sm:w-10 rounded-full bg-card/80 backdrop-blur-sm flex items-center justify-center transition-transform active:scale-95"
+                    >
+                      <Share2 className="h-4 w-4 sm:h-5 sm:w-5 text-foreground" />
+                    </button>
+                    <button
+                      onClick={handleFavourite}
+                      className={`h-9 w-9 sm:h-10 sm:w-10 rounded-full bg-card/80 backdrop-blur-sm flex items-center justify-center transition-all duration-300 ${isAnimating ? 'scale-125' : ''}`}
+                    >
+                      <Heart
+                        className={`h-4 w-4 sm:h-5 sm:w-5 transition-all duration-300 ${
+                          isFavourited
+                            ? 'fill-destructive text-destructive scale-110'
+                            : 'fill-transparent text-foreground'
+                        }`}
+                      />
+                    </button>
+                    {isDbTrip && !isOrganizer && dbTrip?.creator_id && (
+                      <ModerationMenu
+                        reportType="TRIP"
+                        targetId={String(dbTrip.id)}
+                        reportedUserId={String(dbTrip.creator_id)}
+                        targetLabel="Trip"
+                        reportLabel="Report Trip"
+                        trigger={
+                          <button
+                            type="button"
+                            className="h-9 w-9 sm:h-10 sm:w-10 rounded-full bg-card/80 backdrop-blur-sm flex items-center justify-center transition-transform active:scale-95 text-foreground"
+                            aria-label="Trip actions"
+                          >
+                            <MoreVertical className="h-5 w-5 sm:h-5 sm:w-5 text-foreground" strokeWidth={2.5} />
+                          </button>
+                        }
+                      />
+                    )}
+                    {isDbTrip && isOrganizer && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            className="h-9 w-9 sm:h-10 sm:w-10 rounded-full bg-card/80 backdrop-blur-sm flex items-center justify-center transition-transform active:scale-95"
+                            aria-label="Trip actions"
+                          >
+                            <MoreVertical className="h-6 w-6 sm:h-7 sm:w-7 text-foreground scale-125" strokeWidth={3} />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="min-w-[12rem]">
+                          <DropdownMenuItem onSelect={() => setShowInviteModal(true)}>
+                            Invite by email
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            onSelect={() => setShowCancelConfirm(true)}
+                            className="text-destructive focus:text-destructive"
+                            disabled={isCancellingTrip}
+                          >
+                            {isCancellingTrip ? "Cancelling..." : "Cancel trip"}
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
         )}
 
+        <div className="mb-2 pt-3 px-0 sm:mb-4 sm:pt-5 lg:px-[14rem] xl:px-[16rem]">
+          <h1 className="text-2xl font-bold text-foreground sm:text-3xl">{tripData.title}</h1>
+        </div>
+
         {/* Content */}
-        <div className="pt-4 sm:pt-6 space-y-4 sm:space-y-6">
+        <div className="px-0 pt-1 sm:pt-4 lg:px-[14rem] xl:px-[16rem] space-y-4 sm:space-y-6">
           {/* Title & Location */}
-          <div className="space-y-2 sm:space-y-3">
-            <div className="flex items-start justify-between gap-2">
-              <div className="space-y-1">
-                <h1 className="text-xl sm:text-2xl font-bold text-foreground">{tripData.title}</h1>
-              </div>
+          <div className="space-y-1.5 sm:space-y-3">
+            <div className="flex items-start justify-end gap-2">
               {isPublishedTrip && (
                 <span className={`px-2 py-1 text-xs font-medium rounded-full shrink-0 ${
                   tripData.visibility === 'public' 
@@ -1351,13 +1816,14 @@ export default function TripDetails() {
             <div className="flex flex-wrap gap-2">
               {tripData.tags.map((tag) => {
                 const category = tripCategories.find(c => c.label === tag);
+                const icon = category?.icon || getExpectationIcon(tag);
                 return (
                   <span
                     key={tag}
                     className="px-3 py-2 text-sm rounded-full border bg-white border-border text-muted-foreground flex items-center gap-2"
                   >
-                    {category?.icon && <span>{category.icon}</span>}
-                    {tag}
+                    {icon && <span>{icon}</span>}
+                    {getExpectationLabel(tag)}
                   </span>
                 );
               })}
@@ -1379,17 +1845,14 @@ export default function TripDetails() {
           {/* Tab Content */}
           {activeTab === "overview" && (
             <div className="space-y-3 sm:space-y-4">
-              {/* Description - Now as bullet points */}
+              {/* Description */}
               <Card className="p-3 sm:p-4 border-border/50">
                 <h3 className="font-semibold text-foreground mb-2 text-sm sm:text-base">About This Trip</h3>
-                <ul className="space-y-1.5 sm:space-y-2">
-                  {descriptionBullets.map((bullet, index) => (
-                    <li key={index} className="flex items-start gap-2 text-xs sm:text-sm text-muted-foreground">
-                      <span className="h-1.5 w-1.5 rounded-full bg-primary mt-1.5 sm:mt-2 shrink-0" />
-                      {bullet}
-                    </li>
+                <div className="space-y-1.5 sm:space-y-2">
+                  {parseDescriptionToBullets(tripData.description).map((line, index) => (
+                    <p key={index} className="text-xs sm:text-sm text-muted-foreground">{line}</p>
                   ))}
-                </ul>
+                </div>
               </Card>
 
               {/* Requirements */}
@@ -1412,67 +1875,95 @@ export default function TripDetails() {
 
 
               {/* Budget Breakdown */}
-              {tripData.budgetBreakdown.length > 0 && (
-                <Card className="p-3 sm:p-4 border-border/50">
-                  <h3 className="font-semibold text-foreground mb-2 sm:mb-3 text-sm sm:text-base">Budget Breakdown</h3>
-                  <div className="space-y-2 sm:space-y-3">
-                    {tripData.budgetBreakdown.map((item) => {
-                      // Get the converted amount from convertedBudgetBreakdown or use original
-                      // Try to find by exact category match first, then by normalized category name
-                      const convertedItem = convertedBudgetBreakdown.find(c => 
-                        c.category === item.category || 
-                        c.category.toLowerCase() === item.category.toLowerCase()
-                      );
-                      const displayAmount = convertedItem?.amount ?? item.amount;
-                      const currencyToDisplay = homeCurrency || "MYR";
-                      // Map budget categories to emojis
-                      const categoryEmojiMap: Record<string, string> = {
-                        'Transport': '🚗',
-                        'transport': '🚗',
-                        'Accommodation': '🏨',
-                        'accommodation': '🏨',
-                        'Food & Drinks': '🍴',
-                        'food': '🍴',
-                        'Food': '🍴',
-                        'Activities': '🎫',
-                        'activities': '🎫',
-                        'Flight': '✈️',
-                        'flight': '✈️',
-                        'Stay': '🏨',
-                        'stay': '🏨',
-                      };
-                      const emoji = categoryEmojiMap[item.category] || categoryEmojiMap[item.icon] || '📦';
-                      return (
-                        <div key={item.category} className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-                            <div className="h-8 w-8 sm:h-10 sm:w-10 rounded-lg sm:rounded-xl bg-secondary flex items-center justify-center shrink-0">
-                              <span className="text-base sm:text-lg">{emoji}</span>
+              {tripData.budgetBreakdown.length > 0 && (() => {
+                const categoryEmojiMap: Record<string, string> = {
+                  'Transport': '🚗',
+                  'transport': '🚗',
+                  'Accommodation': '🏨',
+                  'accommodation': '🏨',
+                  'Food & Drinks': '🍴',
+                  'food': '🍴',
+                  'Food': '🍴',
+                  'Activities': '🎫',
+                  'activities': '🎫',
+                  'Flight': '✈️',
+                  'flight': '✈️',
+                  'Stay': '🏨',
+                  'stay': '🏨',
+                };
+                const currencyToDisplay = homeCurrency || "MYR";
+                const totalDisplay = `${getCurrencySymbol(currencyToDisplay)} ${Math.round(convertedTotalPrice || tripData.price).toLocaleString()}`;
+
+                if ((tripData as any).budgetType === 'rough') {
+                  return (
+                    <Card className="p-3 sm:p-4 border-border/50">
+                      <h3 className="font-semibold text-foreground mb-1 text-sm sm:text-base">Rough Budget</h3>
+                      <p className="text-2xl sm:text-3xl font-bold text-foreground">{totalDisplay}</p>
+                      <p className="text-xs text-muted-foreground mb-3">Per person (estimated)</p>
+                      <p className="text-xs sm:text-sm text-foreground font-medium mb-2">This budget may cover:</p>
+                      <div className="flex flex-wrap gap-2 mb-3">
+                        {tripData.budgetBreakdown.map((item) => {
+                          const emoji = categoryEmojiMap[item.category] || categoryEmojiMap[item.icon] || '📦';
+                          return (
+                            <span
+                              key={item.category}
+                              className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs text-foreground bg-background"
+                            >
+                              <span>{emoji}</span>
+                              <span>{item.category}</span>
+                            </span>
+                          );
+                        })}
+                      </div>
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        This is an estimated amount to prepare, not a fixed cost or payment to the organizer. Actual spending may be higher or lower depending on bookings, preferences, and shared expenses during the trip.
+                      </p>
+                    </Card>
+                  );
+                }
+
+                return (
+                  <Card className="p-3 sm:p-4 border-border/50">
+                    <h3 className="font-semibold text-foreground mb-2 sm:mb-3 text-sm sm:text-base">Budget Breakdown</h3>
+                    <div className="space-y-2 sm:space-y-3">
+                      {tripData.budgetBreakdown.map((item) => {
+                        const convertedItem = convertedBudgetBreakdown.find(c =>
+                          c.category === item.category ||
+                          c.category.toLowerCase() === item.category.toLowerCase()
+                        );
+                        const displayAmount = convertedItem?.amount ?? item.amount;
+                        const emoji = categoryEmojiMap[item.category] || categoryEmojiMap[item.icon] || '📦';
+                        return (
+                          <div key={item.category} className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                              <div className="h-8 w-8 sm:h-10 sm:w-10 rounded-lg sm:rounded-xl bg-secondary flex items-center justify-center shrink-0">
+                                <span className="text-base sm:text-lg">{emoji}</span>
+                              </div>
+                              <span className="text-xs sm:text-sm text-foreground truncate">{item.category}</span>
                             </div>
-                            <span className="text-xs sm:text-sm text-foreground truncate">{item.category}</span>
+                            <span className="font-semibold text-foreground text-sm sm:text-base shrink-0">
+                              {getCurrencySymbol(currencyToDisplay)} {Math.round(displayAmount).toLocaleString()}
+                            </span>
                           </div>
-                          <span className="font-semibold text-foreground text-sm sm:text-base shrink-0">
-                            {getCurrencySymbol(currencyToDisplay)} {Math.round(displayAmount)}
+                        );
+                      })}
+                      <div className="pt-2 sm:pt-3 border-t border-border/50">
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold text-foreground text-sm sm:text-base">Total per person</span>
+                          <span className="text-base sm:text-lg font-bold text-primary">
+                            {totalDisplay}
                           </span>
                         </div>
-                      );
-                    })}
-                    <div className="pt-2 sm:pt-3 border-t border-border/50">
-                      <div className="flex items-center justify-between">
-                        <span className="font-semibold text-foreground text-sm sm:text-base">Total per person</span>
-                        <span className="text-base sm:text-lg font-bold text-primary">
-                          {getCurrencySymbol(homeCurrency || "MYR")} {Math.round(convertedTotalPrice || tripData.price)}
-                        </span>
-                      </div>
-                      {/* Budget Clarification */}
-                      <div className="mt-2 p-2 bg-secondary/50 rounded-lg">
-                        <p className="text-xs text-muted-foreground leading-relaxed">
-                          <span className="font-medium text-foreground">Estimated shared expenses.</span> This is the amount you should be prepared to spend during the trip. You don't pay this to the organizer  expenses are tracked and split transparently in the group.
-                        </p>
+                        <div className="mt-2 p-2 bg-secondary/50 rounded-lg">
+                          <p className="text-xs text-muted-foreground leading-relaxed">
+                            <span className="font-medium text-foreground">Estimated shared expenses.</span> This is the amount you should be prepared to spend during the trip. You don't pay this to the organizer — expenses are tracked and split transparently in the group.
+                          </p>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                </Card>
-              )}
+                  </Card>
+                );
+              })()}
 
               {/* No budget set message */}
               {tripData.budgetBreakdown.length === 0 && (
@@ -1706,9 +2197,27 @@ export default function TripDetails() {
 
       {/* Sticky CTA Bar */}
       {isDbTrip && !isOrganizer && (
-        <div className="fixed bottom-above-nav lg:bottom-0 left-0 lg:left-60 right-0 z-40 bg-background border-t border-border/50">
-          <div className="container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto px-4 py-3">
-            <div className={cn("grid gap-3", joinRequestStatus === 'member' && isDraftTrip ? "grid-cols-1" : "grid-cols-2")}>
+        <div
+          className={cn(
+            "fixed bottom-above-nav lg:bottom-0 left-0 right-0 z-40 bg-background border-t border-border/50",
+            user ? "lg:left-60" : "lg:left-0"
+          )}
+        >
+          <div
+            className={cn(
+              "mx-auto px-4 py-3",
+              user
+                ? "container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl"
+                : "w-full px-16 sm:px-32 lg:px-[14rem] xl:px-[16rem]"
+            )}
+          >
+            <div
+              className={cn(
+                "grid gap-3",
+                joinRequestStatus === 'member' && isDraftTrip ? "grid-cols-1" : "grid-cols-2",
+                !user && "mx-auto w-full max-w-4xl"
+              )}
+            >
               {joinRequestStatus === 'member' ? (
                 <Button size="lg" disabled className="w-full rounded-xl text-sm sm:text-base gap-2">
                   <Check className="h-4 w-4" />
@@ -1773,42 +2282,44 @@ export default function TripDetails() {
 
       {/* Request to Join Confirmation Modal */}
       <Dialog open={showJoinConfirmModal} onOpenChange={setShowJoinConfirmModal}>
-        <DialogContent className="max-w-md w-[calc(100%-2rem)] sm:w-full rounded-2xl p-0 max-h-[calc(100dvh-1rem)] sm:max-h-[85vh] overflow-y-auto top-[6%] translate-y-0 sm:top-[50%] sm:-translate-y-1/2 [&>button]:hidden">
-          <DialogHeader className="p-4 pb-3 border-b border-border/50">
-            <div className="flex items-center justify-between">
-              <DialogTitle>Request to Join Trip</DialogTitle>
+        <DialogContent className="max-w-md w-[calc(100%-1rem)] sm:w-full rounded-2xl p-0 max-h-[min(92dvh,720px)] overflow-hidden [&>button]:hidden">
+          <div className="flex max-h-[min(92dvh,720px)] flex-col">
+          <DialogHeader className="p-5 pb-4 border-b border-border/50 shrink-0">
+            <div className="flex items-center justify-between gap-3">
+              <DialogTitle className="text-2xl sm:text-[30px] leading-tight tracking-tight">Request to Join Trip</DialogTitle>
               <button 
                 onClick={() => setShowJoinConfirmModal(false)}
+                aria-label="Close request modal"
                 className="h-8 w-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <DialogDescription>
+            <DialogDescription className="text-base leading-relaxed pt-1">
               Here's what happens when you request to join
             </DialogDescription>
           </DialogHeader>
           
-          <div className="p-4 space-y-4">
+          <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
             {/* What happens next steps */}
-            <div className="bg-secondary/50 rounded-xl p-3 space-y-2">
+            <div className="rounded-2xl border border-border/60 bg-muted/30 p-4 space-y-3">
               <div className="flex items-start gap-3">
-                <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0 text-xs font-semibold text-primary">1</div>
-                <p className="text-sm text-muted-foreground">Your request is sent to the trip organizer</p>
+                <div className="h-7 w-7 rounded-full bg-primary/15 flex items-center justify-center shrink-0 text-xs font-semibold text-primary">1</div>
+                <p className="text-sm text-foreground/90 leading-snug">Your request is sent to the trip organizer</p>
               </div>
               <div className="flex items-start gap-3">
-                <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0 text-xs font-semibold text-primary">2</div>
-                <p className="text-sm text-muted-foreground">They'll review your profile and message</p>
+                <div className="h-7 w-7 rounded-full bg-primary/15 flex items-center justify-center shrink-0 text-xs font-semibold text-primary">2</div>
+                <p className="text-sm text-foreground/90 leading-snug">They'll review your profile and message</p>
               </div>
               <div className="flex items-start gap-3">
-                <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0 text-xs font-semibold text-primary">3</div>
-                <p className="text-sm text-muted-foreground">You'll be notified when they respond</p>
+                <div className="h-7 w-7 rounded-full bg-primary/15 flex items-center justify-center shrink-0 text-xs font-semibold text-primary">3</div>
+                <p className="text-sm text-foreground/90 leading-snug">You'll be notified when they respond</p>
               </div>
             </div>
 
             {/* Message input */}
-            <div className="space-y-2">
-              <label htmlFor="join-note" className="text-sm font-medium">
+            <div className="space-y-2.5">
+              <label htmlFor="join-note" className="text-lg sm:text-xl leading-tight font-semibold tracking-tight">
                 Introduce yourself <span className="text-muted-foreground font-normal">(optional)</span>
               </label>
               <textarea
@@ -1821,42 +2332,46 @@ export default function TripDetails() {
                   }, 120);
                 }}
                 placeholder={`Hi! I'd love to join your ${tripData.destination} trip. A bit about me...`}
-                className="w-full min-h-[80px] p-3 rounded-xl border border-border/50 bg-background text-sm resize-none focus-visible:outline-none focus-visible:border-primary/50"
+                className="w-full min-h-[112px] p-4 rounded-xl border border-border/50 bg-background text-base leading-relaxed resize-none focus-visible:outline-none focus-visible:border-primary/50"
                 maxLength={300}
               />
-              <p className="text-xs text-muted-foreground text-right">
+              <p className="text-sm text-muted-foreground text-right">
                 {joinNote.length}/300
               </p>
             </div>
-            
-            {/* Action buttons */}
-            <div className="grid grid-cols-2 gap-3 pt-2">
+
+          </div>
+
+          {/* Action buttons */}
+          <div className="shrink-0 border-t border-border/50 bg-background/95 backdrop-blur px-5 py-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+            <div className="grid grid-cols-2 gap-3">
               <Button 
                 variant="outline" 
                 onClick={() => {
                   setShowJoinConfirmModal(false);
                   setJoinNote("");
                 }}
-                className="rounded-xl"
+                className="rounded-xl h-12 text-base"
               >
                 Cancel
               </Button>
               <Button
                 onClick={handleSendJoinRequest}
-                className="rounded-xl gap-2"
+                className="rounded-xl h-12 gap-2 text-base"
               >
                 <UserPlus className="h-4 w-4" />
                 Send Request
               </Button>
             </div>
           </div>
+          </div>
         </DialogContent>
       </Dialog>
 
       {/* Message Organizer Modal */}
       <Dialog open={showMessageModal} onOpenChange={setShowMessageModal}>
-        <DialogContent className="max-w-md w-[calc(100%-2rem)] sm:w-full rounded-2xl p-0 max-h-[calc(100dvh-1rem)] sm:max-h-[85vh] overflow-y-auto top-[6%] translate-y-0 sm:top-[50%] sm:-translate-y-1/2 [&>button]:hidden">
-          <DialogHeader className="p-4 pb-3 border-b border-border/50">
+        <DialogContent className="max-w-md w-[calc(100%-2rem)] sm:w-full rounded-2xl p-0 max-h-[min(90dvh,720px)] overflow-hidden flex flex-col [&>button]:hidden">
+          <DialogHeader className="shrink-0 p-4 pb-3 border-b border-border/50">
             <div className="flex items-center justify-between">
               <DialogTitle>Message Trip Organizer</DialogTitle>
               <button 
@@ -1871,7 +2386,7 @@ export default function TripDetails() {
             </DialogDescription>
           </DialogHeader>
           
-          <div className="p-4 space-y-4">
+          <div className="flex-1 overflow-y-auto overscroll-contain p-4 space-y-4">
             {/* Organizer preview */}
             <div className="flex items-center gap-3 p-3 rounded-xl bg-secondary/50">
               <img 
@@ -1896,7 +2411,7 @@ export default function TripDetails() {
                 onChange={(e) => setInitialMessage(e.target.value.slice(0, 500))}
                 onFocus={(e) => {
                   setTimeout(() => {
-                    e.currentTarget.scrollIntoView({ block: "center", behavior: "smooth" });
+                    e.currentTarget.scrollIntoView({ block: "nearest", behavior: "auto" });
                   }, 120);
                 }}
                 placeholder={`Hi ${organizer.name}, I'm interested in joining your ${tripData.destination} trip...`}
@@ -1933,7 +2448,7 @@ export default function TripDetails() {
                   const messageParam = initialMessage.trim() 
                     ? `?message=${encodeURIComponent(initialMessage.trim())}` 
                     : "";
-                  navigate(`/chat/${organizer.id}${messageParam}`);
+                  navigate(`/chat/new/${organizer.id}${messageParam}`);
                   setInitialMessage("");
                 }}
                 disabled={!initialMessage.trim()}

@@ -91,6 +91,8 @@ export interface StoryComment {
   author: StoryAuthor;
   createdAt: Date;
   likes: number;
+  parentCommentId?: string | null;
+  depth?: number;
 }
 
 export interface Location {

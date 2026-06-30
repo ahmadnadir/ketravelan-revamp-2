@@ -7,18 +7,15 @@
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:597159324842:android:5b09df6bb446f9ee8af4d3",
+        "mobilesdk_app_id": "1:597159324842:android:d7ae807d908d38d98af4d3",
         "android_client_info": {
-          "package_name": "dev.ketravelan.app"
+          "package_name": "com.ketravelan.app"
         }
       },
       "oauth_client": [
         {
-          "client_id": "597159324842-5l7j39f2429cdqs21pbpplrivabbp68g.apps.googleusercontent.com",
-          "client_type": 1,
-          "android_info": {
-            "package_name": "dev.ketravelan.app"
-          }
+          "client_id": "597159324842-m5tbrbsqhdp0mnb57lsjl8dhkk27ioei.apps.googleusercontent.com",
+          "client_type": 3
         }
       ],
       "api_key": [
@@ -28,7 +25,55 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "597159324842-m5tbrbsqhdp0mnb57lsjl8dhkk27ioei.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "597159324842-i5rl6fuonnhq4aiau8abmaqnh2et79nl.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "dev.ketravelan.app"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:597159324842:android:5b09df6bb446f9ee8af4d3",
+        "android_client_info": {
+          "package_name": "dev.ketravelan.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "597159324842-m5tbrbsqhdp0mnb57lsjl8dhkk27ioei.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC2SRVs9p_cn7ZYfGzgUOCCKdz3lWV3whI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "597159324842-m5tbrbsqhdp0mnb57lsjl8dhkk27ioei.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "597159324842-i5rl6fuonnhq4aiau8abmaqnh2et79nl.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "dev.ketravelan.app"
+              }
+            }
+          ]
         }
       }
     }

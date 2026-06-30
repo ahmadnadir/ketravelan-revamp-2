@@ -9,6 +9,7 @@ import { Card } from "@/components/ui/card";
 import { ExpensesAtGlanceSlide } from "@/components/welcome/ExpensesAtGlanceSlide";
 import { UpfrontPaymentsSlide } from "@/components/welcome/UpfrontPaymentsSlide";
 import { NetSettlementSlide } from "@/components/welcome/NetSettlementSlide";
+import welcomeImage from "../../assets/welcome.jpeg";
 
 export default function WelcomeOnboarding() {
   const navigate = useNavigate();
@@ -68,27 +69,13 @@ export default function WelcomeOnboarding() {
           {/* Screen 1: Intro */}
           <div className="flex-[0_0_100%] min-w-0 h-full">
             <div className="h-full flex flex-col items-center justify-center px-6 text-center">
-              {/* Illustration */}
-              <div className="w-64 h-56 mb-8 relative">
-                <div className="absolute inset-0 bg-gradient-to-br from-primary/20 via-accent/20 to-secondary/20 rounded-3xl" />
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="relative">
-                    {/* Central plane */}
-                    <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center animate-pulse">
-                      <Plane className="w-10 h-10 text-primary" />
-                    </div>
-                    {/* Orbiting elements */}
-                    <div className="absolute -top-4 -right-8 w-12 h-12 rounded-full bg-accent/20 flex items-center justify-center">
-                      <Users className="w-6 h-6 text-accent-foreground" />
-                    </div>
-                    <div className="absolute -bottom-4 -left-8 w-12 h-12 rounded-full bg-secondary flex items-center justify-center">
-                      <Receipt className="w-6 h-6 text-secondary-foreground" />
-                    </div>
-                    <div className="absolute -bottom-6 right-0 w-10 h-10 rounded-full bg-muted flex items-center justify-center">
-                      <MessageCircle className="w-5 h-5 text-muted-foreground" />
-                    </div>
-                  </div>
-                </div>
+              {/* Welcome image */}
+              <div className="w-full max-w-sm aspect-[4/5] mb-8 rounded-3xl overflow-hidden shadow-xl border border-border/40">
+                <img
+                  src={welcomeImage}
+                  alt="Welcome to Ketravelan"
+                  className="w-full h-full object-cover"
+                />
               </div>
 
               {/* Content */}

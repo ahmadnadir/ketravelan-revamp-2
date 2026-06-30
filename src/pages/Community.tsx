@@ -7,10 +7,13 @@ import { DiscussionsFeed } from "@/components/community/discussions/DiscussionsF
 import { AskQuestionDrawer } from "@/components/community/discussions/AskQuestionDrawer";
 import { SEOHead } from "@/components/seo/SEOHead";
 import { SegmentedControl } from "@/components/shared/SegmentedControl";
+import { detectCountryFromLocale } from "@/lib/geolocation";
+
+const DISCUSSION_LOCATION_STORAGE_KEY = "ketravelan-discussion-country";
 
 function CommunityContent() {
   const [searchParams] = useSearchParams();
-  const { mode, setMode } = useCommunity();
+  const { mode, setMode, setLocationFilter, refreshDiscussions } = useCommunity();
   const [askQuestionOpen, setAskQuestionOpen] = useState(false);
 
   // Set mode based on URL query param (only on mount), default to stories
@@ -23,6 +26,53 @@ function CommunityContent() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Use cached discussion country when available, then refresh discussions only
+  // if the newly inferred locale country differs from the cached one.
+  useEffect(() => {
+    let isMounted = true;
+
+    const getStoredCountry = (): string | null => {
+      if (typeof window === "undefined") return null;
+      const raw = window.localStorage.getItem(DISCUSSION_LOCATION_STORAGE_KEY);
+      const value = raw?.trim();
+      return value ? value : null;
+    };
+
+    const storeCountry = (country: string) => {
+      if (typeof window === "undefined") return;
+      window.localStorage.setItem(DISCUSSION_LOCATION_STORAGE_KEY, country);
+    };
+
+    (async () => {
+      try {
+        const cachedCountry = getStoredCountry();
+        if (isMounted && cachedCountry) {
+          setLocationFilter(cachedCountry);
+        }
+
+        const detectedCountry = detectCountryFromLocale();
+        const normalizedCountry = detectedCountry?.trim();
+
+        if (!isMounted || !normalizedCountry) return;
+
+        if (normalizedCountry !== cachedCountry) {
+          setLocationFilter(normalizedCountry);
+          storeCountry(normalizedCountry);
+
+          if (cachedCountry) {
+            await refreshDiscussions();
+          }
+        }
+      } catch (error) {
+        console.error("Background location preload error:", error);
+      }
+    })();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [refreshDiscussions, setLocationFilter]);
 
   return (
     <>
@@ -45,7 +95,14 @@ function CommunityContent() {
         {mode === "stories" ? <StoriesFeed /> : <DiscussionsFeed onAskQuestion={() => setAskQuestionOpen(true)} />}
       </div>
       
-      <AskQuestionDrawer open={askQuestionOpen} onOpenChange={setAskQuestionOpen} />
+      <AskQuestionDrawer
+        open={askQuestionOpen}
+        onOpenChange={setAskQuestionOpen}
+        onCreated={async () => {
+          setMode("discussions");
+          await refreshDiscussions();
+        }}
+      />
     </>
   );
 }

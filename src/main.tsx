@@ -1,8 +1,36 @@
 import { createRoot } from "react-dom/client";
 import { HelmetProvider } from "react-helmet-async";
 import { Capacitor } from "@capacitor/core";
+import { registerSW } from "virtual:pwa-register";
 import App from "./App.tsx";
 import "./index.css";
+
+if (typeof window !== "undefined" && window.location.hostname === "localhost" && "serviceWorker" in navigator) {
+  // Keep localhost free from stale cached bundles during rapid UI iteration.
+  void navigator.serviceWorker.getRegistrations().then((registrations) => {
+    registrations.forEach((registration) => {
+      void registration.unregister();
+    });
+  });
+
+  if ("caches" in window) {
+    void caches.keys().then((keys) => {
+      keys.forEach((key) => {
+        void caches.delete(key);
+      });
+    });
+  }
+}
+
+if (typeof window !== "undefined" && window.location.hostname !== "localhost") {
+  // Register SW in non-local environments and auto-activate fresh builds.
+  const updateSW = registerSW({
+    immediate: true,
+    onNeedRefresh() {
+      void updateSW(true);
+    },
+  });
+}
 
 // Aborted browser operations (for example canceled share dialogs) can surface
 // as unhandled promise rejections in WebKit. Ignore only AbortError globally.

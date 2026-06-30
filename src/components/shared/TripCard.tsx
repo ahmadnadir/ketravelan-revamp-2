@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Calendar, MapPin, Users, Heart, Share2, Copy, MessageCircle, Check, Lock, Trash2, X, Tag } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Card } from "@/components/ui/card";
@@ -19,6 +19,8 @@ import { isTripSaved, saveTrip, unsaveTrip } from "@/lib/savedTrips";
 import { buildPublicUrl, buildTripShareUrl } from "@/lib/publicUrl";
 import { getExpectationIcon, getExpectationLabel } from "@/lib/expectationUtils";
 
+const DEFAULT_TRIP_IMAGE = "/default-trip-photo.jpeg";
+
 interface TripCardProps {
   id: string;
   title: string;
@@ -27,6 +29,7 @@ interface TripCardProps {
   startDate: string;
   endDate: string;
   price: number;
+  creatorId?: string;
   displayCurrency?: string;
   slotsLeft: number;
   totalSlots: number;
@@ -73,9 +76,18 @@ export function TripCard({
   const { user } = useAuth();
   const [isFavourited, setIsFavourited] = useState(false);
   const [isAnimating, setIsAnimating] = useState(false);
+  const [showLikeFx, setShowLikeFx] = useState(false);
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const suppressNavigationUntilRef = useRef(0);
+  const tapRef = useRef<{ x: number; y: number; at: number } | null>(null);
+  const pointerRef = useRef<{ x: number; y: number; at: number; active: boolean } | null>(null);
+
+  const isInteractiveTarget = (target: EventTarget | null) => {
+    if (!(target instanceof HTMLElement)) return false;
+    return Boolean(target.closest("button, a, input, textarea, select"));
+  };
 
   const handleDelete = async (e: React.MouseEvent) => {
     e.preventDefault();
@@ -115,18 +127,8 @@ export function TripCard({
   };
 
   // Fallbacks for all props
-  // Use a special 'no photo' SVG icon if imageUrl is missing
-  const noPhotoIcon = (
-    <div className="flex items-center justify-center h-full w-full bg-muted text-muted-foreground">
-      <img
-        src="https://static.thenounproject.com/png/1211233-200.png"
-        alt="No Photo"
-        className="w-12 h-12 object-contain"
-      />
-    </div>
-  );
   const hasImage = imageUrl && imageUrl.trim() !== "";
-  const safeImageUrl = hasImage ? imageUrl : undefined;
+  const safeImageUrl = hasImage ? imageUrl : DEFAULT_TRIP_IMAGE;
   const safeTitle = title && title.trim() !== "" ? title : "Untitled Trip";
   const safeDestination = destination && destination.trim() !== "" ? destination : "Unknown Destination";
   const safeStartDate = startDate && startDate.trim() !== "" ? startDate : "TBA";
@@ -157,12 +159,17 @@ export function TripCard({
 
   const handleFavourite = (e: React.MouseEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     if (!user?.id) {
       toast({ title: "Sign in required", description: "Please sign in to save trips." });
       return;
     }
     setIsAnimating(true);
     const next = !isFavourited;
+    if (next) {
+      setShowLikeFx(true);
+      setTimeout(() => setShowLikeFx(false), 450);
+    }
     setIsFavourited(next);
     (async () => {
       const ok = next ? await saveTrip(id, user.id) : await unsaveTrip(id, user.id);
@@ -175,6 +182,75 @@ export function TripCard({
       }
       setTimeout(() => setIsAnimating(false), 300);
     })();
+  };
+
+  const handleGestureLike = async () => {
+    suppressNavigationUntilRef.current = Date.now() + 380;
+
+    if (!user?.id) {
+      toast({ title: "Sign in required", description: "Please sign in to save trips." });
+      return;
+    }
+
+    setIsAnimating(true);
+    setShowLikeFx(true);
+    setTimeout(() => setShowLikeFx(false), 450);
+
+    if (isFavourited) {
+      setTimeout(() => setIsAnimating(false), 300);
+      return;
+    }
+
+    setIsFavourited(true);
+    const ok = await saveTrip(id, user.id);
+    if (!ok) {
+      setIsFavourited(false);
+      toast({ title: "Failed", description: "Could not update favourites.", variant: "destructive" });
+    } else {
+      toast({ title: "Added to favourites" });
+    }
+    setTimeout(() => setIsAnimating(false), 300);
+  };
+
+  const handlePointerDown = (event: React.PointerEvent<HTMLElement>) => {
+    if (isInteractiveTarget(event.target)) {
+      pointerRef.current = null;
+      return;
+    }
+
+    pointerRef.current = {
+      x: event.clientX,
+      y: event.clientY,
+      at: Date.now(),
+      active: true,
+    };
+  };
+
+  const handlePointerUp = async (event: React.PointerEvent<HTMLElement>) => {
+    if (isInteractiveTarget(event.target)) {
+      pointerRef.current = null;
+      return;
+    }
+
+    const pointer = pointerRef.current;
+    pointerRef.current = null;
+    if (!pointer?.active) return;
+
+    const dx = event.clientX - pointer.x;
+    const dy = event.clientY - pointer.y;
+    const elapsed = Date.now() - pointer.at;
+    const isTap = Math.abs(dx) < 20 && Math.abs(dy) < 20 && elapsed < 350;
+    if (!isTap) return;
+
+    const now = Date.now();
+    const lastTap = tapRef.current;
+    if (lastTap && now - lastTap.at < 320) {
+      tapRef.current = null;
+      await handleGestureLike();
+      return;
+    }
+
+    tapRef.current = { x: event.clientX, y: event.clientY, at: now };
   };
 
   const handleShare = async (e: React.MouseEvent) => {
@@ -276,17 +352,16 @@ export function TripCard({
           <div className="space-y-4">
             {/* Trip Preview */}
             <div className="flex items-center gap-3 p-3 rounded-xl bg-secondary/50">
-              {hasImage ? (
-                <img 
-                  src={safeImageUrl} 
-                  alt={safeTitle} 
-                  className="h-12 w-12 rounded-lg object-cover"
-                />
-              ) : (
-                <div className="h-12 w-12 rounded-lg overflow-hidden bg-muted flex items-center justify-center">
-                  {noPhotoIcon}
-                </div>
-              )}
+              <img
+                src={safeImageUrl}
+                alt={safeTitle}
+                className="h-12 w-12 rounded-lg object-cover"
+                onError={(event) => {
+                  const img = event.currentTarget;
+                  if (img.src.endsWith(DEFAULT_TRIP_IMAGE)) return;
+                  img.src = DEFAULT_TRIP_IMAGE;
+                }}
+              />
               <div className="flex-1 min-w-0">
                 <p className="font-medium text-sm text-foreground truncate">{safeTitle}</p>
                 <p className="text-xs text-muted-foreground truncate">{safeDestination}</p>
@@ -332,19 +407,42 @@ export function TripCard({
         </DialogContent>
       </Dialog>
 
-      <Card className={cn("overflow-hidden border-border/50 shadow-sm flex flex-col h-full", className)}>
+      <Card
+        className={cn("overflow-hidden border-border/50 shadow-sm flex flex-col h-full", className)}
+        onDoubleClick={(event) => {
+          if (isInteractiveTarget(event.target)) return;
+          void handleGestureLike();
+        }}
+        onClickCapture={(event) => {
+          if (Date.now() > suppressNavigationUntilRef.current) return;
+          const target = event.target as HTMLElement | null;
+          if (target?.closest("a")) {
+            event.preventDefault();
+            event.stopPropagation();
+          }
+        }}
+        onPointerDown={handlePointerDown}
+        onPointerUp={(event) => {
+          void handlePointerUp(event);
+        }}
+      >
       <Link to={tripLink}>
         {/* Image */}
         <div className="relative aspect-[16/10] sm:aspect-[16/9] overflow-hidden">
-          {hasImage ? (
-            <img
-              src={safeImageUrl}
-              alt={safeTitle}
-              className="h-full w-full object-cover transition-transform hover:scale-105"
-            />
-          ) : (
-            <div className="h-full w-full flex items-center justify-center bg-muted">
-              {noPhotoIcon}
+          <img
+            src={safeImageUrl}
+            alt={safeTitle}
+            className="h-full w-full object-cover transition-transform hover:scale-105"
+            onError={(event) => {
+              const img = event.currentTarget;
+              if (img.src.endsWith(DEFAULT_TRIP_IMAGE)) return;
+              img.src = DEFAULT_TRIP_IMAGE;
+            }}
+          />
+          {showLikeFx && (
+            <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
+              <span className="absolute h-20 w-20 rounded-full border-2 border-destructive/55 animate-ping" />
+              <Heart className="h-14 w-14 text-destructive fill-destructive drop-shadow-md animate-pulse" />
             </div>
           )}
           {(isAlmostFull || isOngoing || slotsLeft === 0) && (
@@ -391,14 +489,14 @@ export function TripCard({
               variant="secondary"
               size="icon"
               className={cn(
-                "h-7 w-7 sm:h-8 sm:w-8 rounded-full bg-card/80 backdrop-blur-sm transition-transform duration-300",
-                isAnimating && "scale-125"
+                "h-7 w-7 sm:h-8 sm:w-8 rounded-full bg-card/80 backdrop-blur-sm transition-transform duration-200",
+                isAnimating && "scale-110"
               )}
               onClick={handleFavourite}
             >
               <Heart 
                 className={cn(
-                  "h-3.5 w-3.5 sm:h-4 sm:w-4 transition-all duration-300",
+                  "h-3.5 w-3.5 sm:h-4 sm:w-4 transition-all duration-200",
                   isFavourited ? "fill-destructive text-destructive scale-110" : "fill-transparent"
                 )} 
               />

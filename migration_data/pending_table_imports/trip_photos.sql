@@ -1,0 +1,12 @@
+SET session_replication_role = replica;
+SET row_security = off;
+COPY "public"."trip_photos" ("id", "trip_id", "user_id", "photo_url", "caption", "is_featured", "uploaded_at") FROM stdin;
+6d29f7e4-aa3a-4b8d-97da-1433d12ff4ba	086e8280-859d-451d-9943-a8c0ed3a39b6	888578f3-5d1e-442f-b82f-16df7de70965	https://ydwhrqtqskdcepqiqkxi.supabase.co/storage/v1/object/public/trip-photos/086e8280-859d-451d-9943-a8c0ed3a39b6/888578f3-5d1e-442f-b82f-16df7de70965-1756641149090.jpeg	It was wonderful	f	2025-08-31 11:52:30.380577+00
+0f4be444-720a-4d61-984a-1c5ee50fc5bf	c5a8ee45-1bff-4378-bc56-52eb819eb0df	d71d3978-1a6b-483e-a453-30952df2dfcd	https://ydwhrqtqskdcepqiqkxi.supabase.co/storage/v1/object/public/trip-photos/c5a8ee45-1bff-4378-bc56-52eb819eb0df/d71d3978-1a6b-483e-a453-30952df2dfcd-1757604750677.jpeg		f	2025-09-11 15:32:35.776849+00
+13b202bc-870f-44ba-9698-cfa4a44fe2c8	c5a8ee45-1bff-4378-bc56-52eb819eb0df	d71d3978-1a6b-483e-a453-30952df2dfcd	https://ydwhrqtqskdcepqiqkxi.supabase.co/storage/v1/object/public/trip-photos/c5a8ee45-1bff-4378-bc56-52eb819eb0df/d71d3978-1a6b-483e-a453-30952df2dfcd-1757604829485.jpeg		f	2025-09-11 15:33:54.18995+00
+5802e844-974e-4b05-896e-26fcbcba6f9b	e4a68065-8b7f-4549-aa53-1b5f20ac3d7f	888578f3-5d1e-442f-b82f-16df7de70965	https://ydwhrqtqskdcepqiqkxi.supabase.co/storage/v1/object/public/trip-photos/e4a68065-8b7f-4549-aa53-1b5f20ac3d7f/888578f3-5d1e-442f-b82f-16df7de70965-1760312926152.jpeg	Had a very fun time!	f	2025-10-12 23:48:47.254007+00
+d5d060ba-f862-4eaa-af30-897a3c88051f	bdaf6b85-c21c-4912-ae17-fb4e80fb394f	888578f3-5d1e-442f-b82f-16df7de70965	https://ydwhrqtqskdcepqiqkxi.supabase.co/storage/v1/object/public/trip-photos/bdaf6b85-c21c-4912-ae17-fb4e80fb394f/888578f3-5d1e-442f-b82f-16df7de70965-1760940814940.png	Magical ✨	f	2025-10-20 06:13:36.698806+00
+ec73a006-0943-41b1-a102-527b74f9f4ad	bdc854f1-c7e7-41e5-803e-296350e696ff	d71d3978-1a6b-483e-a453-30952df2dfcd	https://ydwhrqtqskdcepqiqkxi.supabase.co/storage/v1/object/public/trip-photos/bdc854f1-c7e7-41e5-803e-296350e696ff/d71d3978-1a6b-483e-a453-30952df2dfcd-1763557879433.png		f	2025-11-19 13:11:20.117307+00
+2517e388-9757-4303-8a2a-f2340f68b244	bdc854f1-c7e7-41e5-803e-296350e696ff	d71d3978-1a6b-483e-a453-30952df2dfcd	https://ydwhrqtqskdcepqiqkxi.supabase.co/storage/v1/object/public/trip-photos/bdc854f1-c7e7-41e5-803e-296350e696ff/d71d3978-1a6b-483e-a453-30952df2dfcd-1763557896460.png		f	2025-11-19 13:11:37.085562+00
+\.
+RESET ALL;

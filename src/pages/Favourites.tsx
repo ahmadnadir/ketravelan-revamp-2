@@ -97,6 +97,7 @@ export default function Favourites() {
                 endDate={trip.end_date}
                 price={trip.price}
                 displayCurrency={trip.currency}
+                creatorId={trip.creator_id}
                 slotsLeft={trip.max_participants - (trip.current_participants || 0)}
                 totalSlots={trip.max_participants}
                 tags={trip.tags || []}

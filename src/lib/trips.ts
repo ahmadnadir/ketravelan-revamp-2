@@ -1,6 +1,15 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { supabase } from './supabase';
 import type { CurrencyCode } from './currencyUtils';
+import { filterItemsByBlockedRelationship } from '@/lib/moderation';
+
+export type TripNotificationSettingKey = 'new_members_join' | 'expense_updates' | 'chat_activity';
+
+const TRIP_NOTIFICATION_DEFAULTS: Record<TripNotificationSettingKey, boolean> = {
+  new_members_join: true,
+  expense_updates: true,
+  chat_activity: false,
+};
 
 function isSchemaDriftError(error: any): boolean {
   const message = `${error?.message ?? ''} ${error?.details ?? ''} ${error?.hint ?? ''}`.toLowerCase();
@@ -11,6 +20,78 @@ function isSchemaDriftError(error: any): boolean {
     message.includes('relation "join_requests" does not exist') ||
     message.includes('could not find the table')
   );
+}
+
+type EnsureTripMemberResult = 'inserted' | 'reactivated' | 'already_active';
+
+async function ensureTripMemberActive(tripId: string, userId: string): Promise<EnsureTripMemberResult> {
+  const { error: insertError } = await supabase
+    .from('trip_members')
+    .insert({
+      trip_id: tripId,
+      user_id: userId,
+      role: 'member',
+    });
+
+  if (!insertError) return 'inserted';
+  if (insertError.code !== '23505') throw insertError;
+
+  const { data: reactivatedRows, error: reactivateError } = await supabase
+    .from('trip_members')
+    .update({
+      left_at: null,
+      joined_at: new Date().toISOString(),
+      role: 'member',
+      is_admin: false,
+    })
+    .eq('trip_id', tripId)
+    .eq('user_id', userId)
+    .not('left_at', 'is', null)
+    .select('id')
+    .limit(1);
+
+  if (reactivateError) throw reactivateError;
+  return (reactivatedRows?.length || 0) > 0 ? 'reactivated' : 'already_active';
+}
+
+async function incrementTripParticipantsCount(tripId: string, context: string) {
+  const { error: rpcError } = await supabase.rpc('increment', {
+    table_name: 'trips',
+    row_id: tripId,
+    column_name: 'current_participants',
+  });
+
+  if (rpcError) {
+    console.warn(`increment RPC failed in ${context}`, rpcError.message);
+  }
+}
+
+async function ensureTripConversationParticipant(tripId: string, userId: string) {
+  const { data: conversations, error: conversationError } = await supabase
+    .from('conversations')
+    .select('id')
+    .eq('trip_id', tripId)
+    .eq('conversation_type', 'trip_group')
+    .limit(1);
+
+  if (conversationError) {
+    console.warn('Unable to load trip conversation while reactivating member:', conversationError);
+    return;
+  }
+
+  const conversationId = conversations?.[0]?.id;
+  if (!conversationId) return;
+
+  const { error: participantError } = await supabase
+    .from('conversation_participants')
+    .insert({
+      conversation_id: conversationId,
+      user_id: userId,
+    });
+
+  if (participantError && participantError.code !== '23505') {
+    console.warn('Unable to ensure trip conversation participant during member reactivation:', participantError);
+  }
 }
 
 export interface TripFilters {
@@ -106,7 +187,7 @@ export async function fetchTrips(filters?: TripFilters) {
   const { data, error } = await query;
 
   if (error) throw error;
-  return data;
+  return filterItemsByBlockedRelationship(data || [], (trip: any) => trip.creator_id);
 }
 
 export async function fetchTripDetails(tripIdOrSlug: string) {
@@ -139,6 +220,7 @@ export async function fetchTripDetails(tripIdOrSlug: string) {
       budget_mode,
       budget_breakdown,
       travel_styles,
+      trip_settings,
       created_at,
       creator_id,
       creator:profiles!trips_creator_id_fkey(id, username, full_name, avatar_url, bio),
@@ -161,7 +243,41 @@ export async function fetchTripDetails(tripIdOrSlug: string) {
   const { data, error } = await query.maybeSingle();
 
   if (error) throw error;
+  if (!data) return null;
+
+  const visible = await filterItemsByBlockedRelationship([data], (trip: any) => trip.creator_id);
+  if (visible.length === 0) {
+    throw new Error('Trip unavailable');
+  }
+
   return data;
+}
+
+export async function isTripNotificationEnabled(
+  tripId: string,
+  key: TripNotificationSettingKey,
+): Promise<boolean> {
+  const fallbackValue = TRIP_NOTIFICATION_DEFAULTS[key];
+
+  if (!tripId) return fallbackValue;
+
+  try {
+    const { data, error } = await supabase
+      .from('trips')
+      .select('trip_settings')
+      .eq('id', tripId)
+      .maybeSingle();
+
+    if (error) throw error;
+
+    const notifications = (data?.trip_settings as any)?.notifications;
+    const rawValue = notifications?.[key];
+
+    return typeof rawValue === 'boolean' ? rawValue : fallbackValue;
+  } catch (error) {
+    console.warn(`Failed to resolve trip notification setting: ${key}`, error);
+    return fallbackValue;
+  }
 }
 
 export async function fetchJoinRequestStatus(tripId: string, userId: string) {
@@ -364,35 +480,16 @@ export async function acceptTripInvite(inviteId: string) {
 
   if (inviteError) throw inviteError;
 
-  const { error: memberError } = await supabase
-    .from('trip_members')
-    .insert({
-      trip_id: invite.trip_id,
-      user_id: invite.invitee_user_id,
-      role: 'member',
-    });
+  const memberResult = await ensureTripMemberActive(invite.trip_id, invite.invitee_user_id);
 
-  if (memberError) throw memberError;
+  if (memberResult === 'inserted' || memberResult === 'reactivated') {
+    // Increment current_participants when a membership is newly active.
+    await incrementTripParticipantsCount(invite.trip_id, 'acceptTripInvite');
 
-  // Increment current_participants atomically
-  const { error: rpcError } = await supabase.rpc('increment', {
-    table_name: 'trips',
-    row_id: invite.trip_id,
-    column_name: 'current_participants',
-  });
-
-  // Fallback: if RPC doesn't exist yet, do a manual read+update
-  if (rpcError) {
-    console.warn('increment RPC failed, using fallback', rpcError.message);
-    const { data: tripRow } = await supabase
-      .from('trips')
-      .select('current_participants')
-      .eq('id', invite.trip_id)
-      .single();
-    await supabase
-      .from('trips')
-      .update({ current_participants: (tripRow?.current_participants ?? 0) + 1 })
-      .eq('id', invite.trip_id);
+    // Re-joining through reactivation does not fire insert triggers that add chat participants.
+    if (memberResult === 'reactivated') {
+      await ensureTripConversationParticipant(invite.trip_id, invite.invitee_user_id);
+    }
   }
 
   try {
@@ -468,26 +565,14 @@ export async function approveJoinRequest(
 
   if (approvedRequest?.trip_id && approvedRequest?.user_id) {
     if (!approvalAppliedInDb) {
-      const { error: directMemberError } = await supabase
-        .from('trip_members')
-        .insert({
-          trip_id: approvedRequest.trip_id,
-          user_id: approvedRequest.user_id,
-          role: 'member'
-        });
+      const memberResult = await ensureTripMemberActive(approvedRequest.trip_id, approvedRequest.user_id);
 
-      if (directMemberError && directMemberError.code !== '23505') {
-        throw directMemberError;
-      }
+      if (memberResult === 'inserted' || memberResult === 'reactivated') {
+        await incrementTripParticipantsCount(approvedRequest.trip_id, 'approveJoinRequest direct fallback path');
 
-      const { error: directCountError } = await supabase.rpc('increment', {
-        table_name: 'trips',
-        row_id: approvedRequest.trip_id,
-        column_name: 'current_participants'
-      });
-
-      if (directCountError) {
-        console.warn('increment RPC failed in direct fallback path', directCountError.message);
+        if (memberResult === 'reactivated') {
+          await ensureTripConversationParticipant(approvedRequest.trip_id, approvedRequest.user_id);
+        }
       }
     }
 
@@ -534,26 +619,14 @@ export async function approveJoinRequest(
       user_id: fallbackContext.userId,
     };
 
-    const { error: directMemberError } = await supabase
-      .from('trip_members')
-      .insert({
-        trip_id: directRequest.trip_id,
-        user_id: directRequest.user_id,
-        role: 'member'
-      });
+    const memberResult = await ensureTripMemberActive(directRequest.trip_id, directRequest.user_id);
 
-    if (directMemberError && directMemberError.code !== '23505') {
-      throw directMemberError;
-    }
+    if (memberResult === 'inserted' || memberResult === 'reactivated') {
+      await incrementTripParticipantsCount(directRequest.trip_id, 'approveJoinRequest UI-context fallback path');
 
-    const { error: directCountError } = await supabase.rpc('increment', {
-      table_name: 'trips',
-      row_id: directRequest.trip_id,
-      column_name: 'current_participants'
-    });
-
-    if (directCountError) {
-      console.warn('increment RPC failed in UI-context fallback path', directCountError.message);
+      if (memberResult === 'reactivated') {
+        await ensureTripConversationParticipant(directRequest.trip_id, directRequest.user_id);
+      }
     }
 
     try {
@@ -625,26 +698,14 @@ export async function approveJoinRequest(
         throw new Error('Approvals backend is not fully migrated yet. Run latest Supabase migrations, then retry.');
       }
 
-      const { error: fallbackMemberError } = await supabase
-        .from('trip_members')
-        .insert({
-          trip_id: fallbackRequest.trip_id,
-          user_id: fallbackRequest.user_id,
-          role: 'member'
-        });
+      const memberResult = await ensureTripMemberActive(fallbackRequest.trip_id, fallbackRequest.user_id);
 
-      if (fallbackMemberError && fallbackMemberError.code !== '23505') {
-        throw fallbackMemberError;
-      }
+      if (memberResult === 'inserted' || memberResult === 'reactivated') {
+        await incrementTripParticipantsCount(fallbackRequest.trip_id, 'approveJoinRequest schema-drift fallback path');
 
-      const { error: fallbackCountError } = await supabase.rpc('increment', {
-        table_name: 'trips',
-        row_id: fallbackRequest.trip_id,
-        column_name: 'current_participants'
-      });
-
-      if (fallbackCountError) {
-        console.warn('increment RPC failed in fallback path', fallbackCountError.message);
+        if (memberResult === 'reactivated') {
+          await ensureTripConversationParticipant(fallbackRequest.trip_id, fallbackRequest.user_id);
+        }
       }
 
       return fallbackRequest;
@@ -653,51 +714,31 @@ export async function approveJoinRequest(
   }
   if (!request) throw new Error('Join request not found or already processed');
 
-  const { error: memberError } = await supabase
-    .from('trip_members')
-    .insert({
-      trip_id: request.trip_id,
-      user_id: request.user_id,
-      role: 'member'
-    });
+  let memberResult: EnsureTripMemberResult;
+  try {
+    memberResult = await ensureTripMemberActive(request.trip_id, request.user_id);
+  } catch (memberError) {
+    // Best-effort rollback so fallback path does not leave request as approved without membership.
+    await supabase
+      .from('join_requests')
+      .update({
+        status: 'pending',
+        reviewed_by: null,
+        reviewed_at: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', requestId)
+      .eq('status', 'approved');
 
-  if (memberError) {
-    // Keep fallback behavior aligned with RPC semantics: duplicate member is acceptable.
-    if (memberError.code !== '23505') {
-      // Best-effort rollback so fallback path does not leave request as approved without membership.
-      await supabase
-        .from('join_requests')
-        .update({
-          status: 'pending',
-          reviewed_by: null,
-          reviewed_at: null,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', requestId)
-        .eq('status', 'approved');
-
-      throw memberError;
-    }
+    throw memberError;
   }
 
-  const { error: countError } = await supabase.rpc('increment', {
-    table_name: 'trips',
-    row_id: request.trip_id,
-    column_name: 'current_participants'
-  });
+  if (memberResult === 'inserted' || memberResult === 'reactivated') {
+    await incrementTripParticipantsCount(request.trip_id, 'approveJoinRequest legacy fallback path');
 
-  // Fallback: if RPC doesn't exist yet, do a manual read+update
-  if (countError) {
-    console.warn('increment RPC failed, using fallback', countError.message);
-    const { data: tripRow } = await supabase
-      .from('trips')
-      .select('current_participants')
-      .eq('id', request.trip_id)
-      .single();
-    await supabase
-      .from('trips')
-      .update({ current_participants: (tripRow?.current_participants ?? 0) + 1 })
-      .eq('id', request.trip_id);
+    if (memberResult === 'reactivated') {
+      await ensureTripConversationParticipant(request.trip_id, request.user_id);
+    }
   }
 
   try {
@@ -878,15 +919,188 @@ export async function fetchAllJoinRequestsForUser() {
   return data;
 }
 
-export async function leaveTripMember(tripId: string) {
+export interface LeaveTripMemberResult {
+  didLeave: boolean;
+  didCancelTrip: boolean;
+  tripAlreadyCancelled: boolean;
+  organizersBeforeLeave: number;
+}
+
+export async function leaveTripMember(
+  tripId: string,
+  options?: { forceCancel?: boolean },
+): Promise<LeaveTripMemberResult> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not authenticated');
+
+  const { data, error } = await supabase.rpc('leave_trip_member', {
+    p_force_cancel: Boolean(options?.forceCancel),
+    p_trip_id: tripId,
+  });
+
+  if (error) {
+    const errorCode = (error as any)?.code;
+    const errorMessage = String((error as any)?.message || '').toLowerCase();
+
+    if (
+      errorCode === 'P0001' &&
+      errorMessage.includes('organizers cannot leave their own trip')
+    ) {
+      const { data: trip, error: tripError } = await supabase
+        .from('trips')
+        .select('status')
+        .eq('id', tripId)
+        .single();
+
+      if (tripError) throw tripError;
+
+      const tripAlreadyCancelled = trip?.status === 'cancelled';
+      let didCancelTrip = false;
+
+      if (!tripAlreadyCancelled) {
+        const { error: cancelError } = await supabase
+          .from('trips')
+          .update({ status: 'cancelled' })
+          .eq('id', tripId);
+
+        if (cancelError) throw cancelError;
+        didCancelTrip = true;
+      }
+
+      // Best effort: remove group chat once trip is cancelled.
+      const { error: deleteConversationError } = await supabase
+        .from('conversations')
+        .delete()
+        .eq('trip_id', tripId)
+        .eq('conversation_type', 'trip_group');
+
+      if (deleteConversationError) {
+        console.warn('Unable to delete trip group conversation after organizer leave block:', deleteConversationError);
+      }
+
+      return {
+        didLeave: true,
+        didCancelTrip,
+        tripAlreadyCancelled,
+        organizersBeforeLeave: 1,
+      };
+    }
+
+    if (errorCode !== 'PGRST202') {
+      throw error;
+    }
+
+    // Compatibility fallback when RPC is not visible in schema cache.
+    const [{ data: trip, error: tripError }, { data: activeMemberships, error: membershipsError }] = await Promise.all([
+      supabase
+        .from('trips')
+        .select('status')
+        .eq('id', tripId)
+        .single(),
+      supabase
+        .from('trip_members')
+        .select('user_id, is_admin, role')
+        .eq('trip_id', tripId)
+        .is('left_at', null),
+    ]);
+
+    if (tripError) throw tripError;
+    if (membershipsError) throw membershipsError;
+
+    const memberships = activeMemberships || [];
+    const membership = memberships.find((m) => m.user_id === user.id);
+    if (!membership) throw new Error('You are not an active member of this trip');
+
+    const organizersBeforeLeave = memberships.filter(
+      (m) => m.is_admin || m.role?.toLowerCase() === 'organizer',
+    ).length;
+    let didCancelTrip = false;
+    const tripAlreadyCancelled = trip?.status === 'cancelled';
+    const isOrganizer = Boolean(membership.is_admin || membership.role?.toLowerCase() === 'organizer');
+    const shouldCancelAsLastOrganizer = Boolean(!tripAlreadyCancelled && isOrganizer && organizersBeforeLeave <= 1);
+
+    const cancelTripAndDeleteChat = async () => {
+      const { error: cancelError } = await supabase
+        .from('trips')
+        .update({ status: 'cancelled' })
+        .eq('id', tripId);
+
+      if (cancelError) throw cancelError;
+
+      // Remove trip group chat for everyone once trip is cancelled by last organizer.
+      const { error: deleteConversationError } = await supabase
+        .from('conversations')
+        .delete()
+        .eq('trip_id', tripId)
+        .eq('conversation_type', 'trip_group');
+
+      // Conversation deletion can be blocked by RLS for non-creator fallback path.
+      if (deleteConversationError) {
+        console.warn('Unable to delete trip group conversation during fallback cancel:', deleteConversationError);
+      }
+
+      didCancelTrip = true;
+    };
+
+    if (shouldCancelAsLastOrganizer) {
+      await cancelTripAndDeleteChat();
+    }
+
+    let { error: leaveError } = await supabase
+      .from('trip_members')
+      .update({ left_at: new Date().toISOString() })
+      .eq('trip_id', tripId)
+      .eq('user_id', user.id)
+      .is('left_at', null);
+
+    const isOrganizerLeaveBlocked =
+      (leaveError as any)?.code === 'P0001' &&
+      String((leaveError as any)?.message || '').toLowerCase().includes('organizers cannot leave');
+
+    if (leaveError && isOrganizerLeaveBlocked && !didCancelTrip) {
+      await cancelTripAndDeleteChat();
+      const retry = await supabase
+        .from('trip_members')
+        .update({ left_at: new Date().toISOString() })
+        .eq('trip_id', tripId)
+        .eq('user_id', user.id)
+        .is('left_at', null);
+
+      leaveError = retry.error;
+    }
+
+    if (leaveError) throw leaveError;
+
+    if (Boolean(options?.forceCancel) && !didCancelTrip && !tripAlreadyCancelled) {
+      await cancelTripAndDeleteChat();
+    }
+
+    return {
+      didLeave: true,
+      didCancelTrip,
+      tripAlreadyCancelled,
+      organizersBeforeLeave,
+    };
+  }
+
+  const row = Array.isArray(data) ? data[0] : data;
+  return {
+    didLeave: Boolean(row?.did_leave ?? true),
+    didCancelTrip: Boolean(row?.did_cancel_trip),
+    tripAlreadyCancelled: Boolean(row?.trip_already_cancelled),
+    organizersBeforeLeave: Number(row?.organizers_before_leave ?? 0),
+  };
+}
+
+export async function deleteTripPermanently(tripId: string) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
 
   const { error } = await supabase
-    .from('trip_members')
-    .update({ left_at: new Date().toISOString() })
-    .eq('trip_id', tripId)
-    .eq('user_id', user.id);
+    .from('trips')
+    .delete()
+    .eq('id', tripId)
+    .eq('creator_id', user.id);
 
   if (error) throw error;
 }
@@ -956,16 +1170,32 @@ export async function updateTrip(tripId: string, data: Partial<CreateTripData>) 
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
 
-  // Fetch current trip to detect changed fields
+  // Fetch current trip to detect changed fields.
+  // Do not hard-filter by creator_id here: admin organizers can also update.
   const { data: currentTrip, error: fetchErr } = await supabase
     .from('trips')
     .select('*')
     .eq('id', tripId)
-    .eq('creator_id', user.id)
     .maybeSingle();
 
   if (fetchErr) throw fetchErr;
-  if (!currentTrip) throw new Error('Trip not found or not authorized');
+
+  let isTripAdmin = false;
+  if (!currentTrip || currentTrip.creator_id !== user.id) {
+    const { data: adminMembership, error: adminErr } = await supabase
+      .from('trip_members')
+      .select('id')
+      .eq('trip_id', tripId)
+      .eq('user_id', user.id)
+      .eq('is_admin', true)
+      .is('left_at', null)
+      .maybeSingle();
+
+    if (adminErr) throw adminErr;
+    isTripAdmin = Boolean(adminMembership);
+  }
+
+  if (!currentTrip && !isTripAdmin) throw new Error('Trip not found or not authorized');
 
   const updateData: Record<string, any> = {};
   const changedFields: string[] = [];
@@ -974,79 +1204,79 @@ export async function updateTrip(tripId: string, data: Partial<CreateTripData>) 
   console.log('updateTrip called with data:', data);
   console.log('Current trip data:', currentTrip);
 
-  if (data.title !== undefined && data.title !== currentTrip.title) {
+  if (data.title !== undefined && (!currentTrip || data.title !== currentTrip.title)) {
     updateData.title = data.title;
     changedFields.push('title');
   }
-  if (data.description !== undefined && data.description !== currentTrip.description) {
+  if (data.description !== undefined && (!currentTrip || data.description !== currentTrip.description)) {
     updateData.description = data.description;
     changedFields.push('description');
   }
-  if (data.destination !== undefined && data.destination !== currentTrip.destination) {
+  if (data.destination !== undefined && (!currentTrip || data.destination !== currentTrip.destination)) {
     updateData.destination = data.destination;
     changedFields.push('destination');
   }
-  if (data.cover_image !== undefined && data.cover_image !== currentTrip.cover_image) {
+  if (data.cover_image !== undefined && (!currentTrip || data.cover_image !== currentTrip.cover_image)) {
     updateData.cover_image = data.cover_image;
     changedFields.push('cover_image');
   }
-  if (data.images !== undefined && JSON.stringify(data.images) !== JSON.stringify(currentTrip.images)) {
+  if (data.images !== undefined && (!currentTrip || JSON.stringify(data.images) !== JSON.stringify(currentTrip.images))) {
     updateData.images = data.images;
     changedFields.push('images');
   }
-  if (data.start_date !== undefined && data.start_date !== currentTrip.start_date) {
+  if (data.start_date !== undefined && (!currentTrip || data.start_date !== currentTrip.start_date)) {
     updateData.start_date = data.start_date;
     changedFields.push('start_date');
   }
-  if (data.end_date !== undefined && data.end_date !== currentTrip.end_date) {
+  if (data.end_date !== undefined && (!currentTrip || data.end_date !== currentTrip.end_date)) {
     updateData.end_date = data.end_date;
     changedFields.push('end_date');
   }
-  if (data.max_participants !== undefined && data.max_participants !== currentTrip.max_participants) {
+  if (data.max_participants !== undefined && (!currentTrip || data.max_participants !== currentTrip.max_participants)) {
     updateData.max_participants = data.max_participants;
     changedFields.push('max_participants');
   }
-  if (data.visibility !== undefined && data.visibility !== currentTrip.visibility) {
+  if (data.visibility !== undefined && (!currentTrip || data.visibility !== currentTrip.visibility)) {
     updateData.visibility = data.visibility;
     changedFields.push('visibility');
   }
-  if (data.tags !== undefined && JSON.stringify(data.tags) !== JSON.stringify(currentTrip.tags)) {
+  if (data.tags !== undefined && (!currentTrip || JSON.stringify(data.tags) !== JSON.stringify(currentTrip.tags))) {
     updateData.tags = data.tags;
     changedFields.push('tags');
   }
-  if (data.travel_styles !== undefined && JSON.stringify(data.travel_styles) !== JSON.stringify(currentTrip.travel_styles)) {
+  if (data.travel_styles !== undefined && (!currentTrip || JSON.stringify(data.travel_styles) !== JSON.stringify(currentTrip.travel_styles))) {
     updateData.travel_styles = data.travel_styles;
     changedFields.push('travel_styles');
   }
-  if (data.stops !== undefined && data.stops !== currentTrip.stops) {
+  if (data.stops !== undefined && (!currentTrip || data.stops !== currentTrip.stops)) {
     updateData.stops = data.stops;
     changedFields.push('stops');
   }
-  if (data.budget_mode !== undefined && data.budget_mode !== currentTrip.budget_mode) {
+  if (data.budget_mode !== undefined && (!currentTrip || data.budget_mode !== currentTrip.budget_mode)) {
     updateData.budget_mode = data.budget_mode;
     changedFields.push('budget_mode');
   }
-  if (data.budget_breakdown !== undefined && JSON.stringify(data.budget_breakdown) !== JSON.stringify(currentTrip.budget_breakdown)) {
+  if (data.budget_breakdown !== undefined && (!currentTrip || JSON.stringify(data.budget_breakdown) !== JSON.stringify(currentTrip.budget_breakdown))) {
     updateData.budget_breakdown = data.budget_breakdown;
     changedFields.push('budget_breakdown');
   }
-  if (data.itinerary_type !== undefined && data.itinerary_type !== currentTrip.itinerary_type) {
+  if (data.itinerary_type !== undefined && (!currentTrip || data.itinerary_type !== currentTrip.itinerary_type)) {
     updateData.itinerary_type = data.itinerary_type;
     changedFields.push('itinerary_type');
   }
-  if (data.itinerary !== undefined && JSON.stringify(data.itinerary) !== JSON.stringify(currentTrip.itinerary)) {
+  if (data.itinerary !== undefined && (!currentTrip || JSON.stringify(data.itinerary) !== JSON.stringify(currentTrip.itinerary))) {
     updateData.itinerary = data.itinerary;
     changedFields.push('itinerary');
   }
-  if (data.status !== undefined && data.status !== currentTrip.status) {
+  if (data.status !== undefined && (!currentTrip || data.status !== currentTrip.status)) {
     updateData.status = data.status;
     changedFields.push('status');
   }
-  if (data.currency !== undefined && data.currency !== currentTrip.currency) {
+  if (data.currency !== undefined && (!currentTrip || data.currency !== currentTrip.currency)) {
     updateData.currency = data.currency;
     changedFields.push('currency');
   }
-  if (data.price !== undefined && data.price !== currentTrip.price) {
+  if (data.price !== undefined && (!currentTrip || data.price !== currentTrip.price)) {
     updateData.price = data.price;
     changedFields.push('price');
   }
@@ -1060,7 +1290,6 @@ export async function updateTrip(tripId: string, data: Partial<CreateTripData>) 
     .from('trips')
     .update(updateData)
     .eq('id', tripId)
-    .eq('creator_id', user.id)
     .select()
     .single();
 

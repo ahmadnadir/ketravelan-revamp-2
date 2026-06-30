@@ -11,7 +11,7 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 // Use non-reserved env name; fallback to legacy if present
 const SERVICE_ROLE_KEY = Deno.env.get("SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY")!;
-const RESEND_FROM = Deno.env.get("RESEND_FROM") ?? "Ketravelan <no-reply@ketravelan.xyz>";
+const RESEND_FROM = Deno.env.get("RESEND_FROM") ?? "Ketravelan <no-reply@ketravelan.com>";
 const RESEND_TEMPLATE_ID = "2dc6db0a-f106-43c2-84a9-4d5107094ce6";
 const DEFAULT_REDIRECT = Deno.env.get("SITE_URL") ?? "https://ketravelan.app/auth/callback";
 
@@ -24,7 +24,7 @@ function buildCorsHeaders(req: Request): Record<string, string> {
   const allowedOrigins = new Set([
     "http://localhost:8080",
     "http://127.0.0.1:8080",
-    "https://ketravelan.xyz",
+    "https://ketravelan.com",
     // Android emulator + Capacitor webview
     "http://10.0.2.2:5173",
     "capacitor://localhost",
@@ -144,8 +144,10 @@ function buildHtmlEmail(opts: {
     '<tr><td align="center" style="padding:24px 20px">',
     '<table role="presentation" width="auto" cellspacing="0" cellpadding="0" align="center">',
     '<tr>',
-    `<td style="vertical-align:middle"><div style="font-size:20px;font-weight:700;color:#020617;margin:0">Welcome to</div></td>`,
-    `<td style="vertical-align:middle;padding-left:4px"><img src="${logoUrlEsc}" alt="${brand}" style="display:block;border:0;outline:none;text-decoration:none;height:28px;width:auto" /></td>`,
+    `<td style="vertical-align:middle"><img src="${logoUrlEsc}" alt="${brand}" style="display:block;border:0;outline:none;text-decoration:none;height:28px;width:auto" /></td>`,
+    '</tr>',
+    '<tr>',
+    `<td align="center" style="padding-top:8px"><div style="font-size:13px;font-weight:500;color:#6b7280;letter-spacing:0.05em;text-transform:uppercase">Email Verification</div></td>`,
     '</tr>',
     '</table>',
     '</td></tr>',
@@ -222,10 +224,10 @@ serve(async (req: Request) => {
 
     // 3) Prepare template variables
     const variables = {
-      subject: "Confirm your email for Ketravelan",
+      subject: "Verify your email for Ketravelan",
       brandTitle: "Ketravelan",
       eyebrow: "Action Required",
-      title: "Confirm your email to start the party 🚀",
+      title: "Verify your email to activate your account",
       message: `You're one click away from joining ${body.name ? body.name + ' at ' : ''}Ketravelan. Verify your email to activate your account and jump into trip planning with your crew.`,
       ctaLabel: "Confirm Email",
       ctaUrl: confirmUrl,
@@ -239,7 +241,7 @@ serve(async (req: Request) => {
       return new Response(JSON.stringify({ ok: true, confirmUrl }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } });
     }
 
-    const subject = body.subject || "Welcome onboard to Ketravelan";
+    const subject = body.subject || "Verify your email for Ketravelan";
     const useTemplate = body.useTemplate !== false; // default true
     if (useTemplate) {
       await sendResendEmail({ to: body.email, subject, variables, templateId: body.templateId });
@@ -250,12 +252,12 @@ serve(async (req: Request) => {
         title: "Confirm your email to get started",
         messageHtml: `${greet}You’re one click away from joining <strong>Ketravelan</strong>.`,
         ctaUrl: variables.ctaUrl as string,
-        logoUrl: "https://ketravelan.xyz/ketravelan_logo.png",
+        logoUrl: "https://ketravelan.com/ketravelan_logo.png",
       });
       const text = [
-        "Welcome onboard to Ketravelan",
+        "Verify your email for Ketravelan",
         "",
-        "Confirm your email to get started",
+        "Verify your email to activate your account",
         body.name ? `Hi ${body.name},` : undefined,
         "",
         "You’re one click away from joining Ketravelan.",

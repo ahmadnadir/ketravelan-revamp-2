@@ -7,15 +7,15 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY")!;
-const RESEND_FROM = Deno.env.get("RESEND_FROM") ?? "Ketravelan <no-reply@ketravelan.xyz>";
-const SITE_URL = Deno.env.get("SITE_URL") ?? "https://ketravelan.xyz";
+const RESEND_FROM = Deno.env.get("RESEND_FROM") ?? "Ketravelan <no-reply@ketravelan.com>";
+const SITE_URL = Deno.env.get("SITE_URL") ?? "https://ketravelan.com";
 
 const SITE_ORIGIN = (() => {
   try {
     return new URL(SITE_URL).origin;
   } catch {
     const m = SITE_URL.match(/^(https?:\/\/[^/]+)/);
-    return m ? m[1] : "https://ketravelan.xyz";
+    return m ? m[1] : "https://ketravelan.com";
   }
 })();
 
@@ -41,7 +41,7 @@ function buildCorsHeaders(req: Request): Record<string, string> {
     "http://127.0.0.1:8080",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-    "https://ketravelan.xyz",
+    "https://ketravelan.com",
     "http://10.0.2.2:5173",
     "capacitor://localhost",
   ]);
@@ -103,7 +103,7 @@ function buildHtmlEmail(opts: {
   const brand = "Ketravelan";
   const title = escapeHtml(opts.title);
   const ctaUrlEsc = escapeHtml(opts.ctaUrl);
-  const logoUrlEsc = "https://ketravelan.xyz/ketravelan_logo.png";
+  const logoUrlEsc = "https://ketravelan.com/ketravelan_logo.png";
   const ctaLabel = escapeHtml(opts.ctaLabel);
   const preheader = escapeHtml(opts.preheader);
   const coverImage = opts.coverImage ? escapeHtml(opts.coverImage) : "";
@@ -162,7 +162,10 @@ function buildHtmlEmail(opts: {
 }
 
 interface ExpensePaymentMarkedRequest {
-  expenseId: string;
+  // Batch mode: multiple expenses settled together (preferred)
+  expenseIds?: string[];
+  // Legacy single-expense mode (kept for backward compatibility)
+  expenseId?: string;
   participantId: string;
   dryRun?: boolean;
 }
@@ -181,39 +184,62 @@ serve(async (req: Request) => {
 
   try {
     const body = await req.json() as ExpensePaymentMarkedRequest;
-    if (!body?.expenseId || !body?.participantId) {
-      return new Response(JSON.stringify({ error: "Missing expenseId or participantId" }), {
+
+    // Normalise to array of IDs (support both batch and legacy single)
+    const allExpenseIds: string[] = body.expenseIds?.length
+      ? body.expenseIds
+      : body.expenseId
+      ? [body.expenseId]
+      : [];
+
+    if (!allExpenseIds.length || !body?.participantId) {
+      return new Response(JSON.stringify({ error: "Missing expenseIds or participantId" }), {
         status: 400,
         headers: { "Content-Type": "application/json", ...corsHeaders },
       });
     }
 
-    const { data: expense, error: expenseErr } = await admin
+    // Fetch all expenses in the batch
+    const { data: expenses, error: expenseErr } = await admin
       .from("trip_expenses")
       .select("id, description, amount, currency, trip_id, created_by")
-      .eq("id", body.expenseId)
-      .maybeSingle();
+      .in("id", allExpenseIds);
     if (expenseErr) throw expenseErr;
-    if (!expense) throw new Error("Expense not found");
+    if (!expenses?.length) throw new Error("Expenses not found");
+
+    // Use the trip_id from the first expense (all should be same trip)
+    const tripId = expenses[0].trip_id;
 
     const { data: trip } = await admin
       .from("trips")
       .select("id, title, slug, cover_image")
-      .eq("id", expense.trip_id)
+      .eq("id", tripId)
       .maybeSingle();
 
+    // Fetch payer for the first expense (payer is the creditor in a settlement)
     const { data: payments } = await admin
       .from("expense_payments")
-      .select("user_id")
-      .eq("expense_id", expense.id);
-    const payerId = payments?.[0]?.user_id || expense.created_by;
+      .select("user_id, expense_id")
+      .in("expense_id", allExpenseIds);
 
-    const { data: participant } = await admin
+    // Most settlements share one payer; use first found
+    const payerId = payments?.[0]?.user_id || expenses[0].created_by;
+
+    // Fetch participant amounts for all expenses
+    const { data: participantRows } = await admin
       .from("expense_participants")
-      .select("user_id, amount_owed")
-      .eq("expense_id", expense.id)
-      .eq("user_id", body.participantId)
-      .maybeSingle();
+      .select("expense_id, user_id, amount_owed")
+      .in("expense_id", allExpenseIds)
+      .eq("user_id", body.participantId);
+
+    const participantAmountMap = new Map(
+      (participantRows || []).map((r: any) => [r.expense_id, Number(r.amount_owed || 0)])
+    );
+
+    // Total settled amount across all expenses
+    const totalAmount = Array.from(participantAmountMap.values()).reduce((s, v) => s + v, 0);
+    // Use the most common currency across expenses
+    const currency = expenses[0].currency;
 
     const userIds = Array.from(new Set([payerId, body.participantId]));
     const { data: profiles } = await admin
@@ -222,9 +248,21 @@ serve(async (req: Request) => {
       .in("id", userIds);
 
     const profileMap = new Map((profiles || []).map((p: any) => [p.id, p]));
-
     const tripUrl = `${SITE_ORIGIN}/trip/${trip?.slug || trip?.id}?tab=expenses`;
-    const amountOwed = Number(participant?.amount_owed || 0).toFixed(2);
+
+    const payerProfile = profileMap.get(payerId);
+    const payerName = payerProfile?.full_name || payerProfile?.username || "Trip member";
+    const participantProfile = profileMap.get(body.participantId);
+    const participantName = participantProfile?.full_name || participantProfile?.username || "Trip member";
+
+    const totalAmountStr = totalAmount.toFixed(2);
+    const expenseCount = expenses.length;
+
+    // Build a compact list of expense names for the email body
+    const expenseListHtml = expenses.map((e: any) => {
+      const share = participantAmountMap.get(e.id) ?? 0;
+      return `<li style="margin:4px 0">${escapeHtml(e.description)} — <strong>${escapeHtml(e.currency)} ${share.toFixed(2)}</strong></li>`;
+    }).join("");
 
     const sendToUser = async (userId: string, subject: string, messageHtml: string, preheader: string) => {
       const profile = profileMap.get(userId);
@@ -237,71 +275,83 @@ serve(async (req: Request) => {
         title: subject,
         messageHtml,
         ctaUrl: tripUrl,
-        ctaLabel: "View Expense",
+        ctaLabel: "View Settlement",
         coverImage: trip?.cover_image,
         preheader,
       });
 
-      const text = `${subject}\nTrip: ${trip?.title}\nExpense: ${expense.description}\nView: ${tripUrl}`;
+      const expenseLines = expenses.map((e: any) => {
+        const share = participantAmountMap.get(e.id) ?? 0;
+        return `  • ${e.description} — ${e.currency} ${share.toFixed(2)}`;
+      }).join("\n");
+      const text = `${subject}\nTrip: ${trip?.title}\n\nExpenses settled:\n${expenseLines}\n\nTotal: ${currency} ${totalAmountStr}\n\nView: ${tripUrl}`;
+
       if (!body.dryRun) {
         await sendResendRawEmail({ to: email, subject, html, text });
       }
     };
 
-    const payerProfile = profileMap.get(payerId);
-    const payerName = payerProfile?.full_name || payerProfile?.username || "Trip member";
-    const participantProfile = profileMap.get(body.participantId);
-    const participantName = participantProfile?.full_name || participantProfile?.username || "Trip member";
+    // --- Single email to PAYER ---
+    const payerSubject = expenseCount === 1
+      ? `Payment received — ${currency} ${totalAmountStr}`
+      : `Settlement received — ${currency} ${totalAmountStr} across ${expenseCount} expenses`;
 
-    await sendToUser(
-      payerId,
-      `Payment marked as paid  ${expense.currency} ${amountOwed}`,
-      `<strong>${escapeHtml(participantName)}</strong> just marked their payment for <strong>${escapeHtml(expense.description)}</strong> as paid. Amount: <strong>${escapeHtml(expense.currency)} ${escapeHtml(amountOwed)}</strong>.`,
-      "Payment marked as paid"
-    );
+    const payerMessageHtml = expenseCount === 1
+      ? `<strong>${escapeHtml(participantName)}</strong> marked their payment for <strong>${escapeHtml(expenses[0].description)}</strong> as paid.<br><br>Amount: <strong>${escapeHtml(currency)} ${escapeHtml(totalAmountStr)}</strong>`
+      : `<strong>${escapeHtml(participantName)}</strong> settled <strong>${expenseCount} expenses</strong> totalling <strong>${escapeHtml(currency)} ${escapeHtml(totalAmountStr)}</strong>.<br><br><ul style="text-align:left;margin:8px 0;padding-left:20px">${expenseListHtml}</ul>`;
 
-    // Send push to the PAYER (person seeking payment) - payment received
+    await sendToUser(payerId, payerSubject, payerMessageHtml, "Payment received");
+
+    // --- Single push to PAYER ---
     await sendSystemPush({
       userIds: [payerId],
       type: "expense_paid",
       title: "Payment received ✅",
-      body: `${participantName} marked ${expense.currency} ${amountOwed} as paid`,
+      body: expenseCount === 1
+        ? `${participantName} paid ${currency} ${totalAmountStr}`
+        : `${participantName} settled ${expenseCount} expenses (${currency} ${totalAmountStr})`,
       actionUrl: `/trip/${trip?.slug || trip?.id}?tab=expenses`,
       priority: "high",
       metadata: {
         trip_id: trip?.id || null,
-        expense_id: expense.id,
-        amount_paid: amountOwed,
-        currency: expense.currency,
+        expense_ids: allExpenseIds,
+        total_amount: totalAmountStr,
+        currency,
         participant_id: body.participantId,
       },
     });
 
-    await sendToUser(
-      body.participantId,
-      `Payment recorded  ${expense.description}`,
-      `You marked your payment for <strong>${escapeHtml(expense.description)}</strong> as paid. We have notified <strong>${escapeHtml(payerName)}</strong>.`,
-      "Payment recorded"
-    );
+    // --- Single email to PARTICIPANT ---
+    const participantSubject = expenseCount === 1
+      ? `Payment recorded — ${expenses[0].description}`
+      : `Settlement recorded — ${expenseCount} expenses paid`;
 
-    // Send push to the PARTICIPANT (person marked as paid) - payment confirmation
+    const participantMessageHtml = expenseCount === 1
+      ? `You marked your payment for <strong>${escapeHtml(expenses[0].description)}</strong> as paid. <strong>${escapeHtml(payerName)}</strong> has been notified.<br><br>Amount: <strong>${escapeHtml(currency)} ${escapeHtml(totalAmountStr)}</strong>`
+      : `You settled <strong>${expenseCount} expenses</strong> totalling <strong>${escapeHtml(currency)} ${escapeHtml(totalAmountStr)}</strong>. <strong>${escapeHtml(payerName)}</strong> has been notified.<br><br><ul style="text-align:left;margin:8px 0;padding-left:20px">${expenseListHtml}</ul>`;
+
+    await sendToUser(body.participantId, participantSubject, participantMessageHtml, "Payment recorded");
+
+    // --- Single push to PARTICIPANT ---
     await sendSystemPush({
       userIds: [body.participantId],
       type: "payment_confirmed",
       title: "Payment confirmed ✅",
-      body: `Your payment of ${expense.currency} ${amountOwed} for ${expense.description} has been confirmed`,
+      body: expenseCount === 1
+        ? `Your payment of ${currency} ${totalAmountStr} is confirmed`
+        : `Your settlement of ${expenseCount} expenses (${currency} ${totalAmountStr}) is confirmed`,
       actionUrl: `/trip/${trip?.slug || trip?.id}?tab=expenses`,
       priority: "high",
       metadata: {
         trip_id: trip?.id || null,
-        expense_id: expense.id,
-        amount_paid: amountOwed,
-        currency: expense.currency,
+        expense_ids: allExpenseIds,
+        total_amount: totalAmountStr,
+        currency,
         payer_id: payerId,
       },
     });
 
-    return new Response(JSON.stringify({ ok: true }), {
+    return new Response(JSON.stringify({ ok: true, expenseCount }), {
       status: 200,
       headers: { "Content-Type": "application/json", ...corsHeaders },
     });
