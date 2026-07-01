@@ -981,13 +981,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
 
     const generated = [...generatedFromDebts, ...generatedFromExpenses];
 
-    // Apply local status overrides (e.g., when user marks as paid)
-    const withOverrides = generated.map(s => ({
-      ...s,
-      status: settlementStatuses[s.id] ? settlementStatuses[s.id] : s.status,
-    }));
-
-    // Merge settled and pending into single cards per directional pair
+    // Merge settled and pending into single cards per directional pair FIRST
     const mergeByDirectionalPair = (list: Settlement[]): Settlement[] => {
       const statusPriority: Record<Settlement["status"], number> = {
         awaiting: 3,
@@ -1004,6 +998,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
         toUser: Settlement["toUser"];
       }>();
 
+      // Combine all settlements by directional pair
       list.forEach((entry) => {
         if (!entry?.fromUser?.id || !entry?.toUser?.id) return;
         const key = `${entry.fromUser.id}-${entry.toUser.id}`;
@@ -1031,6 +1026,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
         }
       });
 
+      // Return merged settlements - ONE per directional pair
       const merged: Settlement[] = [];
       directionMap.forEach((data, key) => {
         if (data.totalAmount <= 0.009) return;
@@ -1048,26 +1044,28 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
       return merged;
     };
 
-    const settledHistorySettlements = buildSettledSettlementsFromExpenses();
+    // Merge ALL settlements (pending + settled) at source level
+    const allSettlements = [
+      ...generated,
+      ...buildSettledSettlementsFromExpenses(),
+    ];
 
-    // Merge both pending and settled into single cards per directional pair
-    const combinedSettlements = mergeByDirectionalPair([
-      ...withOverrides,
-      ...settledHistorySettlements,
-    ]).filter((s) => s.amount > 0.009);
+    // Merge by directional pair FIRST (this combines pending + settled)
+    const mergedSettlements = mergeByDirectionalPair(allSettlements);
 
-    // Apply status overrides after merging
-    const withFinalOverrides = combinedSettlements.map((s) => ({
+    // Then apply status overrides to the merged result
+    const finalSettlements = mergedSettlements.map(s => ({
       ...s,
       status: settlementStatuses[s.id] ? settlementStatuses[s.id] : s.status,
     }));
 
-    if (withFinalOverrides.length > 0) {
-      return withFinalOverrides;
+    if (finalSettlements.length > 0) {
+      return finalSettlements;
     }
 
+    // Fallback: merge fallback settlements the same way
     const fallbackSettlements = buildDirectionalSettlementsFromExpenses();
-    const mergedFallback = mergeByDirectionalPair(fallbackSettlements).filter((s) => s.amount > 0.009);
+    const mergedFallback = mergeByDirectionalPair(fallbackSettlements);
     
     return mergedFallback.map((s) => ({
       ...s,
