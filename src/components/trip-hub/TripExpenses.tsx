@@ -1048,27 +1048,31 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
       return merged;
     };
 
-    const primarySettlements = mergeByDirectionalPair(withOverrides).filter((s) => s.amount > 0.009);
     const settledHistorySettlements = buildSettledSettlementsFromExpenses();
 
-    // Merge settled history into primary settlements by directional pair
+    // Merge both pending and settled into single cards per directional pair
     const combinedSettlements = mergeByDirectionalPair([
-      ...primarySettlements,
-      ...settledHistorySettlements.map((s) => ({
-        ...s,
-        status: settlementStatuses[s.id] ? settlementStatuses[s.id] : s.status,
-      })),
+      ...withOverrides,
+      ...settledHistorySettlements,
     ]).filter((s) => s.amount > 0.009);
 
-    if (combinedSettlements.length > 0) {
-      return combinedSettlements;
-    }
-
-    const fallbackSettlements = buildDirectionalSettlementsFromExpenses().map((s) => ({
+    // Apply status overrides after merging
+    const withFinalOverrides = combinedSettlements.map((s) => ({
       ...s,
       status: settlementStatuses[s.id] ? settlementStatuses[s.id] : s.status,
     }));
-    return mergeByDirectionalPair(fallbackSettlements).filter((s) => s.amount > 0.009);
+
+    if (withFinalOverrides.length > 0) {
+      return withFinalOverrides;
+    }
+
+    const fallbackSettlements = buildDirectionalSettlementsFromExpenses();
+    const mergedFallback = mergeByDirectionalPair(fallbackSettlements).filter((s) => s.amount > 0.009);
+    
+    return mergedFallback.map((s) => ({
+      ...s,
+      status: settlementStatuses[s.id] ? settlementStatuses[s.id] : s.status,
+    }));
   }, [debts, members, expenses, paymentMethods, settlementStatuses, currentUserId]);
 
   // Get current user's name from members array
