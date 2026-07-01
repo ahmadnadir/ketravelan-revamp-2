@@ -987,42 +987,88 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
       status: settlementStatuses[s.id] ? settlementStatuses[s.id] : s.status,
     }));
 
-    // De-duplicate pairs and keep the higher net amount (avoids 0.00 cards)
-    const pairMap = new Map<string, Settlement>();
-    withOverrides.forEach((settlement) => {
-      const pairKey = [settlement.fromUser.id, settlement.toUser.id].sort().join("-");
-      const existing = pairMap.get(pairKey);
-      if (!existing || settlement.amount > existing.amount) {
-        pairMap.set(pairKey, settlement);
-      }
-    });
+    // Merge settled and pending into single cards per directional pair
+    const mergeByDirectionalPair = (list: Settlement[]): Settlement[] => {
+      const statusPriority: Record<Settlement["status"], number> = {
+        awaiting: 3,
+        pending: 2,
+        settled: 1,
+      };
 
-    const primarySettlements = Array.from(pairMap.values()).filter((s) => s.amount > 0.009);
+      const round2 = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
+      const directionMap = new Map<string, {
+        totalAmount: number;
+        topStatus: Settlement["status"];
+        receiptUrl?: string;
+        fromUser: Settlement["fromUser"];
+        toUser: Settlement["toUser"];
+      }>();
+
+      list.forEach((entry) => {
+        if (!entry?.fromUser?.id || !entry?.toUser?.id) return;
+        const key = `${entry.fromUser.id}-${entry.toUser.id}`;
+        const amount = Number(entry.amount) || 0;
+        if (amount <= 0) return;
+
+        if (!directionMap.has(key)) {
+          directionMap.set(key, {
+            totalAmount: amount,
+            topStatus: entry.status,
+            fromUser: entry.fromUser,
+            toUser: entry.toUser,
+          });
+        } else {
+          const acc = directionMap.get(key)!;
+          acc.totalAmount = round2(acc.totalAmount + amount);
+          
+          if (statusPriority[entry.status] > statusPriority[acc.topStatus]) {
+            acc.topStatus = entry.status;
+          }
+          
+          if (entry.receiptUrl && !acc.receiptUrl) {
+            acc.receiptUrl = entry.receiptUrl;
+          }
+        }
+      });
+
+      const merged: Settlement[] = [];
+      directionMap.forEach((data, key) => {
+        if (data.totalAmount <= 0.009) return;
+
+        merged.push({
+          id: `settlement-${key}`,
+          fromUser: data.fromUser,
+          toUser: data.toUser,
+          amount: data.totalAmount,
+          status: data.topStatus,
+          ...(data.receiptUrl ? { receiptUrl: data.receiptUrl } : {}),
+        });
+      });
+
+      return merged;
+    };
+
+    const primarySettlements = mergeByDirectionalPair(withOverrides).filter((s) => s.amount > 0.009);
     const settledHistorySettlements = buildSettledSettlementsFromExpenses();
 
-    const combinedByDirectionAndStatus = new Map<string, Settlement>();
-    [...primarySettlements, ...settledHistorySettlements].forEach((settlement) => {
-      const key = `${settlement.fromUser.id}-${settlement.toUser.id}-${settlement.status}`;
-      const existing = combinedByDirectionAndStatus.get(key);
-      if (!existing || settlement.amount > existing.amount) {
-        combinedByDirectionAndStatus.set(key, settlement);
-      }
-    });
-
-    const combinedSettlements = Array.from(combinedByDirectionAndStatus.values()).map((s) => ({
-      ...s,
-      status: settlementStatuses[s.id] ? settlementStatuses[s.id] : s.status,
-    }));
+    // Merge settled history into primary settlements by directional pair
+    const combinedSettlements = mergeByDirectionalPair([
+      ...primarySettlements,
+      ...settledHistorySettlements.map((s) => ({
+        ...s,
+        status: settlementStatuses[s.id] ? settlementStatuses[s.id] : s.status,
+      })),
+    ]).filter((s) => s.amount > 0.009);
 
     if (combinedSettlements.length > 0) {
       return combinedSettlements;
     }
 
-    const fallbackSettlements = buildDirectionalSettlementsFromExpenses();
-    return fallbackSettlements.map((s) => ({
+    const fallbackSettlements = buildDirectionalSettlementsFromExpenses().map((s) => ({
       ...s,
       status: settlementStatuses[s.id] ? settlementStatuses[s.id] : s.status,
     }));
+    return mergeByDirectionalPair(fallbackSettlements).filter((s) => s.amount > 0.009);
   }, [debts, members, expenses, paymentMethods, settlementStatuses, currentUserId]);
 
   // Get current user's name from members array
