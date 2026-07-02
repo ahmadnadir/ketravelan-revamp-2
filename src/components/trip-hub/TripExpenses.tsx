@@ -890,9 +890,6 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
 
       const netRaw = Math.round((owedSum - offsetSum) * 100) / 100;
       const hasRelatedExpenses = expensesToUserPaid.length > 0 || expensesFromUserPaid.length > 0;
-      const dbAmountNormalized = typeof dbAmount === "number" && dbAmount > 0
-        ? Math.round(dbAmount * 100) / 100
-        : 0;
 
       const pairExpenses = [...expensesToUserPaid, ...expensesFromUserPaid];
       const conversionRates = pairExpenses
@@ -910,11 +907,13 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
         ? conversionRates.reduce((sum, rate) => sum + rate, 0) / conversionRates.length
         : 1;
 
-      let settlementAmount = netRaw;
-      if (!hasRelatedExpenses && dbAmountNormalized > 0) {
-        const convertedDb = Math.round(dbAmountNormalized * averageRate * 100) / 100;
-        settlementAmount = convertedDb;
+      // Do not show DB-only fallback amounts with no contributing expenses,
+      // otherwise settlement card totals can diverge from breakdown details.
+      if (!hasRelatedExpenses) {
+        return null;
       }
+
+      const settlementAmount = netRaw;
 
       if (Math.abs(settlementAmount) <= 0.009) {
         return null;
@@ -972,54 +971,197 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
     });
 
     const generatedFromExpenses = Array.from(expensePairs)
-      .filter(key => !pairKeys.has(key))
       .map(key => {
         const [fromUserId, toUserId] = key.split("-");
         return computeSettlementForPair(fromUserId, toUserId);
       })
       .filter((s): s is Settlement => !!s);
 
-    const generated = [...generatedFromDebts, ...generatedFromExpenses];
+    // Prefer expense-derived settlements when available so card totals match breakdown details.
+    const generatedByDirection = new Map<string, Settlement>();
+    generatedFromDebts.forEach((settlement) => {
+      generatedByDirection.set(`${settlement.fromUser.id}-${settlement.toUser.id}`, settlement);
+    });
+    generatedFromExpenses.forEach((settlement) => {
+      generatedByDirection.set(`${settlement.fromUser.id}-${settlement.toUser.id}`, settlement);
+    });
+    const generated = Array.from(generatedByDirection.values());
 
-    // Apply local status overrides (e.g., when user marks as paid)
-    const withOverrides = generated.map(s => ({
+    // Merge settled and pending into single cards per directional pair FIRST
+    const mergeByDirectionalPair = (list: Settlement[]): Settlement[] => {
+      const statusPriority: Record<Settlement["status"], number> = {
+        awaiting: 3,
+        pending: 2,
+        settled: 1,
+      };
+
+      const round2 = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
+      const directionMap = new Map<string, {
+        totalAmount: number;
+        topStatus: Settlement["status"];
+        receiptUrl?: string;
+        fromUser: Settlement["fromUser"];
+        toUser: Settlement["toUser"];
+      }>();
+
+      // Combine all settlements by directional pair
+      list.forEach((entry) => {
+        if (!entry?.fromUser?.id || !entry?.toUser?.id) return;
+        const key = `${entry.fromUser.id}-${entry.toUser.id}`;
+        const amount = Number(entry.amount) || 0;
+        if (amount <= 0) return;
+
+        if (!directionMap.has(key)) {
+          directionMap.set(key, {
+            totalAmount: amount,
+            topStatus: entry.status,
+            fromUser: entry.fromUser,
+            toUser: entry.toUser,
+          });
+        } else {
+          const acc = directionMap.get(key)!;
+          acc.totalAmount = round2(acc.totalAmount + amount);
+          
+          if (statusPriority[entry.status] > statusPriority[acc.topStatus]) {
+            acc.topStatus = entry.status;
+          }
+          
+          if (entry.receiptUrl && !acc.receiptUrl) {
+            acc.receiptUrl = entry.receiptUrl;
+          }
+        }
+      });
+
+      // Return merged settlements - ONE per directional pair
+      const merged: Settlement[] = [];
+      directionMap.forEach((data, key) => {
+        if (data.totalAmount <= 0.009) return;
+
+        merged.push({
+          id: `settlement-${key}`,
+          fromUser: data.fromUser,
+          toUser: data.toUser,
+          amount: data.totalAmount,
+          status: data.topStatus,
+          ...(data.receiptUrl ? { receiptUrl: data.receiptUrl } : {}),
+        });
+      });
+
+      return merged;
+    };
+
+    const collapseByUnorderedPair = (list: Settlement[]): Settlement[] => {
+      const statusPriority: Record<Settlement["status"], number> = {
+        awaiting: 3,
+        pending: 2,
+        settled: 1,
+      };
+
+      const round2 = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
+      const pairMap = new Map<string, {
+        signedOutstandingNet: number;
+        signedSettledNet: number;
+        topOutstandingStatus: Exclude<Settlement["status"], "settled">;
+        leftUser?: Settlement["fromUser"] | Settlement["toUser"];
+        rightUser?: Settlement["fromUser"] | Settlement["toUser"];
+        outstandingReceiptUrl?: string;
+        settledReceiptUrl?: string;
+      }>();
+
+      list.forEach((settlement) => {
+        if (!settlement?.fromUser?.id || !settlement?.toUser?.id) return;
+        const amount = Number(settlement.amount) || 0;
+        if (amount <= 0.009) return;
+
+        const [left, right] = [settlement.fromUser.id, settlement.toUser.id].sort();
+        const pairKey = `${left}-${right}`;
+
+        if (!pairMap.has(pairKey)) {
+          pairMap.set(pairKey, {
+            signedOutstandingNet: 0,
+            signedSettledNet: 0,
+            topOutstandingStatus: "pending",
+          });
+        }
+
+        const acc = pairMap.get(pairKey)!;
+        const signedDelta = settlement.fromUser.id === left ? amount : -amount;
+
+        if (settlement.fromUser.id === left) {
+          acc.leftUser = { ...(acc.leftUser || {}), ...settlement.fromUser } as Settlement["fromUser"];
+          acc.rightUser = { ...(acc.rightUser || {}), ...settlement.toUser } as Settlement["toUser"];
+        } else {
+          acc.leftUser = { ...(acc.leftUser || {}), ...settlement.toUser } as Settlement["toUser"];
+          acc.rightUser = { ...(acc.rightUser || {}), ...settlement.fromUser } as Settlement["fromUser"];
+        }
+
+        if (settlement.status === "settled") {
+          acc.signedSettledNet = round2(acc.signedSettledNet + signedDelta);
+          if (!acc.settledReceiptUrl && settlement.receiptUrl) {
+            acc.settledReceiptUrl = settlement.receiptUrl;
+          }
+        } else {
+          acc.signedOutstandingNet = round2(acc.signedOutstandingNet + signedDelta);
+          if (statusPriority[settlement.status] > statusPriority[acc.topOutstandingStatus]) {
+            acc.topOutstandingStatus = settlement.status;
+          }
+          if (!acc.outstandingReceiptUrl && settlement.receiptUrl) {
+            acc.outstandingReceiptUrl = settlement.receiptUrl;
+          }
+        }
+      });
+
+      const collapsed: Settlement[] = [];
+      pairMap.forEach((acc, pairKey) => {
+        const hasOutstanding = Math.abs(acc.signedOutstandingNet) > 0.009;
+        const netToShow = hasOutstanding ? acc.signedOutstandingNet : acc.signedSettledNet;
+        if (Math.abs(netToShow) <= 0.009) return;
+
+        const [left, right] = pairKey.split("-");
+        if (!left || !right || !acc.leftUser || !acc.rightUser) return;
+
+        const isLeftToRight = netToShow > 0;
+        const fromUser = isLeftToRight ? acc.leftUser : acc.rightUser;
+        const toUser = isLeftToRight ? acc.rightUser : acc.leftUser;
+
+        collapsed.push({
+          id: `settlement-${fromUser.id}-${toUser.id}`,
+          fromUser,
+          toUser,
+          amount: round2(Math.abs(netToShow)),
+          status: hasOutstanding ? acc.topOutstandingStatus : "settled",
+          ...((hasOutstanding ? acc.outstandingReceiptUrl : acc.settledReceiptUrl)
+            ? { receiptUrl: hasOutstanding ? acc.outstandingReceiptUrl : acc.settledReceiptUrl }
+            : {}),
+        });
+      });
+
+      return collapsed;
+    };
+
+    // Merge ALL settlements (pending + settled) at source level
+    const allSettlements = [
+      ...generated,
+      ...buildSettledSettlementsFromExpenses(),
+    ];
+
+    // Merge by directional pair first, then collapse opposite directions into one pair card
+    const mergedSettlements = mergeByDirectionalPair(allSettlements);
+    const finalSettlements = collapseByUnorderedPair(mergedSettlements).map(s => ({
       ...s,
       status: settlementStatuses[s.id] ? settlementStatuses[s.id] : s.status,
     }));
 
-    // De-duplicate pairs and keep the higher net amount (avoids 0.00 cards)
-    const pairMap = new Map<string, Settlement>();
-    withOverrides.forEach((settlement) => {
-      const pairKey = [settlement.fromUser.id, settlement.toUser.id].sort().join("-");
-      const existing = pairMap.get(pairKey);
-      if (!existing || settlement.amount > existing.amount) {
-        pairMap.set(pairKey, settlement);
-      }
-    });
-
-    const primarySettlements = Array.from(pairMap.values()).filter((s) => s.amount > 0.009);
-    const settledHistorySettlements = buildSettledSettlementsFromExpenses();
-
-    const combinedByDirectionAndStatus = new Map<string, Settlement>();
-    [...primarySettlements, ...settledHistorySettlements].forEach((settlement) => {
-      const key = `${settlement.fromUser.id}-${settlement.toUser.id}-${settlement.status}`;
-      const existing = combinedByDirectionAndStatus.get(key);
-      if (!existing || settlement.amount > existing.amount) {
-        combinedByDirectionAndStatus.set(key, settlement);
-      }
-    });
-
-    const combinedSettlements = Array.from(combinedByDirectionAndStatus.values()).map((s) => ({
-      ...s,
-      status: settlementStatuses[s.id] ? settlementStatuses[s.id] : s.status,
-    }));
-
-    if (combinedSettlements.length > 0) {
-      return combinedSettlements;
+    if (finalSettlements.length > 0) {
+      return finalSettlements;
     }
 
+    // Fallback: merge fallback settlements the same way
     const fallbackSettlements = buildDirectionalSettlementsFromExpenses();
-    return fallbackSettlements.map((s) => ({
+    const mergedFallback = mergeByDirectionalPair(fallbackSettlements);
+    const fallbackCollapsed = collapseByUnorderedPair(mergedFallback);
+
+    return fallbackCollapsed.map((s) => ({
       ...s,
       status: settlementStatuses[s.id] ? settlementStatuses[s.id] : s.status,
     }));
@@ -1421,31 +1563,27 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
       }
     });
     
+    const round2 = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
     const grossOwed = owedToReceiver.reduce((sum, e) => sum + e.shareAmount, 0);
     const grossOffset = owedToDebtor.reduce((sum, e) => sum + e.shareAmount, 0);
 
-    if (owedToReceiver.length === 0 && settlement.amount > 0) {
-      const fallbackStatus: SettlementExpense["status"] =
-        settlement.status === "settled" ? "settled" : "pending";
-      owedToReceiver.push({
-        expenseId: `debt-${settlement.fromUser.id}-${settlement.toUser.id}`,
-        title: "Net balance from debts",
-        date: new Date().toISOString(),
-        shareAmount: settlement.amount,
-        status: fallbackStatus,
-        category: "Other",
-        paidBy: settlement.toUser.name,
-      });
-      return { owedToReceiver, owedToDebtor, grossOwed: settlement.amount, grossOffset };
-    }
-
-    return { owedToReceiver, owedToDebtor, grossOwed, grossOffset };
+    return {
+      owedToReceiver,
+      owedToDebtor,
+      grossOwed: round2(grossOwed),
+      grossOffset: round2(grossOffset),
+    };
   };
 
   // Handler for settlement card click
   const handleSettlementCardClick = (settlement: Settlement) => {
     setSelectedSettlementForBreakdown(settlement);
     setBreakdownModalOpen(true);
+  };
+
+  const getSettlementDisplayAmount = (settlement: Settlement): number => {
+    const breakdown = getContributingExpenses(settlement);
+    return Math.max(0, Number((breakdown.grossOwed - breakdown.grossOffset).toFixed(2)));
   };
   // Helper: Get all expense payments contributing to a settlement
   const getExpensePaymentsForSettlement = (settlement: Settlement): { expenseId: string; memberId: string }[] => {
@@ -3026,7 +3164,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
                       key={settlement.id}
                       fromUser={settlement.fromUser}
                       toUser={settlement.toUser}
-                      amount={settlement.amount}
+                      amount={getSettlementDisplayAmount(settlement)}
                       status={settlement.status}
                       currentUserId={currentUserId}
                       receiptAvailable={!!settlement.receiptUrl}
@@ -3190,7 +3328,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
           }
         }}
         recipientName={selectedMemberForQR?.name || selectedSettlement?.toUser.name || ""}
-        amount={selectedSettlement?.amount}
+        amount={selectedSettlement ? getSettlementDisplayAmount(selectedSettlement) : undefined}
         qrCodeUrl={
           selectedMemberForQR?.qrCodeUrl ||
           selectedSettlement?.toUser.qrCodeUrl ||
@@ -3204,7 +3342,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
         open={reminderOpen}
         onOpenChange={setReminderOpen}
         recipientName={selectedSettlement?.fromUser.name || ""}
-        amount={selectedSettlement?.amount || 0}
+        amount={selectedSettlement ? getSettlementDisplayAmount(selectedSettlement) : 0}
         tripName={tripName}
         onSend={handleReminderSend}
       />
@@ -3264,7 +3402,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
             }}
             fromUser={selectedSettlementForBreakdown.fromUser}
             toUser={selectedSettlementForBreakdown.toUser}
-            totalAmount={selectedSettlementForBreakdown.amount}
+            totalAmount={Math.max(0, Number((breakdown.grossOwed - breakdown.grossOffset).toFixed(2)))}
             status={selectedSettlementForBreakdown.status === "awaiting" ? "pending" : selectedSettlementForBreakdown.status}
             contributingExpenses={breakdown.owedToReceiver}
             reverseExpenses={breakdown.owedToDebtor}
@@ -3321,7 +3459,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
             }}
             fromUser={settlementToConfirm.fromUser}
             toUser={settlementToConfirm.toUser}
-            netAmount={settlementToConfirm.amount}
+            netAmount={Math.max(0, Number((breakdown.grossOwed - breakdown.grossOffset).toFixed(2)))}
             owedToReceiver={breakdown.owedToReceiver.map(e => ({ title: e.title, amount: e.shareAmount }))}
             owedToDebtor={breakdown.owedToDebtor.map(e => ({ title: e.title, amount: e.shareAmount }))}
             grossOwed={breakdown.grossOwed}
