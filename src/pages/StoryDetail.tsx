@@ -34,6 +34,80 @@ const socialIcons: Record<string, React.ComponentType<{ className?: string }>> =
   other: Link2,
 };
 
+const linkifyPattern = /(https?:\/\/[^\s<]+|www\.[^\s<]+)/gi;
+
+const trimTrailingPunctuation = (value: string): { url: string; trailing: string } => {
+  let url = value;
+  let trailing = "";
+
+  while (/[),.;!?]$/.test(url)) {
+    trailing = `${url[url.length - 1]}${trailing}`;
+    url = url.slice(0, -1);
+  }
+
+  return { url, trailing };
+};
+
+const linkifyTextNodes = (root: HTMLElement) => {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const textNodes: Text[] = [];
+
+  while (walker.nextNode()) {
+    const textNode = walker.currentNode as Text;
+    const parentTag = textNode.parentElement?.tagName?.toLowerCase();
+
+    if (!textNode.textContent || !textNode.textContent.trim()) continue;
+    if (parentTag === "a" || parentTag === "script" || parentTag === "style") continue;
+    linkifyPattern.lastIndex = 0;
+    if (!linkifyPattern.test(textNode.textContent)) continue;
+
+    textNodes.push(textNode);
+  }
+
+  textNodes.forEach((textNode) => {
+    const text = textNode.textContent || "";
+    linkifyPattern.lastIndex = 0;
+    const fragment = document.createDocumentFragment();
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+
+    while ((match = linkifyPattern.exec(text)) !== null) {
+      const fullMatch = match[0];
+      const start = match.index;
+      const end = start + fullMatch.length;
+
+      if (start > lastIndex) {
+        fragment.appendChild(document.createTextNode(text.slice(lastIndex, start)));
+      }
+
+      const { url, trailing } = trimTrailingPunctuation(fullMatch);
+      if (url) {
+        const href = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+        const linkEl = document.createElement("a");
+        linkEl.href = href;
+        linkEl.target = "_blank";
+        linkEl.rel = "noopener noreferrer nofollow";
+        linkEl.textContent = url;
+        fragment.appendChild(linkEl);
+      } else {
+        fragment.appendChild(document.createTextNode(fullMatch));
+      }
+
+      if (trailing) {
+        fragment.appendChild(document.createTextNode(trailing));
+      }
+
+      lastIndex = end;
+    }
+
+    if (lastIndex < text.length) {
+      fragment.appendChild(document.createTextNode(text.slice(lastIndex)));
+    }
+
+    textNode.replaceWith(fragment);
+  });
+};
+
 // Helper function to process and clean HTML for display
 const processContentForPreview = (htmlContent: string): string => {
   const parser = new DOMParser();
@@ -60,8 +134,102 @@ const processContentForPreview = (htmlContent: string): string => {
       block.appendChild(captionText);
     }
   });
+
+  linkifyTextNodes(doc.body);
   
   return doc.body.innerHTML;
+};
+
+const renderCommentBodyWithLinks = (text: string) => {
+  const urlPattern = /(https?:\/\/[^\s]+|www\.[^\s]+)/gi;
+  const matches = Array.from(text.matchAll(urlPattern));
+  if (matches.length === 0) {
+    return text;
+  }
+
+  const nodes: React.ReactNode[] = [];
+  let lastIndex = 0;
+
+  matches.forEach((match, index) => {
+    const fullMatch = match[0];
+    const start = match.index ?? 0;
+
+    if (start > lastIndex) {
+      nodes.push(text.slice(lastIndex, start));
+    }
+
+    const { url, trailing } = trimTrailingPunctuation(fullMatch);
+    if (url) {
+      const href = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+      nodes.push(
+        <a
+          key={`comment-link-${index}-${start}`}
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer nofollow"
+          className="text-blue-600 hover:text-blue-700 underline underline-offset-2 break-all"
+        >
+          {url}
+        </a>
+      );
+    } else {
+      nodes.push(fullMatch);
+    }
+
+    if (trailing) {
+      nodes.push(trailing);
+    }
+
+    lastIndex = start + fullMatch.length;
+  });
+
+  if (lastIndex < text.length) {
+    nodes.push(text.slice(lastIndex));
+  }
+
+  return nodes;
+};
+
+const hasCommentUrl = (text: string) => {
+  const value = text.trim();
+  if (!value || /\s/.test(value)) return false;
+  return /^(https?:\/\/[^\s]+|www\.[^\s]+)$/i.test(value);
+};
+
+const renderCommentInputPreview = (text: string) => {
+  if (!text) return null;
+
+  const urlPattern = /(https?:\/\/[^\s]+|www\.[^\s]+)/gi;
+  const matches = Array.from(text.matchAll(urlPattern));
+  if (matches.length === 0) {
+    return text;
+  }
+
+  const nodes: React.ReactNode[] = [];
+  let lastIndex = 0;
+
+  matches.forEach((match, index) => {
+    const matchedText = match[0];
+    const start = match.index ?? 0;
+
+    if (start > lastIndex) {
+      nodes.push(text.slice(lastIndex, start));
+    }
+
+    nodes.push(
+      <span key={`input-link-${index}-${start}`} className="text-blue-600">
+        {matchedText}
+      </span>
+    );
+
+    lastIndex = start + matchedText.length;
+  });
+
+  if (lastIndex < text.length) {
+    nodes.push(text.slice(lastIndex));
+  }
+
+  return nodes;
 };
 
 export default function StoryDetail() {
@@ -75,6 +243,7 @@ export default function StoryDetail() {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [commentText, setCommentText] = useState("");
+  const [isSubmittingComment, setIsSubmittingComment] = useState(false);
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [deletingCommentId, setDeletingCommentId] = useState<string | null>(null);
   const [replyingToCommentId, setReplyingToCommentId] = useState<string | null>(null);
@@ -137,6 +306,7 @@ export default function StoryDetail() {
   };
 
   const isOwner = user && story && story.author.id === user.id;
+  const isCommentInputLinkLike = hasCommentUrl(commentText);
 
   const getNestedComments = () => {
     const comments = story?.commentsList || [];
@@ -415,6 +585,8 @@ export default function StoryDetail() {
   };
 
   const handleSubmitComment = async () => {
+    if (isSubmittingComment) return;
+
     const trimmedText = commentText.trim();
     if (!trimmedText || !story) return;
     if (!user) {
@@ -426,6 +598,7 @@ export default function StoryDetail() {
       return;
     }
 
+    setIsSubmittingComment(true);
     try {
       if (editingCommentId) {
         await updateStoryComment(editingCommentId, trimmedText);
@@ -455,6 +628,8 @@ export default function StoryDetail() {
         description: error instanceof Error ? error.message : "Please try again.",
         variant: "destructive",
       });
+    } finally {
+      setIsSubmittingComment(false);
     }
   };
 
@@ -666,7 +841,7 @@ export default function StoryDetail() {
                 dangerouslySetInnerHTML={{
                   __html: processContentForPreview(story.blocks[0].content),
                 }}
-                className="space-y-4 [&_ul]:list-disc [&_ul]:ml-6 [&_ol]:list-decimal [&_ol]:ml-6 [&_img]:w-full [&_img]:rounded-lg [&_img]:m-0 [&_input]:hidden [&_button]:hidden"
+                className="space-y-4 [&_ul]:list-disc [&_ul]:ml-6 [&_ol]:list-decimal [&_ol]:ml-6 [&_img]:w-full [&_img]:rounded-lg [&_img]:m-0 [&_input]:hidden [&_button]:hidden [&_a]:text-blue-600 [&_a]:underline [&_a]:underline-offset-2 [&_a:hover]:text-blue-700"
               />
             </div>
           ) : story?.excerpt ? (
@@ -766,8 +941,8 @@ export default function StoryDetail() {
                           </div>
                         )}
                       </div>
-                      <p className="text-sm text-foreground leading-relaxed">
-                        {comment.body}
+                      <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap break-words">
+                        {renderCommentBodyWithLinks(comment.body)}
                       </p>
 
                       {isEditing && (
@@ -818,27 +993,37 @@ export default function StoryDetail() {
               </div>
             )}
             <div className="flex gap-2">
-              <Input
-                ref={desktopCommentInputRef}
-                type="text"
-                placeholder={editingCommentId ? "Edit your comment..." : replyingToCommentId ? `Reply to ${replyingToAuthor}...` : "Write a comment..."}
-                value={commentText}
-                onChange={(e) => setCommentText(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSubmitComment();
-                  }
-                }}
-                className="flex-1"
-              />
+              <div className="relative flex-1">
+                {commentText && (
+                  <div className="pointer-events-none absolute inset-0 z-10 px-3 py-2 text-sm leading-5 text-foreground whitespace-nowrap overflow-hidden">
+                    {renderCommentInputPreview(commentText)}
+                  </div>
+                )}
+                <Input
+                  ref={desktopCommentInputRef}
+                  type="text"
+                  placeholder={editingCommentId ? "Edit your comment..." : replyingToCommentId ? `Reply to ${replyingToAuthor}...` : "Write a comment..."}
+                  value={commentText}
+                  onChange={(e) => setCommentText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey && !isSubmittingComment) {
+                      e.preventDefault();
+                      handleSubmitComment();
+                    }
+                  }}
+                  className={commentText ? "text-transparent caret-foreground" : ""}
+                  disabled={isSubmittingComment}
+                />
+              </div>
               <Button
                 size={editingCommentId ? "sm" : "icon"}
                 className={editingCommentId ? "rounded-lg px-4" : "rounded-lg"}
                 onClick={handleSubmitComment}
-                disabled={!commentText.trim()}
+                disabled={!commentText.trim() || isSubmittingComment}
               >
-                {editingCommentId ? (
+                {isSubmittingComment ? (
+                  editingCommentId ? "Updating..." : "Posting..."
+                ) : editingCommentId ? (
                   <>
                     <Check className="h-4 w-4 mr-1" />
                     Update
@@ -882,27 +1067,37 @@ export default function StoryDetail() {
               </div>
             )}
             <div className="flex gap-2 items-center">
-              <Input
-                ref={mobileCommentInputRef}
-                type="text"
-                placeholder={editingCommentId ? "Edit your comment..." : replyingToCommentId ? `Reply to ${replyingToAuthor}...` : "Write a comment..."}
-                value={commentText}
-                onChange={(e) => setCommentText(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSubmitComment();
-                  }
-                }}
-                className="flex-1 h-8 text-xs px-3"
-              />
+              <div className="relative flex-1">
+                {commentText && (
+                  <div className="pointer-events-none absolute inset-0 z-10 px-3 py-[7px] text-xs leading-4 text-foreground whitespace-nowrap overflow-hidden">
+                    {renderCommentInputPreview(commentText)}
+                  </div>
+                )}
+                <Input
+                  ref={mobileCommentInputRef}
+                  type="text"
+                  placeholder={editingCommentId ? "Edit your comment..." : replyingToCommentId ? `Reply to ${replyingToAuthor}...` : "Write a comment..."}
+                  value={commentText}
+                  onChange={(e) => setCommentText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey && !isSubmittingComment) {
+                      e.preventDefault();
+                      handleSubmitComment();
+                    }
+                  }}
+                  className={`h-8 text-xs px-3 ${commentText ? "text-transparent caret-foreground" : ""}`}
+                  disabled={isSubmittingComment}
+                />
+              </div>
               <Button
                 size={editingCommentId ? "sm" : "icon"}
                 className={editingCommentId ? "rounded-lg flex-shrink-0 h-8 px-3 text-xs" : "rounded-lg flex-shrink-0 h-8 w-8"}
                 onClick={handleSubmitComment}
-                disabled={!commentText.trim()}
+                disabled={!commentText.trim() || isSubmittingComment}
               >
-                {editingCommentId ? (
+                {isSubmittingComment ? (
+                  editingCommentId ? "Saving..." : "..."
+                ) : editingCommentId ? (
                   <>
                     <Check className="h-3.5 w-3.5 mr-1" />
                     Save

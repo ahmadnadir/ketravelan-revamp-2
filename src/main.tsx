@@ -5,7 +5,10 @@ import { registerSW } from "virtual:pwa-register";
 import App from "./App.tsx";
 import "./index.css";
 
-if (typeof window !== "undefined" && window.location.hostname === "localhost" && "serviceWorker" in navigator) {
+const isBrowser = typeof window !== "undefined";
+const isDev = import.meta.env.DEV;
+
+if (isBrowser && isDev && "serviceWorker" in navigator) {
   // Keep localhost free from stale cached bundles during rapid UI iteration.
   void navigator.serviceWorker.getRegistrations().then((registrations) => {
     registrations.forEach((registration) => {
@@ -22,11 +25,16 @@ if (typeof window !== "undefined" && window.location.hostname === "localhost" &&
   }
 }
 
-if (typeof window !== "undefined" && window.location.hostname !== "localhost") {
+if (isBrowser && import.meta.env.PROD) {
   // Register SW in non-local environments and auto-activate fresh builds.
+  let refreshTriggered = false;
   const updateSW = registerSW({
     immediate: true,
     onNeedRefresh() {
+      if (refreshTriggered) {
+        return;
+      }
+      refreshTriggered = true;
       void updateSW(true);
     },
   });
