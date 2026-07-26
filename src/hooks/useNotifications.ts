@@ -19,6 +19,7 @@ import { MessageCircle } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
 import { isNativePlatform } from "@/lib/capacitor";
+import { resolveNativeDeepLinkPath } from "@/lib/deepLinks";
 
 /**
  * Hook to fetch notifications with React Query
@@ -163,6 +164,16 @@ async function getSenderProfile(senderId: string) {
 function navigateToNotificationAction(rawUrl: string) {
   const trimmed = rawUrl.trim();
   if (!trimmed) return;
+
+  const resolvedInAppPath = resolveNativeDeepLinkPath(trimmed);
+  if (resolvedInAppPath) {
+    const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    if (current !== resolvedInAppPath) {
+      window.history.pushState({}, "", resolvedInAppPath);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    }
+    return;
+  }
 
   const isNative = isNativePlatform();
 

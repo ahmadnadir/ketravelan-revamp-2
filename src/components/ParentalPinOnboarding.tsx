@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
+import { Haptics, ImpactStyle } from "@capacitor/haptics";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
@@ -31,7 +32,13 @@ interface Props {
   heading?: string;
   description?: string;
   submitLabel?: string;
+  closeLabel?: string;
+  closeIcon?: boolean;
   mandatory?: boolean;
+  keepBottomNavVisible?: boolean;
+  showSafetyFooter?: boolean;
+  onForgotPin?: () => void | Promise<void>;
+  isResettingPin?: boolean;
   onComplete?: () => void;
   onCancel?: () => void;
   onVerify?: (pin: string) => Promise<boolean | void>;
@@ -42,7 +49,13 @@ export default function ParentalPinOnboarding({
   heading,
   description,
   submitLabel,
+  closeLabel,
+  closeIcon = false,
   mandatory = false,
+  keepBottomNavVisible = false,
+  showSafetyFooter = true,
+  onForgotPin,
+  isResettingPin = false,
   onComplete,
   onCancel,
   onVerify,
@@ -78,6 +91,9 @@ export default function ParentalPinOnboarding({
       setIsSaving(true);
       const result = await onVerify(value);
       if (result === false) {
+        setStep("create");
+        setPin("");
+        setConfirmPin("");
         return false;
       }
       onComplete?.();
@@ -173,7 +189,7 @@ export default function ParentalPinOnboarding({
     return undefined;
   }, [confirmPin, pin, savePin, step, isVerifyMode, handleVerify]);
 
-  const handleDigit = (digit: string) => {
+  const handleDigit = useCallback((digit: string) => {
     if (isSaving) return;
 
     if (step === "create") {
@@ -186,9 +202,9 @@ export default function ParentalPinOnboarding({
     if (confirmPin.length >= 4) return;
 
     setConfirmPin((prev) => prev + digit);
-  };
+  }, [confirmPin.length, isSaving, pin.length, step]);
 
-  const handleBackspace = () => {
+  const handleBackspace = useCallback(() => {
     if (isSaving) return;
 
     if (step === "create") {
@@ -197,7 +213,7 @@ export default function ParentalPinOnboarding({
     }
 
     setConfirmPin((prev) => prev.slice(0, -1));
-  };
+  }, [isSaving, step]);
 
   const handleBack = () => {
     if (isSaving) return;
@@ -212,10 +228,10 @@ export default function ParentalPinOnboarding({
     onComplete?.();
   };
 
-  const handleCancel = () => {
+  const handleCancel = useCallback(() => {
     if (isSaving) return;
     onCancel?.();
-  };
+  }, [isSaving, onCancel]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -284,6 +300,18 @@ export default function ParentalPinOnboarding({
         ? "Create a 4-digit PIN to protect parental control settings."
         : "Enter the same PIN again to continue.";
 
+  const triggerKeypadFeedback = useCallback(() => {
+    void Haptics.impact({ style: ImpactStyle.Medium })
+      .catch(() => Haptics.selectionChanged())
+      .catch(() => {
+        if (typeof navigator === "undefined" || typeof navigator.vibrate !== "function") {
+          return;
+        }
+
+        navigator.vibrate(10);
+      });
+  }, []);
+
   const PinBoxes = () => (
     <div className="mt-6 flex justify-center gap-4">
       {Array.from({ length: 4 }).map((_, index) => (
@@ -321,7 +349,10 @@ export default function ParentalPinOnboarding({
   }) => (
     <button
       type="button"
-      onClick={() => handleDigit(value)}
+      onPointerDown={triggerKeypadFeedback}
+      onClick={() => {
+        handleDigit(value);
+      }}
       disabled={isSaving}
       className="
         h-12
@@ -331,7 +362,6 @@ export default function ParentalPinOnboarding({
         font-medium
         transition-all
         active:scale-95
-        hover:bg-neutral-100
         disabled:opacity-40
       "
     >
@@ -340,7 +370,14 @@ export default function ParentalPinOnboarding({
   );
 
   return (
-    <div className="fixed inset-0 z-50 bg-white text-black flex flex-col min-h-0 overflow-hidden">
+    <div
+      className="fixed inset-x-0 top-0 z-[120] bg-white text-black flex flex-col min-h-0 overflow-hidden sm:bottom-0"
+      style={{
+        bottom: keepBottomNavVisible
+          ? "calc(var(--tabbar-height) + env(safe-area-inset-bottom, 0px))"
+          : "0px",
+      }}
+    >
       {/* Header */}
       <header className="flex items-center justify-between px-6 pt-safe pt-5 pb-4 border-b border-neutral-200">
         {step === "confirm" ? (
@@ -358,7 +395,7 @@ export default function ParentalPinOnboarding({
 
         <h1 className="text-lg font-semibold">{title}</h1>
 
-        {mandatory ? (
+        {!onCancel && mandatory ? (
           <div className="h-10 w-10" />
         ) : (
           <button
@@ -366,9 +403,12 @@ export default function ParentalPinOnboarding({
             onClick={handleCancel}
             disabled={isSaving}
             aria-label="Close"
-            className="h-10 w-10 rounded-full flex items-center justify-center hover:bg-neutral-100 transition"
+            className={closeIcon
+              ? "h-10 w-10 rounded-full flex items-center justify-center text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900 transition"
+              : "min-w-10 h-10 rounded-full px-3 flex items-center justify-center text-sm font-medium text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900 transition"
+            }
           >
-            <X className="h-5 w-5" />
+            {closeIcon ? <X className="h-5 w-5" /> : (closeLabel || "Close")}
           </button>
         )}
       </header>
@@ -460,6 +500,29 @@ export default function ParentalPinOnboarding({
             )}
           </Button>
 
+          {isVerifyMode && onForgotPin && (
+            <div className="mt-3 flex justify-center">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => {
+                  void onForgotPin();
+                }}
+                disabled={isSaving || isResettingPin}
+                className="h-10 px-4 text-sm font-medium text-neutral-500 hover:bg-transparent hover:text-neutral-500 transition-none"
+              >
+                {isResettingPin ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Sending...
+                  </>
+                ) : (
+                  "Forgot PIN?"
+                )}
+              </Button>
+            </div>
+          )}
+
         </div>
 
         {/* Keypad */}
@@ -485,7 +548,10 @@ export default function ParentalPinOnboarding({
 
             <button
               type="button"
-              onClick={handleBackspace}
+              onPointerDown={triggerKeypadFeedback}
+              onClick={() => {
+                handleBackspace();
+              }}
               disabled={isSaving}
               className="
                 h-12
@@ -494,7 +560,6 @@ export default function ParentalPinOnboarding({
                 flex
                 items-center
                 justify-center
-                hover:bg-neutral-100
                 transition
                 active:scale-95
               "
@@ -509,20 +574,22 @@ export default function ParentalPinOnboarding({
 
       </main>
 
-      <footer className="fixed bottom-12 left-0 right-0 border-t border-neutral-200 bg-white px-6 py-4 sm:static sm:bottom-auto sm:left-auto sm:right-auto sm:px-6 sm:py-6">
-        <div className="mx-auto flex max-w-4xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-start gap-3">
-            <Shield className="h-5 w-5 text-neutral-500 mt-0.5" />
+      {showSafetyFooter && (
+        <footer className="fixed bottom-0 left-0 right-0 border-t border-neutral-200 bg-white px-6 py-4 pb-[calc(env(safe-area-inset-bottom,0px)+1rem)] sm:static sm:bottom-auto sm:left-auto sm:right-auto sm:px-6 sm:py-6 sm:pb-6">
+          <div className="mx-auto flex max-w-4xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <Shield className="h-5 w-5 text-neutral-500 mt-0.5" />
 
-            <div>
-              <p className="text-sm font-medium">Your child's safety comes first</p>
-              <p className="mt-1 text-xs leading-5 text-neutral-500">
-                This PIN is required whenever someone wants to change parental control settings or manage your child's social features in Ketravelan.
-              </p>
+              <div>
+                <p className="text-sm font-medium">Your child's safety comes first</p>
+                <p className="mt-1 text-xs leading-5 text-neutral-500">
+                  This PIN is required whenever someone wants to change parental control settings or manage your child's social features in Ketravelan.
+                </p>
+              </div>
             </div>
           </div>
-        </div>
-      </footer>
+        </footer>
+      )}
     </div>
   );
 }

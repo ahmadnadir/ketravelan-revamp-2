@@ -17,12 +17,22 @@ import { ExpenseProvider } from "./contexts/ExpenseContext";
 import { CommunityProvider } from "./contexts/CommunityContext";
 import { classifyRequestError } from "@/lib/requestErrors";
 import { getPendingAuthIntent, normalizeOAuthErrorMessage, persistAuthError } from "@/lib/authFlow";
+import { resolveNativeDeepLinkPath } from "@/lib/deepLinks";
 
 import { OfflineBanner } from "./components/layout/OfflineBanner";
 import { NetworkStatusProvider } from "./contexts/NetworkStatusContext";
 import { AppInitializer } from "./components/AppInitializer";
 import { TermsAcceptanceModal } from "./components/modals/TermsAcceptanceModal";
 import React, { Suspense, useEffect, useRef, useState } from "react";
+import { AlertDialog, AlertDialogAction, AlertDialogContent, AlertDialogDescription, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { useAuth } from "@/contexts/AuthContext";
+import {
+  FAMILIES_SAFETY_REMINDER,
+  acknowledgeSafetyReminderToday,
+  getEffectiveSocialFeaturesLevel,
+  hasAcknowledgedSafetyReminderToday,
+  isMinorProfile,
+} from "@/lib/familiesSafety";
 
 const routeFallback = (
   <div className="min-h-[60vh] flex items-center justify-center px-4">
@@ -264,6 +274,55 @@ function AuthDeepLinkHandler() {
   return null;
 }
 
+function NativeDeepLinkRouteHandler() {
+  const navigate = useNavigate();
+  const lastHandledPathRef = useRef("");
+
+  useEffect(() => {
+    if (!isNativePlatform()) {
+      return;
+    }
+
+    const handleUrl = (url: string) => {
+      const targetPath = resolveNativeDeepLinkPath(url);
+      if (!targetPath) {
+        return;
+      }
+
+      if (lastHandledPathRef.current === targetPath) {
+        return;
+      }
+
+      lastHandledPathRef.current = targetPath;
+      navigate(targetPath, { replace: true });
+    };
+
+    let removeListener: (() => void) | undefined;
+
+    CapacitorApp.addListener("appUrlOpen", ({ url }) => {
+      if (url) {
+        handleUrl(url);
+      }
+    }).then((listener) => {
+      removeListener = () => listener.remove();
+    });
+
+    CapacitorApp.getLaunchUrl().then((launch) => {
+      if (launch?.url) {
+        handleUrl(launch.url);
+      }
+    });
+
+    return () => {
+      if (removeListener) {
+        removeListener();
+      }
+    };
+  }, [navigate]);
+
+  return null;
+}
+
 function IOSStatusBarInitializer() {
   const location = useLocation();
 
@@ -457,6 +516,123 @@ function NativeAnimatedSplash() {
   );
 }
 
+function FamiliesSafetyReminderGate() {
+  const { profile } = useAuth();
+  const location = useLocation();
+  const [open, setOpen] = useState(false);
+  const [secondsRemaining, setSecondsRemaining] = useState(3);
+
+  useEffect(() => {
+    const isMinor = isMinorProfile(profile);
+    const path = location.pathname;
+    const isSocialPath = path.startsWith("/chat") || path.startsWith("/community") || path.startsWith("/create-story");
+
+    if (isMinor && isSocialPath && !hasAcknowledgedSafetyReminderToday()) {
+      setOpen(true);
+      return;
+    }
+
+    setOpen(false);
+  }, [location.pathname, profile]);
+
+  useEffect(() => {
+    if (!open) {
+      setSecondsRemaining(3);
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setSecondsRemaining((prev) => {
+        if (prev <= 1) {
+          window.clearInterval(intervalId);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [open]);
+
+  return (
+    <AlertDialog open={open}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Online Safety Reminder</AlertDialogTitle>
+          <AlertDialogDescription>
+            {FAMILIES_SAFETY_REMINDER}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogAction
+          onClick={() => {
+            acknowledgeSafetyReminderToday();
+            setOpen(false);
+          }}
+        >
+          {secondsRemaining > 0 ? `I Understand (${secondsRemaining}s)` : "I Understand"}
+        </AlertDialogAction>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+function SocialAccessBlockedState() {
+  const navigate = useNavigate();
+
+  return (
+    <div className="min-h-[60vh] flex items-center justify-center px-4 py-8">
+      <div className="w-full max-w-2xl rounded-3xl border border-border/70 bg-card p-6 shadow-sm sm:p-10">
+        <div className="space-y-4 text-center">
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-secondary text-secondary-foreground">
+            <span className="text-2xl font-bold">!</span>
+          </div>
+          <div>
+            <h1 className="text-xl font-semibold text-foreground sm:text-2xl">Social access is disabled</h1>
+            <p className="mt-3 text-sm leading-6 text-muted-foreground sm:text-base">
+              This child account can still view the page, but social posting and chat features are temporarily disabled until an adult enables them in Settings.
+            </p>
+          </div>
+          <div className="flex flex-col gap-3 sm:flex-row sm:justify-center">
+            <button
+              type="button"
+              onClick={() => navigate("/settings")}
+              className="inline-flex h-11 items-center justify-center rounded-lg bg-primary px-5 text-sm font-medium text-primary-foreground transition hover:bg-primary/90"
+            >
+              Go to Family Safety settings
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate(-1)}
+              className="inline-flex h-11 items-center justify-center rounded-lg border border-border bg-transparent px-5 text-sm font-medium text-foreground transition hover:bg-muted"
+            >
+              Back to previous page
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SocialFeatureAccessGate({ children }: { children: React.ReactElement }) {
+  const { profile } = useAuth();
+  const isMinor = isMinorProfile(profile);
+  const socialLevel = getEffectiveSocialFeaturesLevel(isMinor);
+  const path = useLocation().pathname;
+  const isSocialPath =
+    path.startsWith("/chat") ||
+    path.startsWith("/community") ||
+    path.startsWith("/create-story");
+
+  if (isMinor && socialLevel === "disabled" && isSocialPath) {
+    return <SocialAccessBlockedState />;
+  }
+
+  return children;
+}
+
 const App = () => (
   <AuthProvider>
     <ExpenseProvider>
@@ -472,9 +648,11 @@ const App = () => (
             <IOSStatusBarInitializer />
             <GlobalSwipeBackHandler />
             <AppInitializer />
+            <FamiliesSafetyReminderGate />
             <TermsAcceptanceModal />
             <ScrollToTop />
           <AuthDeepLinkHandler />
+          <NativeDeepLinkRouteHandler />
             <RecoveryBootstrap />
           <Suspense fallback={routeFallback}>
             <Routes>
@@ -485,7 +663,7 @@ const App = () => (
               <Route path="/trip/:id/chat" element={<ProtectedRoute><TripChatRedirect /></ProtectedRoute>} />
               <Route path="/trip/:id/hub" element={<ProtectedRoute><TripHub /></ProtectedRoute>} />
               <Route path="/create" element={<ProtectedRoute><CreateTrip /></ProtectedRoute>} />
-              <Route path="/create-story" element={<ProtectedRoute><CreateStory /></ProtectedRoute>} />
+              <Route path="/create-story" element={<ProtectedRoute><SocialFeatureAccessGate><CreateStory /></SocialFeatureAccessGate></ProtectedRoute>} />
               <Route path="/my-trips" element={<ProtectedRoute><MyTrips /></ProtectedRoute>} />
               <Route
                 path="/my-stories"
@@ -497,14 +675,16 @@ const App = () => (
                   </ProtectedRoute>
                 }
               />
-              <Route path="/chat" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
-              <Route path="/chat/new/:userId" element={<ProtectedRoute><DirectChat /></ProtectedRoute>} />
-              <Route path="/community" element={<Community />} />
-              <Route path="/community/stories/:slug" element={<StoryDetail />} />
+              <Route path="/chat" element={<ProtectedRoute><SocialFeatureAccessGate><Chat /></SocialFeatureAccessGate></ProtectedRoute>} />
+              <Route path="/chat/new/:userId" element={<ProtectedRoute><SocialFeatureAccessGate><DirectChat /></SocialFeatureAccessGate></ProtectedRoute>} />
+              <Route path="/community" element={<SocialFeatureAccessGate><Community /></SocialFeatureAccessGate>} />
+              <Route path="/community/stories/:slug" element={<SocialFeatureAccessGate><StoryDetail /></SocialFeatureAccessGate>} />
               <Route path="/share/story/:slug" element={<StoryDetail />} />
-              <Route path="/community/discussions/:id" element={<DiscussionDetail />} />
+              <Route path="/post/:slug" element={<StoryDetail />} />
+              <Route path="/community/discussions/:id" element={<SocialFeatureAccessGate><DiscussionDetail /></SocialFeatureAccessGate>} />
+              <Route path="/discussion/:id" element={<SocialFeatureAccessGate><DiscussionDetail /></SocialFeatureAccessGate>} />
               <Route path="/expenses" element={<ProtectedRoute><Expenses /></ProtectedRoute>} />
-              <Route path="/chat/:id" element={<ProtectedRoute><DirectChat /></ProtectedRoute>} />
+              <Route path="/chat/:id" element={<ProtectedRoute><SocialFeatureAccessGate><DirectChat /></SocialFeatureAccessGate></ProtectedRoute>} />
               <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
               <Route path="/profile/edit" element={<ProtectedRoute><EditProfile /></ProtectedRoute>} />
               <Route path="/user/:userId" element={<UserProfileView />} />

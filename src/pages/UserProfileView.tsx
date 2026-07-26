@@ -41,6 +41,7 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { blockUser, isBlockedByUser, isUserBlocked, unblockUser } from "@/lib/blockUser";
+import { ensureCurrentUserCanStartDirectChat } from "@/lib/familiesSafety";
 import { ModerationMenu } from "@/components/moderation/ModerationMenu";
 
 // Helper to generate fallback avatar
@@ -209,6 +210,16 @@ const UserProfilePage = () => {
       toast({
         title: "Unavailable",
         description: "You cannot message this user.",
+        variant: "destructive",
+      });
+      return;
+    }
+    try {
+      await ensureCurrentUserCanStartDirectChat(profile.id);
+    } catch (err) {
+      toast({
+        title: "Messaging restricted",
+        description: err instanceof Error ? err.message : "This chat is not available.",
         variant: "destructive",
       });
       return;

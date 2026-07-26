@@ -158,8 +158,7 @@ function shouldRetryAlternateApnsHost(status: number, responseText: string) {
   return lowered.includes("baddevicetoken") || lowered.includes("devicetokennotfortopic");
 }
 
-async function sendApnsMessageViaHost(host: string, token: string, title: string, body: string, data: Record<string, string>, badge?: number) {
-  const jwt = await getApnsJwt();
+async function sendApnsMessageViaHost(host: string, jwt: string, token: string, title: string, body: string, data: Record<string, string>, badge?: number) {
   const aps: Record<string, unknown> = {
     alert: { title, body },
     sound: "default",
@@ -188,7 +187,7 @@ async function sendApnsMessageViaHost(host: string, token: string, title: string
   return { ok: response.ok, status: response.status, text };
 }
 
-async function sendApnsMessage(token: string, title: string, body: string, data: Record<string, string>, badge?: number) {
+async function sendApnsMessage(apnsJwt: string, token: string, title: string, body: string, data: Record<string, string>, badge?: number) {
   const primaryHost = APPLE_APNS_USE_SANDBOX
     ? "https://api.sandbox.push.apple.com"
     : "https://api.push.apple.com";
@@ -196,11 +195,11 @@ async function sendApnsMessage(token: string, title: string, body: string, data:
     ? "https://api.push.apple.com"
     : "https://api.sandbox.push.apple.com";
 
-  const primary = await sendApnsMessageViaHost(primaryHost, token, title, body, data, badge);
+  const primary = await sendApnsMessageViaHost(primaryHost, apnsJwt, token, title, body, data, badge);
   if (primary.ok) return;
 
   if (shouldRetryAlternateApnsHost(primary.status, primary.text)) {
-    const fallback = await sendApnsMessageViaHost(fallbackHost, token, title, body, data, badge);
+    const fallback = await sendApnsMessageViaHost(fallbackHost, apnsJwt, token, title, body, data, badge);
     if (fallback.ok) {
       console.warn("APNs send succeeded on fallback host", { primaryHost, fallbackHost });
       return;
@@ -262,7 +261,17 @@ serve(async (req: Request) => {
 
   try {
     const body = await req.json() as SystemPushRequest;
-    const userIds = Array.isArray(body.userIds) ? body.userIds.filter(Boolean) : [];
+    const requestedUserIds = Array.isArray(body.userIds) ? body.userIds.filter(Boolean) : [];
+    const metadata = body.metadata ?? {};
+
+    // Defensive guard: a "member_joined" notification should never be sent
+    // to the participant who just joined, even if a caller passes them in.
+    const participantId = body.type === "member_joined"
+      ? String(metadata.participant_id ?? "").trim()
+      : "";
+    const userIds = participantId
+      ? requestedUserIds.filter((id) => id !== participantId)
+      : requestedUserIds;
 
     if (!body?.title || !body?.body || !body?.type || userIds.length === 0) {
       return new Response(JSON.stringify({ error: "Missing required fields" }), {
@@ -303,7 +312,6 @@ serve(async (req: Request) => {
       });
     }
 
-    const metadata = body.metadata ?? {};
     const actionUrl = body.actionUrl || "";
     const siteOrigin = getSiteOrigin();
     const resolvedActionUrl = actionUrl.startsWith("http") ? actionUrl : `${siteOrigin}${actionUrl}`;
@@ -373,6 +381,8 @@ serve(async (req: Request) => {
       ...Object.fromEntries(Object.entries(metadata).map(([key, value]) => [key, String(value)])),
     };
 
+    const apnsJwt = hasApnsConfig() ? await getApnsJwt() : "";
+
     const sends = tokens.map(async (t) => {
       const tokenValue = String((t as { token: string }).token || "");
       const platform = String((t as { platform?: string }).platform || "").toLowerCase();
@@ -385,7 +395,7 @@ serve(async (req: Request) => {
         if (!hasApnsConfig()) {
           throw new Error("APNs config missing (APPLE_TEAM_ID, APPLE_KEY_ID, APPLE_PRIVATE_KEY, APPLE_BUNDLE_ID)");
         }
-        await sendApnsMessage(tokenValue, body.title, truncate(body.body), payloadData, badgeCount);
+        await sendApnsMessage(apnsJwt, tokenValue, body.title, truncate(body.body), payloadData, badgeCount);
         return { provider: "apns", token: tokenValue };
       }
 

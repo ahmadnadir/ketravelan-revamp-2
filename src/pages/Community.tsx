@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { CommunityProvider, useCommunity } from "@/contexts/CommunityContext";
 import { StoriesFeed } from "@/components/community/stories/StoriesFeed";
@@ -8,6 +8,9 @@ import { AskQuestionDrawer } from "@/components/community/discussions/AskQuestio
 import { SEOHead } from "@/components/seo/SEOHead";
 import { SegmentedControl } from "@/components/shared/SegmentedControl";
 import { detectCountryFromLocale } from "@/lib/geolocation";
+import { useAuth } from "@/contexts/AuthContext";
+import { isMinorProfile } from "@/lib/familiesSafety";
+import ParentalPinOnboarding from "@/components/ParentalPinOnboarding";
 
 const DISCUSSION_LOCATION_STORAGE_KEY = "ketravelan-discussion-country";
 
@@ -107,11 +110,41 @@ function CommunityContent() {
   );
 }
 
+type FamilySafetyProfile = {
+  social_features_pin_hash?: string | null;
+  date_of_birth?: string | null;
+};
+
 export default function Community() {
+  const navigate = useNavigate();
+  const { profile } = useAuth();
+  const [showPinOnboard, setShowPinOnboard] = useState(false);
+  const safetyProfile = profile as FamilySafetyProfile | null;
+
+  useEffect(() => {
+    if (!safetyProfile) return;
+    const raw = safetyProfile.social_features_pin_hash;
+    const hasPin = typeof raw === "string" && raw.trim().length > 0;
+    setShowPinOnboard(!hasPin);
+  }, [safetyProfile]);
+
   return (
     <CommunityProvider>
-      <AppLayout mainClassName="px-0 sm:px-0 pt-0">
-        <CommunityContent />
+      <AppLayout
+        hideHeader={showPinOnboard}
+        hideBottomNav={showPinOnboard}
+        fullWidth={showPinOnboard}
+        mainClassName={showPinOnboard ? "px-0 sm:px-0" : "px-0 sm:px-0 pt-0"}
+      >
+        {showPinOnboard && (
+          <ParentalPinOnboarding
+            closeIcon
+            mandatory={isMinorProfile(safetyProfile)}
+            onCancel={() => navigate(-1)}
+            onComplete={() => setShowPinOnboard(false)}
+          />
+        )}
+        {!showPinOnboard && <CommunityContent />}
       </AppLayout>
     </CommunityProvider>
   );

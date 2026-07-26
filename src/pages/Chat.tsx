@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { MessageCircle, Users, Search, X, MoreVertical } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Input } from "@/components/ui/input";
@@ -15,6 +15,8 @@ import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
+import { isMinorProfile } from "@/lib/familiesSafety";
+import ParentalPinOnboarding from "@/components/ParentalPinOnboarding";
 import { useConversations } from "@/hooks/useConversations";
 import { deleteDirectConversation, profileCache } from "@/lib/conversations";
 import { getLoadErrorFeedback } from "@/lib/requestErrors";
@@ -61,17 +63,19 @@ function mapConversationToChatItem(participant: any, currentUserId?: string) {
 
   // Build last message preview, including attachment notes
   const att = Array.isArray(lastMsg?.attachments) ? lastMsg.attachments : [];
-  const hasImage = att.some((a: any) => a?.type === 'image');
-  const hasDoc = att.some((a: any) => a?.type === 'document');
-  const hasLoc = att.some((a: any) => a?.type === 'location');
+  const nonReplyAttachments = att.filter((a: any) => a?.type !== 'reply');
+  const hasImage = nonReplyAttachments.some((a: any) => a?.type === 'image');
+  const hasDoc = nonReplyAttachments.some((a: any) => a?.type === 'document');
+  const hasLoc = nonReplyAttachments.some((a: any) => a?.type === 'location');
   const attLabel = [
     hasImage ? 'Photo' : null,
     hasDoc ? 'Document' : null,
     hasLoc ? 'Location' : null,
   ].filter(Boolean).join(' • ');
-  const previewText = att.length > 0
-    ? (attLabel || 'Attachment')
-    : (lastMsg?.content || "");
+  const textContent = (lastMsg?.content || "").trim();
+  const previewText = textContent.length > 0
+    ? textContent
+    : (nonReplyAttachments.length > 0 ? (attLabel || 'Attachment') : "");
 
   const hasIncomingLastMessage = Boolean(
     lastMsg?.sender_id && currentUserId && lastMsg.sender_id !== currentUserId
@@ -95,6 +99,7 @@ function mapConversationToChatItem(participant: any, currentUserId?: string) {
 
 
 export default function Chat() {
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const initialTab = searchParams.get("tab") === "direct" ? "direct" : "trips";
   const [chatFilter, setChatFilter] = useState<"trips" | "direct">(initialTab);
@@ -111,13 +116,23 @@ export default function Chat() {
       return p;
     }, { replace: true });
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; type: "trip" | "direct"; name: string } | null>(null);
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
+  const [showPinOnboard, setShowPinOnboard] = useState(false);
   const queryClient = useQueryClient();
   const deletedTripNotifiedConversationsRef = useRef<Set<string>>(new Set());
   const lastBlockedRefreshAtRef = useRef(0);
   const [blockedUserIds, setBlockedUserIds] = useState<Set<string>>(new Set());
 
   // Fetch conversations with React Query
+  // Show parental PIN onboarding if no PIN exists.
+  useEffect(() => {
+    if (!profile) return;
+    const raw = (profile as any)?.social_features_pin_hash;
+    const hasPin = typeof raw === "string" && raw.trim().length > 0;
+    const minor = isMinorProfile(profile as any);
+    // Show onboarding when PIN is not set; hide when it is saved/available
+    setShowPinOnboard(!hasPin);
+  }, [profile]);
   const { data: participants = [], isLoading: loading, error } = useConversations(user?.id);
 
   useEffect(() => {
@@ -361,7 +376,20 @@ export default function Chat() {
   }, [queryClient, user]);
 
   return (
-    <AppLayout>
+    <AppLayout
+      hideHeader={showPinOnboard}
+      hideBottomNav={showPinOnboard}
+      fullWidth={showPinOnboard}
+      mainClassName={showPinOnboard ? "px-0 sm:px-0" : undefined}
+    >
+      {showPinOnboard && (
+        <ParentalPinOnboarding
+          closeIcon
+          mandatory={isMinorProfile(profile as any)}
+          onCancel={() => navigate(-1)}
+          onComplete={() => setShowPinOnboard(false)}
+        />
+      )}
       <div className="py-6 sm:py-8 space-y-5">
         <h1 className="text-3xl font-bold text-foreground">Messages</h1>
 

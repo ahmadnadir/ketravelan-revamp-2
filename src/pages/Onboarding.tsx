@@ -8,6 +8,13 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -36,6 +43,11 @@ export default function Onboarding() {
   const [username, setUsername] = useState(profile?.username || "");
   const [usernameStatus, setUsernameStatus] = useState<"idle" | "checking" | "available" | "taken">("idle");
   const [gender, setGender] = useState<string | null>(null);
+  const [dateOfBirth, setDateOfBirth] = useState(profile?.date_of_birth || "");
+  const [showDobModal, setShowDobModal] = useState(false);
+  const [dobDraftYear, setDobDraftYear] = useState(() => new Date().getFullYear() - 18);
+  const [dobDraftMonth, setDobDraftMonth] = useState(1);
+  const [dobDraftDay, setDobDraftDay] = useState(1);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [cropModalOpen, setCropModalOpen] = useState(false);
   const [pendingImage, setPendingImage] = useState<string | null>(null);
@@ -77,11 +89,17 @@ export default function Onboarding() {
     const timer = setTimeout(async () => {
       setUsernameStatus("checking");
       try {
-        const { data, error } = await supabase
+        let query = supabase
           .from("profiles")
-          .select("username")
+          .select("id")
           .eq("username", username)
-          .single();
+          .limit(1);
+
+        if (user?.id) {
+          query = query.neq("id", user.id);
+        }
+
+        const { data, error } = await query.maybeSingle();
 
         if (error && error.code === "PGRST116") {
           // No row found = username is available
@@ -99,7 +117,7 @@ export default function Onboarding() {
     }, 500);
 
     return () => clearTimeout(timer);
-  }, [username]);
+  }, [username, user?.id]);
 
   // Update derived currency when country changes
   const handleCountryChange = (selectedCountry: Country) => {
@@ -136,6 +154,79 @@ export default function Onboarding() {
     );
   };
 
+  const todayIso = new Date().toISOString().split("T")[0];
+  const todayYear = Number(todayIso.slice(0, 4));
+
+  const parseIsoDate = (value: string) => {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+    if (!match) return null;
+
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const parsed = new Date(year, month - 1, day);
+
+    if (
+      !Number.isFinite(parsed.getTime()) ||
+      parsed.getFullYear() !== year ||
+      parsed.getMonth() !== month - 1 ||
+      parsed.getDate() !== day
+    ) {
+      return null;
+    }
+
+    return { year, month, day };
+  };
+
+  const getDaysInMonth = (year: number, month: number) => new Date(year, month, 0).getDate();
+
+  const pad2 = (value: number) => String(value).padStart(2, "0");
+
+  const formatDateForDisplay = (value: string) => {
+    const parsed = parseIsoDate(value);
+    if (!parsed) return "Select date of birth";
+
+    return new Date(parsed.year, parsed.month - 1, parsed.day).toLocaleDateString(undefined, {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    });
+  };
+
+  const openDobModal = () => {
+    const parsed = parseIsoDate(dateOfBirth) ?? parseIsoDate(todayIso);
+    if (parsed) {
+      setDobDraftYear(parsed.year);
+      setDobDraftMonth(parsed.month);
+      setDobDraftDay(parsed.day);
+    }
+    setShowDobModal(true);
+  };
+
+  const handleSaveDob = () => {
+    const nextDob = `${dobDraftYear}-${pad2(dobDraftMonth)}-${pad2(dobDraftDay)}`;
+    if (!isValidDateOfBirth(nextDob)) {
+      alert("Please enter a valid date of birth");
+      return;
+    }
+    setDateOfBirth(nextDob);
+    setShowDobModal(false);
+  };
+
+  useEffect(() => {
+    const maxDay = getDaysInMonth(dobDraftYear, dobDraftMonth);
+    if (dobDraftDay > maxDay) {
+      setDobDraftDay(maxDay);
+    }
+  }, [dobDraftYear, dobDraftMonth, dobDraftDay]);
+
+  const isValidDateOfBirth = (value: string) => {
+    if (!value) return false;
+    const parsed = new Date(value);
+    if (!Number.isFinite(parsed.getTime())) return false;
+    return value <= todayIso;
+  };
+
   const handleNext = async () => {
     // Step 1 validation: name and username required
     if (currentStep === 1) {
@@ -159,6 +250,10 @@ export default function Onboarding() {
         alert("Please wait while we check username availability...");
         return;
       }
+      if (!isValidDateOfBirth(dateOfBirth)) {
+        alert("Please enter a valid date of birth");
+        return;
+      }
     }
 
     if (!user) {
@@ -170,6 +265,7 @@ export default function Onboarding() {
       full_name: name,
       username: username,
       gender,
+      date_of_birth: dateOfBirth,
       avatar_url: avatarUrl,
       country,
       city,
@@ -216,6 +312,7 @@ export default function Onboarding() {
     const updatePayload: any = {
       full_name: name,
       gender,
+      date_of_birth: dateOfBirth,
       avatar_url: avatarUrl,
       country,
       city,
@@ -268,7 +365,7 @@ export default function Onboarding() {
   const canProceed = () => {
     switch (currentStep) {
       case 1:
-        return name.trim().length > 0;
+        return name.trim().length > 0 && username.trim().length >= 3 && isValidDateOfBirth(dateOfBirth);
       case 2:
         return country !== "";
       case 3:
@@ -300,9 +397,9 @@ export default function Onboarding() {
   const selectedCountryData = countries.find((c) => c.name === country);
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="app-shell bg-background">
       {/* Header */}
-      <header className="sticky top-0 z-50 glass border-b border-border/50 safe-top">
+      <header className="app-shell-top glass border-b border-border/50 safe-top">
         <div className="container max-w-lg mx-auto flex h-16 items-center px-4">
           {currentStep > 1 ? (
             <Button variant="ghost" size="icon" onClick={handleBack} className="mr-3">
@@ -326,10 +423,13 @@ export default function Onboarding() {
       </header>
 
       {/* Content */}
-      <div className="flex-1 container max-w-lg mx-auto px-4 py-6 flex flex-col">
+      <div
+        className="app-shell-content container max-w-lg mx-auto px-4 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] flex flex-col"
+        style={{ WebkitOverflowScrolling: "touch" }}
+      >
         {/* Step 1: Basic Profile */}
         {currentStep === 1 && (
-          <div className="flex-1 flex flex-col animate-in fade-in slide-in-from-right-4 duration-300">
+          <div className="flex flex-col animate-in fade-in slide-in-from-right-4 duration-300">
             <div className="text-center mb-8">
               <h1 className="text-2xl font-bold mb-2">Let's set up your profile</h1>
               <p className="text-muted-foreground">
@@ -445,13 +545,27 @@ export default function Onboarding() {
               </p>
             </div>
 
-            <div className="flex-1" />
+            <div className="space-y-2 mt-5">
+              <label className="text-sm font-medium">
+                Date of Birth <span className="text-destructive">*</span>
+              </label>
+              <button
+                type="button"
+                onClick={openDobModal}
+                className="h-12 w-full rounded-xl border border-input bg-background px-4 text-left text-base"
+              >
+                {formatDateForDisplay(dateOfBirth)}
+              </button>
+              <p className="text-xs text-muted-foreground">
+                Required for child safety protections and parental controls.
+              </p>
+            </div>
           </div>
         )}
 
         {/* Step 2: Location */}
         {currentStep === 2 && (
-          <div className="flex-1 flex flex-col animate-in fade-in slide-in-from-right-4 duration-300">
+          <div className="flex flex-col animate-in fade-in slide-in-from-right-4 duration-300">
             <div className="text-center mb-6">
               <h1 className="text-2xl font-bold mb-2">Where are you based?</h1>
               <p className="text-muted-foreground">
@@ -540,14 +654,12 @@ export default function Onboarding() {
                 )}
               </div>
             )}
-
-            <div className="flex-1" />
           </div>
         )}
 
         {/* Step 3: About & Social */}
         {currentStep === 3 && (
-          <div className="flex-1 flex flex-col animate-in fade-in slide-in-from-right-4 duration-300">
+          <div className="flex flex-col animate-in fade-in slide-in-from-right-4 duration-300">
             <div className="text-center mb-6">
               <h1 className="text-2xl font-bold mb-2">Tell others about you</h1>
               <p className="text-muted-foreground">
@@ -614,14 +726,12 @@ export default function Onboarding() {
                 You can edit this anytime
               </p>
             </div>
-
-            <div className="flex-1" />
           </div>
         )}
 
         {/* Step 4: Travel Styles */}
         {currentStep === 4 && (
-          <div className="flex-1 flex flex-col animate-in fade-in slide-in-from-right-4 duration-300">
+          <div className="flex flex-col animate-in fade-in slide-in-from-right-4 duration-300">
             <div className="text-center mb-6">
               <h1 className="text-2xl font-bold mb-2">What's your travel vibe?</h1>
               <p className="text-muted-foreground">
@@ -644,8 +754,6 @@ export default function Onboarding() {
                 Pick 3–5 that describe you
               </p>
             )}
-
-            <div className="flex-1" />
           </div>
         )}
 
@@ -812,6 +920,88 @@ export default function Onboarding() {
         imageSrc={pendingImage}
         onCropComplete={handleCropComplete}
       />
+
+      <Dialog open={showDobModal} onOpenChange={setShowDobModal}>
+        <DialogContent className="w-[calc(100%-2rem)] max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto p-0">
+          <div className="p-5">
+            <DialogHeader>
+              <DialogTitle>Select date of birth</DialogTitle>
+              <DialogDescription>
+                We ask for date of birth for child safety and parental controls, including Full Access and Disabled social access settings.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="mt-5 grid grid-cols-3 gap-3">
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-muted-foreground">Day</label>
+                <select
+                  value={dobDraftDay}
+                  onChange={(e) => setDobDraftDay(Number(e.target.value))}
+                  className="h-11 w-full rounded-md border border-input bg-background px-3 text-sm"
+                >
+                  {Array.from({ length: getDaysInMonth(dobDraftYear, dobDraftMonth) }, (_, index) => index + 1).map((day) => (
+                    <option key={day} value={day}>
+                      {day}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-muted-foreground">Month</label>
+                <select
+                  value={dobDraftMonth}
+                  onChange={(e) => setDobDraftMonth(Number(e.target.value))}
+                  className="h-11 w-full rounded-md border border-input bg-background px-3 text-sm"
+                >
+                  {[
+                    "Jan",
+                    "Feb",
+                    "Mar",
+                    "Apr",
+                    "May",
+                    "Jun",
+                    "Jul",
+                    "Aug",
+                    "Sep",
+                    "Oct",
+                    "Nov",
+                    "Dec",
+                  ].map((monthLabel, index) => (
+                    <option key={monthLabel} value={index + 1}>
+                      {monthLabel}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-muted-foreground">Year</label>
+                <select
+                  value={dobDraftYear}
+                  onChange={(e) => setDobDraftYear(Number(e.target.value))}
+                  className="h-11 w-full rounded-md border border-input bg-background px-3 text-sm"
+                >
+                  {Array.from({ length: todayYear - 1900 + 1 }, (_, index) => todayYear - index).map((year) => (
+                    <option key={year} value={year}>
+                      {year}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="mt-6 flex justify-end gap-2">
+              <Button type="button" variant="outline" onClick={() => setShowDobModal(false)}>
+                Cancel
+              </Button>
+              <Button type="button" onClick={handleSaveDob}>
+                Save date
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

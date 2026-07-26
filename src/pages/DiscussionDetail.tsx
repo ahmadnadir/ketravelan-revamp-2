@@ -1,5 +1,5 @@
 import { useParams, Link, useLocation, useNavigate } from "react-router-dom";
-import { ArrowLeft, MapPin, CheckCircle2, Send, Pencil, Trash2, Share2, MoreVertical, Flag, Copy, Check, MessageCircle, Eye, ArrowUp, ArrowDown, ChevronUp, ChevronDown, Reply as ReplyIcon, Heart, Bookmark } from "lucide-react";
+import { ArrowLeft, MapPin, CheckCircle2, Send, Pencil, Trash2, Share2, MoreVertical, Flag, Copy, Check, MessageCircle, Eye, ArrowUp, ArrowDown, ChevronUp, ChevronDown, Reply as ReplyIcon, Heart, Bookmark, Lock } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -11,10 +11,11 @@ import { SEOHead } from "@/components/seo/SEOHead";
 import { formatDistanceToNow } from "date-fns";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { buildPublicUrl } from "@/lib/publicUrl";
+import { buildUniversalLinkUrl } from "@/lib/publicUrl";
 import { createDiscussionReply, deleteDiscussion, deleteDiscussionReply, fetchDiscussionById, fetchDiscussionReplies, toggleAcceptDiscussionReply, updateDiscussionReply, incrementDiscussionViews, toggleDiscussionReplyVote, toggleDiscussionReaction } from "@/lib/community";
 import { getLoadErrorFeedback } from "@/lib/requestErrors";
 import { toast } from "@/hooks/use-toast";
+import { isMinorProfile, getEffectiveSocialFeaturesLevel, enforceCurrentUserSocialWritePolicy, FamiliesPolicyError } from "@/lib/familiesSafety";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -53,7 +54,7 @@ export default function DiscussionDetail() {
   const { id } = useParams<{ id: string }>();
   const location = useLocation();
   const navigate = useNavigate();
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, user, profile } = useAuth();
   const [replyText, setReplyText] = useState("");
   const [discussion, setDiscussion] = useState<Discussion | null>(null);
   const [replies, setReplies] = useState<DiscussionReply[]>([]);
@@ -84,6 +85,9 @@ export default function DiscussionDetail() {
   const [scrolledReplyId, setScrolledReplyId] = useState<string | null>(null);
   const replyRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const replyInputRef = useRef<HTMLInputElement | null>(null);
+  
+  const [isMinorAccount, setIsMinorAccount] = useState(false);
+  const [socialFeaturesLevel, setSocialFeaturesLevel] = useState<"full" | "disabled">("full");
 
   const focusReplyComposer = () => {
     if (typeof window === "undefined") return;
@@ -224,7 +228,7 @@ export default function DiscussionDetail() {
   }, [targetReplyId, replies, expandedReplies, scrolledReplyId]);
 
   const handleShare = (reply: DiscussionReply) => {
-    const link = buildPublicUrl(`/community/discussions/${id}?reply=${reply.id}`);
+    const link = buildUniversalLinkUrl(`/community/discussions/${id}?reply=${reply.id}`);
     setShareLink(link);
     setSelectedReplyForShare(reply);
     setShowShareModal(true);
@@ -406,6 +410,18 @@ export default function DiscussionDetail() {
     };
   }, [id, user?.id]);
 
+  // Check if current user is a minor and what their social features level is
+  useEffect(() => {
+    const updateSocialFeaturesStatus = () => {
+      const isMinor = isMinorProfile(profile);
+      const level = getEffectiveSocialFeaturesLevel(isMinor);
+      setIsMinorAccount(isMinor);
+      setSocialFeaturesLevel(level);
+    };
+
+    updateSocialFeaturesStatus();
+  }, [profile]);
+
   if (isLoading) {
     return (
       <AppLayout>
@@ -474,9 +490,37 @@ export default function DiscussionDetail() {
 
   const handleSendReply = async () => {
     if (!id || !replyText.trim()) return;
+
+    // Check social features restrictions for minor accounts
+    if (isMinorAccount) {
+      if (socialFeaturesLevel === "disabled") {
+        toast({
+          title: "Social posting disabled",
+          description: "Social posting is currently disabled for this child account. An adult can enable it in Settings > Family Safety.",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
     const trimmedReply = replyText.trim();
     setIsSubmitting(true);
     try {
+      // Enforce social write policy (checks for personal info, safety reminders, etc.)
+      try {
+        await enforceCurrentUserSocialWritePolicy(trimmedReply);
+      } catch (policyError) {
+        if (policyError instanceof FamiliesPolicyError) {
+          toast({
+            title: "Policy restriction",
+            description: policyError.message,
+            variant: "destructive",
+          });
+          return;
+        }
+        throw policyError;
+      }
+
       if (editingReplyId) {
         await updateDiscussionReply(editingReplyId, trimmedReply);
         setReplies((prev) =>
@@ -938,6 +982,17 @@ export default function DiscussionDetail() {
       {isAuthenticated && (
         <div className="fixed bottom-above-nav lg:bottom-0 left-0 lg:left-60 right-0 bg-background">
           <div className="max-w-5xl mx-auto px-3 py-2 sm:p-4 border-t border-border">
+            {/* Social features disabled warning */}
+            {isMinorAccount && socialFeaturesLevel === "disabled" && (
+              <div className="mb-3 p-3 bg-destructive/10 border border-destructive/30 rounded-md flex items-start gap-2">
+                <Lock className="h-4 w-4 text-destructive mt-0.5 flex-shrink-0" />
+                <div className="text-xs text-destructive">
+                  <p className="font-semibold">Social features disabled</p>
+                  <p className="text-xs opacity-90">An adult needs to enable posting in Settings &gt; Family Safety</p>
+                </div>
+              </div>
+            )}
+
             {editingReplyId && (
               <div className="flex items-center gap-2 mb-1 sm:mb-2 text-xs text-muted-foreground">
                 <span>Editing your reply</span>
@@ -969,12 +1024,12 @@ export default function DiscussionDetail() {
                   }
                 }}
                 className="flex-1 h-8 sm:h-10 text-xs sm:text-sm px-3"
-                disabled={isSubmitting}
+                disabled={isSubmitting || (isMinorAccount && socialFeaturesLevel === "disabled")}
               />
               <Button
                 size={editingReplyId ? "sm" : "icon"}
                 className={editingReplyId ? "h-8 sm:h-10 px-3 sm:px-4 flex-shrink-0 text-xs sm:text-sm" : "h-8 w-8 sm:h-10 sm:w-10 flex-shrink-0"}
-                disabled={!replyText.trim() || isSubmitting}
+                disabled={!replyText.trim() || isSubmitting || (isMinorAccount && socialFeaturesLevel === "disabled")}
                 onClick={handleSendReply}
               >
                 {editingReplyId ? (

@@ -251,7 +251,7 @@ export default function DirectChat() {
       scrollContainerRef={scrollContainerRef}
     >
       <div className="relative">
-        <div className="w-full px-3 sm:px-4 lg:px-6 xl:px-8 pt-4 sm:pt-6 pb-2 space-y-4">
+        <div className="w-full px-3 sm:px-4 lg:px-6 xl:px-8 pt-0 pb-2 space-y-2">
           {messagesContent}
           {messagingBlocked && (
             <p className="text-xs text-muted-foreground text-center -mt-2">

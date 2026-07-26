@@ -15,7 +15,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { fetchStoryBySlug, toggleStoryReaction, deleteStory, createStoryComment, updateStoryComment, deleteStoryComment } from "@/lib/community";
 import { toast } from "@/hooks/use-toast";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { buildPublicUrl } from "@/lib/publicUrl";
+import { buildUniversalLinkUrl } from "@/lib/publicUrl";
 import { getLoadErrorFeedback } from "@/lib/requestErrors";
 import { ModerationMenu } from "@/components/moderation/ModerationMenu";
 
@@ -190,48 +190,6 @@ const renderCommentBodyWithLinks = (text: string) => {
   return nodes;
 };
 
-const hasCommentUrl = (text: string) => {
-  const value = text.trim();
-  if (!value || /\s/.test(value)) return false;
-  return /^(https?:\/\/[^\s]+|www\.[^\s]+)$/i.test(value);
-};
-
-const renderCommentInputPreview = (text: string) => {
-  if (!text) return null;
-
-  const urlPattern = /(https?:\/\/[^\s]+|www\.[^\s]+)/gi;
-  const matches = Array.from(text.matchAll(urlPattern));
-  if (matches.length === 0) {
-    return text;
-  }
-
-  const nodes: React.ReactNode[] = [];
-  let lastIndex = 0;
-
-  matches.forEach((match, index) => {
-    const matchedText = match[0];
-    const start = match.index ?? 0;
-
-    if (start > lastIndex) {
-      nodes.push(text.slice(lastIndex, start));
-    }
-
-    nodes.push(
-      <span key={`input-link-${index}-${start}`} className="text-blue-600">
-        {matchedText}
-      </span>
-    );
-
-    lastIndex = start + matchedText.length;
-  });
-
-  if (lastIndex < text.length) {
-    nodes.push(text.slice(lastIndex));
-  }
-
-  return nodes;
-};
-
 export default function StoryDetail() {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
@@ -306,7 +264,6 @@ export default function StoryDetail() {
   };
 
   const isOwner = user && story && story.author.id === user.id;
-  const isCommentInputLinkLike = hasCommentUrl(commentText);
 
   const getNestedComments = () => {
     const comments = story?.commentsList || [];
@@ -562,7 +519,7 @@ export default function StoryDetail() {
   const handleShare = async () => {
     if (!story) return;
     const cacheBust = Date.now().toString(36);
-    const storyUrl = buildPublicUrl(`/share/story/${story.slug}?v=${cacheBust}`);
+    const storyUrl = buildUniversalLinkUrl(`/share/story/${story.slug}?v=${cacheBust}`);
     const shareData = {
       title: story.title || "Check out this story",
       text: story.excerpt || "",
@@ -893,10 +850,11 @@ export default function StoryDetail() {
           <h3 className="font-semibold text-lg">Comments ({story?.commentsList?.length || 0})</h3>
 
           {/* Comments List - hidden on mobile to show above navbar */}
-          <div className="space-y-7 sm:space-y-6 pb-0 sm:pb-8">
+          <div className="space-y-3 sm:space-y-4 pb-0 sm:pb-8">
             {story?.commentsList && story.commentsList.length > 0 ? (
               getNestedComments().map((comment) => {
                 const isCommentOwner = user && comment.author.id === user.id;
+                const isOwnComment = Boolean(user && comment.author.id === user.id);
                 const isEditing = editingCommentId === comment.id;
                 const commentDepth = comment.depth ?? 0;
 
@@ -906,53 +864,60 @@ export default function StoryDetail() {
                     ref={(element) => {
                       commentRefs.current[comment.id] = element;
                     }}
-                    className={`flex gap-3 ${highlightedCommentId === comment.id ? "rounded-lg bg-primary/10 ring-1 ring-primary/40 px-2 py-2 -mx-2" : ""}`}
+                    className={`flex gap-2 ${highlightedCommentId === comment.id ? "rounded-xl bg-primary/10 ring-1 ring-primary/40 px-2 py-2 -mx-2" : ""}`}
                     style={{ marginLeft: `${Math.min(commentDepth, 4) * 24}px` }}
                   >
-                    <Avatar className="h-9 w-9 flex-shrink-0">
+                    <Avatar className="h-8 w-8 flex-shrink-0 mt-0.5">
                       <AvatarImage src={comment.author.avatar} />
                       <AvatarFallback>{comment.author.name[0]}</AvatarFallback>
                     </Avatar>
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-baseline justify-between gap-2 mb-1">
-                        <div className="flex items-baseline gap-2">
-                          <span className="font-semibold text-sm text-foreground">{comment.author.name}</span>
-                          <span className="text-xs text-muted-foreground/70">
-                            {formatDistanceToNow(comment.createdAt, { addSuffix: true })}
-                          </span>
+                      <div
+                        className={`rounded-2xl border px-3 py-2.5 ${isOwnComment
+                          ? "bg-primary/10 border-primary/20"
+                          : "bg-muted/40 border-border/60"
+                        }`}
+                      >
+                        <div className="flex items-baseline justify-between gap-2 mb-1">
+                          <div className="flex items-baseline gap-2">
+                            <span className="font-semibold text-sm text-foreground">{comment.author.name}</span>
+                            <span className="text-xs text-muted-foreground/70">
+                              {formatDistanceToNow(comment.createdAt, { addSuffix: true })}
+                            </span>
+                          </div>
+                          {isCommentOwner && !isEditing && (
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => handleEditComment(comment.id, comment.body)}
+                                className="p-1 text-muted-foreground hover:text-foreground transition-colors"
+                                title="Edit comment"
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteComment(comment.id)}
+                                disabled={deletingCommentId === comment.id}
+                                className="p-1 text-muted-foreground hover:text-destructive transition-colors disabled:opacity-50"
+                                title="Delete comment"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          )}
                         </div>
-                        {isCommentOwner && !isEditing && (
-                          <div className="flex items-center gap-1">
-                            <button
-                              onClick={() => handleEditComment(comment.id, comment.body)}
-                              className="p-1 text-muted-foreground hover:text-foreground transition-colors"
-                              title="Edit comment"
-                            >
-                              <Pencil className="h-3.5 w-3.5" />
-                            </button>
-                            <button
-                              onClick={() => handleDeleteComment(comment.id)}
-                              disabled={deletingCommentId === comment.id}
-                              className="p-1 text-muted-foreground hover:text-destructive transition-colors disabled:opacity-50"
-                              title="Delete comment"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
+                        <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap break-words">
+                          {renderCommentBodyWithLinks(comment.body)}
+                        </p>
+
+                        {isEditing && (
+                          <div className="mt-1 text-xs text-primary font-medium">
+                            Editing in comment field below
                           </div>
                         )}
                       </div>
-                      <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap break-words">
-                        {renderCommentBodyWithLinks(comment.body)}
-                      </p>
-
-                      {isEditing && (
-                        <div className="mt-1 text-xs text-primary font-medium">
-                          Editing in comment field below
-                        </div>
-                      )}
 
                       {!isEditing && user && (
-                        <div className="mt-2">
+                        <div className="mt-1.5 pl-1">
                           <button
                             onClick={() => handleReplyToComment(comment.id, comment.author.name)}
                             className="text-xs text-muted-foreground hover:text-foreground transition-colors"
@@ -994,11 +959,6 @@ export default function StoryDetail() {
             )}
             <div className="flex gap-2">
               <div className="relative flex-1">
-                {commentText && (
-                  <div className="pointer-events-none absolute inset-0 z-10 px-3 py-2 text-sm leading-5 text-foreground whitespace-nowrap overflow-hidden">
-                    {renderCommentInputPreview(commentText)}
-                  </div>
-                )}
                 <Input
                   ref={desktopCommentInputRef}
                   type="text"
@@ -1011,7 +971,6 @@ export default function StoryDetail() {
                       handleSubmitComment();
                     }
                   }}
-                  className={commentText ? "text-transparent caret-foreground" : ""}
                   disabled={isSubmittingComment}
                 />
               </div>
@@ -1045,13 +1004,13 @@ export default function StoryDetail() {
 
       {/* Mobile Comment CTA - Above navbar */}
       <div 
-        className="sm:hidden fixed left-0 right-0 z-40 bg-background border-t border-black/[0.07] px-3 py-2"
+        className="sm:hidden fixed left-0 right-0 z-40 bg-background/95 backdrop-blur border-t border-black/[0.07] px-3 py-2"
         style={{
           bottom: 'calc(var(--keyboard-height, 0px) + var(--tabbar-height) + env(safe-area-inset-bottom, 0px))',
         }}
       >
         {user ? (
-          <div className="space-y-1">
+          <div className="space-y-1.5">
             {editingCommentId && (
               <div className="text-xs text-muted-foreground flex items-center gap-2">
                 <span>Editing your comment</span>
@@ -1066,13 +1025,8 @@ export default function StoryDetail() {
                 </button>
               </div>
             )}
-            <div className="flex gap-2 items-center">
+            <div className="flex gap-2 items-center rounded-full border border-border/70 bg-muted/35 pl-1.5 pr-1.5 py-1">
               <div className="relative flex-1">
-                {commentText && (
-                  <div className="pointer-events-none absolute inset-0 z-10 px-3 py-[7px] text-xs leading-4 text-foreground whitespace-nowrap overflow-hidden">
-                    {renderCommentInputPreview(commentText)}
-                  </div>
-                )}
                 <Input
                   ref={mobileCommentInputRef}
                   type="text"
@@ -1085,13 +1039,13 @@ export default function StoryDetail() {
                       handleSubmitComment();
                     }
                   }}
-                  className={`h-8 text-xs px-3 ${commentText ? "text-transparent caret-foreground" : ""}`}
+                  className="h-10 text-sm leading-5 px-3 border-0 bg-transparent shadow-none focus-visible:ring-0 focus-visible:border-transparent"
                   disabled={isSubmittingComment}
                 />
               </div>
               <Button
                 size={editingCommentId ? "sm" : "icon"}
-                className={editingCommentId ? "rounded-lg flex-shrink-0 h-8 px-3 text-xs" : "rounded-lg flex-shrink-0 h-8 w-8"}
+                className={editingCommentId ? "rounded-full flex-shrink-0 h-10 px-3 text-sm" : "rounded-full flex-shrink-0 h-10 w-10"}
                 onClick={handleSubmitComment}
                 disabled={!commentText.trim() || isSubmittingComment}
               >
@@ -1099,11 +1053,11 @@ export default function StoryDetail() {
                   editingCommentId ? "Saving..." : "..."
                 ) : editingCommentId ? (
                   <>
-                    <Check className="h-3.5 w-3.5 mr-1" />
+                    <Check className="h-4 w-4 mr-1" />
                     Save
                   </>
                 ) : (
-                  <Send className="h-3.5 w-3.5" />
+                  <Send className="h-4 w-4" />
                 )}
               </Button>
             </div>

@@ -33,6 +33,10 @@ export const buildPublicUrl = (path: string): string => {
   return new URL(normalizedPath, `${getPublicBaseUrl()}/`).toString();
 };
 
+export const buildUniversalLinkUrl = (path: string): string => {
+  return buildPublicUrl(path);
+};
+
 interface TripShareMeta {
   tripId: string;
   slug?: string;

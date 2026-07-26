@@ -31,6 +31,8 @@ interface TripNotesProps {
 export function TripNotes({ tripId }: TripNotesProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [notes, setNotes] = useState<TripNoteDB[]>([]);
+  const [isCreatingNote, setIsCreatingNote] = useState(false);
+  const [creatingNoteId, setCreatingNoteId] = useState<string | null>(null);
   const [pinnedIds, setPinnedIds] = useState<Set<string>>(() => {
     try {
       const stored = localStorage.getItem(`trip-notes-pinned-${tripId}`);
@@ -94,6 +96,7 @@ export function TripNotes({ tripId }: TripNotesProps) {
   };
 
   const handleTogglePin = (note: TripNoteDB) => {
+    if (note.id === creatingNoteId) return;
     markNoteAction();
     setPinnedIds(prev => {
       const next = new Set(prev);
@@ -110,17 +113,40 @@ export function TripNotes({ tripId }: TripNotesProps) {
   };
 
   const handleNewNote = async () => {
+    if (isCreatingNote) return;
+
+    const tempId = `temp-note-${Date.now()}`;
+    const optimisticNote: TripNoteDB = {
+      id: tempId,
+      trip_id: tripId,
+      author_id: "",
+      title: "Untitled",
+      blocks: [],
+      updated_at: new Date().toISOString(),
+    };
+
+    setIsCreatingNote(true);
+    setCreatingNoteId(tempId);
+    setNotes((prev) => [optimisticNote, ...prev]);
+
     try {
       const newNote = await createTripNote(tripId, "Untitled", []);
+
+      setNotes((prev) => prev.map((note) => (note.id === tempId ? newNote : note)));
       setSelectedNote(newNote);
       setEditorOpen(true);
     } catch (error) {
+      setNotes((prev) => prev.filter((note) => note.id !== tempId));
       console.error("Failed to create note:", error);
       toast({ title: "Failed to create note" });
+    } finally {
+      setIsCreatingNote(false);
+      setCreatingNoteId(null);
     }
   };
 
   const handleOpenNote = (note: TripNoteDB) => {
+    if (note.id === creatingNoteId) return;
     if (noteActionJustHappened.current) return;
     setSelectedNote(note);
     setEditorOpen(true);
@@ -160,6 +186,7 @@ export function TripNotes({ tripId }: TripNotesProps) {
   };
 
   const handleDeleteFromCard = (note: TripNoteDB) => {
+    if (note.id === creatingNoteId) return;
     markNoteAction();
     setNoteToDelete(note);
     // Let DropdownMenu close first to avoid modal transition jank.
@@ -240,10 +267,10 @@ export function TripNotes({ tripId }: TripNotesProps) {
               disabled={isLoading}
             />
           </div>
-          <Button onClick={handleNewNote} disabled={isLoading} className="rounded-xl text-sm sm:text-base shrink-0">
+          <Button onClick={handleNewNote} disabled={isLoading || isCreatingNote} className="rounded-xl text-sm sm:text-base shrink-0">
             <Plus className="h-4 w-4 mr-1 sm:mr-2" />
-            <span className="hidden sm:inline">New Note</span>
-            <span className="sm:hidden">New</span>
+            <span className="hidden sm:inline">{isCreatingNote ? "Creating..." : "New Note"}</span>
+            <span className="sm:hidden">{isCreatingNote ? "Creating" : "New"}</span>
           </Button>
         </div>
 
@@ -266,7 +293,7 @@ export function TripNotes({ tripId }: TripNotesProps) {
             </p>
             <Button onClick={handleNewNote} variant="outline" className="rounded-xl">
               <Plus className="h-4 w-4 mr-2" />
-              Create Note
+              {isCreatingNote ? "Creating..." : "Create Note"}
             </Button>
           </div>
         )}
@@ -289,6 +316,7 @@ export function TripNotes({ tripId }: TripNotesProps) {
                         key={note.id}
                         note={note}
                         isPinned={true}
+                        isPending={note.id === creatingNoteId}
                         onClick={() => handleOpenNote(note)}
                         onDelete={() => handleDeleteFromCard(note)}
                         onTogglePin={() => handleTogglePin(note)}
@@ -312,6 +340,7 @@ export function TripNotes({ tripId }: TripNotesProps) {
                         key={note.id}
                         note={note}
                         isPinned={false}
+                        isPending={note.id === creatingNoteId}
                         onClick={() => handleOpenNote(note)}
                         onDelete={() => handleDeleteFromCard(note)}
                         onTogglePin={() => handleTogglePin(note)}
@@ -400,6 +429,7 @@ export function TripNotes({ tripId }: TripNotesProps) {
 interface NoteCardProps {
   note: TripNoteDB;
   isPinned: boolean;
+  isPending: boolean;
   onClick: () => void;
   onDelete: () => void;
   onTogglePin: () => void;
@@ -407,7 +437,7 @@ interface NoteCardProps {
   onLinkClick: (url: string) => void;
 }
 
-function NoteCard({ note, isPinned, onClick, onDelete, onTogglePin, formatDate, onLinkClick }: NoteCardProps) {
+function NoteCard({ note, isPinned, isPending, onClick, onDelete, onTogglePin, formatDate, onLinkClick }: NoteCardProps) {
   // Get content preview from blocks
   const contentPreview = note.blocks
     .map((b) => b.content)
@@ -427,9 +457,11 @@ function NoteCard({ note, isPinned, onClick, onDelete, onTogglePin, formatDate, 
     <Card
       className={cn(
         "p-3 sm:p-4 border-border/50 hover:border-primary/30 transition-all cursor-pointer active:scale-[0.99] hover:shadow-sm",
-        isPinned && "border-primary/20 bg-primary/5"
+        isPinned && "border-primary/20 bg-primary/5",
+          isPending && "opacity-80"
       )}
-      onClick={onClick}
+      onClick={isPending ? undefined : onClick}
+        aria-busy={isPending}
     >
       <div className="flex items-start justify-between gap-2 sm:gap-3">
         <div className="flex-1 min-w-0">
@@ -438,8 +470,9 @@ function NoteCard({ note, isPinned, onClick, onDelete, onTogglePin, formatDate, 
             <h4 className="font-semibold text-foreground truncate text-sm sm:text-base">
               {note.title || "Untitled"}
             </h4>
+            {isPending && <span className="text-[10px] sm:text-xs text-muted-foreground">Creating...</span>}
           </div>
-          {contentPreview && (
+            {contentPreview && (
             <p className="text-xs sm:text-sm text-muted-foreground line-clamp-2 mt-0.5 sm:mt-1">
               {previewParts.map((part, index) => {
                 const isLink = linkPattern.test(part);
@@ -458,11 +491,18 @@ function NoteCard({ note, isPinned, onClick, onDelete, onTogglePin, formatDate, 
               })}
             </p>
           )}
+            {isPending && !contentPreview && (
+              <div className="mt-1.5 space-y-1.5 animate-pulse">
+                <div className="h-2 w-5/6 rounded bg-muted/70" />
+                <div className="h-2 w-2/3 rounded bg-muted/60" />
+              </div>
+            )}
           <p className="text-[10px] sm:text-xs text-muted-foreground/70 mt-1.5 sm:mt-2">
             {formatDate(note.updated_at)}
           </p>
         </div>
-        <DropdownMenu>
+        {!isPending && (
+          <DropdownMenu>
           <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
             <Button variant="ghost" size="icon" className="h-7 w-7 sm:h-8 sm:w-8 shrink-0">
               <MoreVertical className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
@@ -497,7 +537,8 @@ function NoteCard({ note, isPinned, onClick, onDelete, onTogglePin, formatDate, 
               <Trash2 className="h-4 w-4 mr-2" />Delete
             </DropdownMenuItem>
           </DropdownMenuContent>
-        </DropdownMenu>
+          </DropdownMenu>
+        )}
       </div>
     </Card>
   );

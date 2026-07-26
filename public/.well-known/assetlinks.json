@@ -1,0 +1,15 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.ketravelan.app",
+      "sha256_cert_fingerprints": [
+        "D4:5C:D6:66:2A:0D:4A:BA:4F:32:CB:76:E1:46:E6:BD:82:A4:6D:AA:3D:8D:79:DF:19:73:FC:13:79:F3:11:37",
+        "FB:8B:5C:90:86:03:74:26:D6:EF:57:55:41:81:D8:2E:F9:83:AC:2E:AE:A2:7A:62:72:31:31:E3:61:71:A7:1D"
+      ]
+    }
+  }
+]

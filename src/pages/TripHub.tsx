@@ -241,6 +241,7 @@ export default function TripHub() {
             onChange={setActiveTab}
           />
         </div>
+        {activeTab === "chat" && conversation && chatPageContent.tripPinnedContent}
       </div>
     </header>
   );
@@ -322,7 +323,7 @@ export default function TripHub() {
               {activeTab === "chat" && (
                 conversation ? (
                   <div className="relative w-full">
-                    <div className="pt-4 sm:pt-6 pb-2 space-y-4">
+                    <div className="pt-0 pb-2 space-y-2">
                       {chatPageContent.messagesContent}
                       <div ref={chatPageContent.messagesEndRef} />
                     </div>

@@ -1,8 +1,7 @@
 /* eslint-disable no-empty */
 import { useEffect, useState, useRef } from "react";
-import { Send, Paperclip, Loader2 } from "lucide-react";
+import { Send, Paperclip, Loader2, Lock, X, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { AttachmentSheet } from "./AttachmentSheet";
 import { getMentionSuggestions } from "@/lib/chatMentions";
 import { Capacitor } from "@capacitor/core";
@@ -29,9 +28,24 @@ interface ChatComposerProps {
   onTypingChange?: (typing: boolean) => void;
   tripMembers?: TripMember[];
   disabled?: boolean;
+  isMessagingRestricted?: boolean;
+  replyTo?: {
+    senderName: string;
+    content: string;
+  };
+  onCancelReply?: () => void;
+  editState?: {
+    active: boolean;
+    value: string;
+    onChange: (value: string) => void;
+    onCancel: () => void;
+  };
 }
 
-export function ChatComposer({ onSend, placeholder = "Type a message...", onTypingChange, tripMembers = [], disabled = false }: ChatComposerProps) {
+export function ChatComposer({ onSend, placeholder = "Type a message...", onTypingChange, tripMembers = [], disabled = false, isMessagingRestricted = false, replyTo, onCancelReply, editState }: ChatComposerProps) {
+  const MIN_TEXTAREA_HEIGHT = 44;
+  const MAX_TEXTAREA_HEIGHT = 140;
+  const isEditing = Boolean(editState?.active);
   const [message, setMessage] = useState("");
   const [attachmentOpen, setAttachmentOpen] = useState(false);
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
@@ -39,10 +53,52 @@ export function ChatComposer({ onSend, placeholder = "Type a message...", onTypi
   const [mentionSuggestions, setMentionSuggestions] = useState<TripMember[]>([]);
   const [showMentionDropdown, setShowMentionDropdown] = useState(false);
   const [cursorPosition, setCursorPosition] = useState(0);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  const resizeTextarea = (target?: HTMLTextAreaElement | null) => {
+    const textarea = target ?? inputRef.current;
+    if (!textarea) return;
+
+    // Use auto to measure natural content height, then clamp.
+    textarea.style.height = "auto";
+
+    const rawValue = textarea.value;
+    if (rawValue.trim().length === 0) {
+      textarea.style.height = `${MIN_TEXTAREA_HEIGHT}px`;
+      textarea.style.overflowY = "hidden";
+      return;
+    }
+
+    const nextHeight = Math.min(textarea.scrollHeight, MAX_TEXTAREA_HEIGHT);
+    textarea.style.height = `${Math.max(nextHeight, MIN_TEXTAREA_HEIGHT)}px`;
+    textarea.style.overflowY = textarea.scrollHeight > MAX_TEXTAREA_HEIGHT ? "auto" : "hidden";
+  };
+
+  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key !== "Backspace" && e.key !== "Delete") return;
+
+    // Recalculate after the key mutates textarea value.
+    requestAnimationFrame(() => {
+      resizeTextarea(e.currentTarget);
+    });
+  };
+
+  const currentMessage = isEditing ? (editState?.value || "") : message;
+
+  useEffect(() => {
+    resizeTextarea();
+  }, [currentMessage]);
 
   const handleSend = async () => {
     if (disabled) return;
+
+    if (isEditing && editState) {
+      const trimmed = editState.value.trim();
+      if (!trimmed) return;
+      onSend(trimmed, [], undefined);
+      return;
+    }
+
     if (!message.trim() && pendingAttachments.length === 0) return;
     setIsProcessing(true);
     // Upload files now (on send)
@@ -85,14 +141,22 @@ export function ChatComposer({ onSend, placeholder = "Type a message...", onTypi
     });
     setMessage("");
     setPendingAttachments([]);
+    if (inputRef.current) {
+      inputRef.current.style.height = `${MIN_TEXTAREA_HEIGHT}px`;
+      inputRef.current.style.overflowY = "hidden";
+    }
     // Keep keyboard open by re-focusing input after send
-    setTimeout(() => inputRef.current?.focus(), 0);
+    setTimeout(() => {
+      inputRef.current?.focus();
+      resizeTextarea();
+    }, 0);
   };
 
   const imageInputId = "chat-image-input";
   const fileInputId = "chat-file-input";
 
   const handleAttachment = async (type: "image" | "document" | "location") => {
+    if (isEditing) return;
     if (type === "image") {
       if (Capacitor.isNativePlatform()) {
         // Use native Capacitor Camera on iOS/Android to avoid crash
@@ -159,15 +223,19 @@ export function ChatComposer({ onSend, placeholder = "Type a message...", onTypi
   };
 
   // Typing detection with mention support
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const newMessage = e.target.value;
     const newCursorPos = e.currentTarget.selectionStart || 0;
 
-    setMessage(newMessage);
+    if (isEditing && editState) {
+      editState.onChange(newMessage);
+    } else {
+      setMessage(newMessage);
+    }
     setCursorPosition(newCursorPos);
 
     // Check for mention suggestions
-    const suggestions = getMentionSuggestions(newMessage, tripMembers, newCursorPos);
+    const suggestions = isEditing ? null : getMentionSuggestions(newMessage, tripMembers, newCursorPos);
     if (suggestions && suggestions.members.length > 0) {
       setMentionSuggestions(suggestions.members);
       setShowMentionDropdown(true);
@@ -177,23 +245,30 @@ export function ChatComposer({ onSend, placeholder = "Type a message...", onTypi
     }
 
     if (typeof onTypingChange === "function") {
-      onTypingChange(newMessage.length > 0);
+      onTypingChange(newMessage.trim().length > 0);
     }
+
+    resizeTextarea(e.currentTarget);
   };
 
   const handleMentionSelect = (member: TripMember) => {
     // Find the @ symbol position
-    const atIndex = message.lastIndexOf('@');
+    const activeMessage = isEditing ? (editState?.value || "") : message;
+    const atIndex = activeMessage.lastIndexOf('@');
     if (atIndex === -1) return;
 
     // Get text before @
-    const beforeMention = message.substring(0, atIndex);
+    const beforeMention = activeMessage.substring(0, atIndex);
     // Get text after cursor (if any)
-    const afterCursor = message.substring(cursorPosition);
+    const afterCursor = activeMessage.substring(cursorPosition);
 
     // Create new message with mention
     const newMessage = `${beforeMention}@${member.username} ${afterCursor}`;
-    setMessage(newMessage);
+    if (isEditing && editState) {
+      editState.onChange(newMessage);
+    } else {
+      setMessage(newMessage);
+    }
     setShowMentionDropdown(false);
     setMentionSuggestions([]);
 
@@ -203,6 +278,7 @@ export function ChatComposer({ onSend, placeholder = "Type a message...", onTypi
       if (inputRef.current) {
         inputRef.current.focus();
         inputRef.current.setSelectionRange(newCursorPos, newCursorPos);
+        resizeTextarea(inputRef.current);
       }
     }, 0);
   };
@@ -221,6 +297,17 @@ export function ChatComposer({ onSend, placeholder = "Type a message...", onTypi
   return (
     <>
       <div className="w-full">
+        {/* Messaging disabled warning */}
+        {isMessagingRestricted && (
+          <div className="px-3 py-2 bg-destructive/10 border-t border-destructive/30 flex items-start gap-2">
+            <Lock className="h-4 w-4 text-destructive mt-0.5 flex-shrink-0" />
+            <div className="text-xs text-destructive">
+              <p className="font-semibold">Direct messaging disabled</p>
+              <p className="text-xs opacity-90">An adult needs to enable messaging in Settings &gt; Family Safety</p>
+            </div>
+          </div>
+        )}
+
         {/* Slim input container - WhatsApp style */}
         <div className="px-3 py-1.5">
           <div>
@@ -250,7 +337,49 @@ export function ChatComposer({ onSend, placeholder = "Type a message...", onTypi
             )}
 
             {/* Attachment previews */}
-            {pendingAttachments.length > 0 && (
+            {isEditing && editState && (
+              <div className="mb-1.5 rounded-xl border border-border/60 bg-secondary/40 px-3 py-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-semibold text-muted-foreground">Editing message</p>
+                    <p className="line-clamp-1 text-xs text-foreground/90">Changes will replace your previous message</p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 shrink-0"
+                    onClick={editState.onCancel}
+                    disabled={disabled || isMessagingRestricted}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {!isEditing && replyTo && (
+              <div className="mb-1.5 rounded-xl border border-border/60 bg-secondary/40 px-3 py-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-semibold text-muted-foreground">Replying to {replyTo.senderName}</p>
+                    <p className="line-clamp-1 text-xs text-foreground/90">{replyTo.content}</p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 shrink-0"
+                    onClick={onCancelReply}
+                    disabled={disabled || isMessagingRestricted}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {!isEditing && pendingAttachments.length > 0 && (
               <div className="mb-1.5 flex flex-wrap gap-1.5">
                 {pendingAttachments.map((att, i) => (
                   <div key={i} className="flex items-center gap-1.5 rounded-lg border bg-background px-1.5 py-1 text-xs">
@@ -290,40 +419,44 @@ export function ChatComposer({ onSend, placeholder = "Type a message...", onTypi
                 ))}
               </div>
             )}
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-end gap-1.5">
               <Button 
                 variant="ghost" 
                 size="icon" 
-                className="shrink-0 h-8 w-8 hover:bg-secondary/80"
+                className="shrink-0 h-9 w-9 hover:bg-secondary/80"
                 onClick={() => setAttachmentOpen(true)}
-                disabled={disabled}
+                disabled={disabled || isMessagingRestricted || isEditing}
               >
                 <Paperclip className="h-4 w-4 text-muted-foreground" />
               </Button>
-              <Input
+              <textarea
                 ref={inputRef}
-                placeholder={placeholder}
-                value={message}
+                placeholder={isEditing ? "Edit your message..." : placeholder}
+                value={currentMessage}
                 onChange={handleInputChange}
+                onKeyDown={handleInputKeyDown}
+                onInput={(e) => resizeTextarea(e.currentTarget)}
                 onBlur={handleInputBlur}
-                onKeyDown={(e) => e.key === "Enter" && handleSend()}
-                className="flex-1 rounded-2xl bg-white text-black border border-[#d9d9d9] h-9 text-sm px-3 placeholder:text-gray-400 shadow-[0_1px_3px_rgba(0,0,0,0.14)] focus-visible:ring-2 focus-visible:ring-black/10 focus-visible:ring-offset-0"
+                rows={1}
+                className="flex-1 rounded-2xl bg-white text-black border border-[#d9d9d9] min-h-[44px] max-h-[140px] text-sm px-3 py-[11px] leading-6 resize-none placeholder:text-gray-400 shadow-[0_1px_3px_rgba(0,0,0,0.14)] focus-visible:ring-2 focus-visible:ring-black/10 focus-visible:ring-offset-0"
                 style={{
                   fontSize: '16px', // Prevent iOS zoom on focus
+                  height: `${MIN_TEXTAREA_HEIGHT}px`,
+                  overflowY: 'hidden',
                 }}
-                disabled={disabled}
+                disabled={disabled || isMessagingRestricted}
               />
               <Button
                 size="icon"
-                className="shrink-0 rounded-full h-8 w-8 hover:opacity-80"
+                className="shrink-0 rounded-full h-9 w-9 hover:opacity-80"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={handleSend}
-                disabled={disabled || (!message.trim() && pendingAttachments.length === 0) || isProcessing}
+                disabled={disabled || isMessagingRestricted || (isEditing ? !currentMessage.trim() : (!message.trim() && pendingAttachments.length === 0)) || isProcessing}
               >
                 {isProcessing ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 ) : (
-                  <Send className="h-3.5 w-3.5" />
+                  isEditing ? <Check className="h-3.5 w-3.5" /> : <Send className="h-3.5 w-3.5" />
                 )}
               </Button>
             </div>

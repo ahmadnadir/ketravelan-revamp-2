@@ -69,7 +69,11 @@ function escapeHtml(v: string) {
     .replaceAll("'", "&#39;");
 }
 
-function isTripNotificationEnabled(tripSettings: any, key: "new_members_join" | "expense_updates" | "chat_activity", fallback: boolean) {
+type TripSettings = {
+  notifications?: Partial<Record<"new_members_join" | "expense_updates" | "chat_activity", boolean>>;
+} | null | undefined;
+
+function isTripNotificationEnabled(tripSettings: TripSettings, key: "new_members_join" | "expense_updates" | "chat_activity", fallback: boolean) {
   const rawValue = tripSettings?.notifications?.[key];
   return typeof rawValue === "boolean" ? rawValue : fallback;
 }
@@ -273,19 +277,36 @@ serve(async (req: Request) => {
 
     await sendResendRawEmail({ to: creatorEmail, subject, html, text });
 
-    // Fetch all trip members to send push notifications
+    // Notify only trip owner/admin organizers (never the newly joined member).
     const { data: tripMembers, error: membersErr } = await admin
       .from("trip_members")
-      .select("user_id")
-      .eq("trip_id", trip.id);
+      .select("user_id,is_admin,role,left_at")
+      .eq("trip_id", trip.id)
+      .is("left_at", null);
 
     if (membersErr) throw membersErr;
 
-    const memberUserIds = (tripMembers || []).map(m => m.user_id);
+    const recipientUserIds = new Set<string>();
 
-    if (memberUserIds.length > 0) {
+    if (trip.creator_id && trip.creator_id !== body.participantId) {
+      recipientUserIds.add(trip.creator_id);
+    }
+
+    for (const member of tripMembers || []) {
+      if (!member?.user_id || member.user_id === body.participantId) continue;
+
+      const isOrganizer = member.role === "organizer";
+      const isAdmin = member.is_admin === true;
+      const isOwner = member.user_id === trip.creator_id;
+
+      if (isOrganizer || isAdmin || isOwner) {
+        recipientUserIds.add(member.user_id);
+      }
+    }
+
+    if (recipientUserIds.size > 0) {
       await sendSystemPush({
-        userIds: memberUserIds,
+        userIds: Array.from(recipientUserIds),
         type: "member_joined",
         title: "Someone Joined Your Trip",
         body: `New traveler joined 🎉 ${participantName} joined ${trip.title}`,

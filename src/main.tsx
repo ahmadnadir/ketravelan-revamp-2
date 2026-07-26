@@ -8,6 +8,40 @@ import "./index.css";
 const isBrowser = typeof window !== "undefined";
 const isDev = import.meta.env.DEV;
 
+const CHUNK_RELOAD_GUARD_KEY = "ketravelan:chunk-reload-attempted";
+
+function isDynamicImportChunkError(reason: unknown): boolean {
+  const message =
+    reason instanceof Error
+      ? reason.message
+      : typeof reason === "string"
+        ? reason
+        : "";
+
+  const lowered = message.toLowerCase();
+  return (
+    lowered.includes("failed to fetch dynamically imported module") ||
+    lowered.includes("importing a module script failed") ||
+    lowered.includes("chunkloaderror")
+  );
+}
+
+function forceSingleChunkRecoveryReload() {
+  if (!isBrowser) {
+    return;
+  }
+
+  if (sessionStorage.getItem(CHUNK_RELOAD_GUARD_KEY) === "1") {
+    return;
+  }
+
+  sessionStorage.setItem(CHUNK_RELOAD_GUARD_KEY, "1");
+
+  const url = new URL(window.location.href);
+  url.searchParams.set("v", Date.now().toString());
+  window.location.replace(url.toString());
+}
+
 if (isBrowser && isDev && "serviceWorker" in navigator) {
   // Keep localhost free from stale cached bundles during rapid UI iteration.
   void navigator.serviceWorker.getRegistrations().then((registrations) => {
@@ -37,6 +71,20 @@ if (isBrowser && import.meta.env.PROD) {
       refreshTriggered = true;
       void updateSW(true);
     },
+  });
+
+  // Recover once from stale chunk references after deployments.
+  window.addEventListener("error", (event) => {
+    if (isDynamicImportChunkError(event.error ?? event.message)) {
+      forceSingleChunkRecoveryReload();
+    }
+  });
+
+  window.addEventListener("unhandledrejection", (event) => {
+    if (isDynamicImportChunkError(event.reason)) {
+      event.preventDefault();
+      forceSingleChunkRecoveryReload();
+    }
   });
 }
 

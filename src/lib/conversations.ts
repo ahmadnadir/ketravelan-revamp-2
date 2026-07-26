@@ -2,6 +2,7 @@
 import { supabase } from './supabase';
 import { isMessagingBlockedBetweenUsers } from '@/lib/blockUser';
 import { getBlockedRelationshipUserIds } from '@/lib/moderation';
+import { ensureCurrentUserCanStartDirectChat, enforceCurrentUserSocialWritePolicy } from '@/lib/familiesSafety';
 
 // Module-level profile cache shared across all fetches and subscriptions.
 // Populated eagerly from conversations list so chat never needs a fresh profile fetch.
@@ -38,7 +39,7 @@ function isVisibleConversation(participant: any) {
 }
 
 export type ChatAttachment = {
-  type: 'image' | 'document' | 'location';
+  type: 'image' | 'document' | 'location' | 'reply';
   url?: string; // for image/document
   name?: string;
   mime?: string;
@@ -46,9 +47,28 @@ export type ChatAttachment = {
   lat?: number; // for location
   lng?: number;
   address?: string;
+  messageId?: string;
+  senderName?: string;
+  preview?: string;
 };
 
 const MESSAGE_ACTION_WINDOW_MS = 60 * 1000;
+
+const PINNED_MESSAGE_SELECT = `
+  pinned_message:messages!conversations_pinned_message_id_fkey(
+    id,
+    conversation_id,
+    sender_id,
+    content,
+    attachments,
+    is_edited,
+    edited_at,
+    created_at,
+    client_id,
+    type,
+    sender:profiles!messages_sender_id_fkey(id, username, full_name, avatar_url)
+  )
+`;
 
 function isWithinMessageActionWindow(createdAt: string): boolean {
   const created = new Date(createdAt).getTime();
@@ -60,12 +80,85 @@ function isWithinMessageActionWindow(createdAt: string): boolean {
 export async function fetchConversationById(conversationId: string) {
   const { data, error } = await supabase
     .from('conversations')
-    .select('*')
+    .select(`*, ${PINNED_MESSAGE_SELECT}`)
     .eq('id', conversationId)
     .eq('is_deleted', false)
     .maybeSingle();
   if (error) throw error;
-  return data;
+  if (!data) return null;
+
+  const pinnedMessage = Array.isArray((data as any).pinned_message)
+    ? (data as any).pinned_message[0]
+    : (data as any).pinned_message;
+  const sender = Array.isArray(pinnedMessage?.sender) ? pinnedMessage.sender[0] : pinnedMessage?.sender;
+  if (sender?.id) profileCache.set(sender.id, sender);
+
+  return {
+    ...data,
+    pinned_message: pinnedMessage
+      ? {
+          ...pinnedMessage,
+          sender,
+        }
+      : null,
+  };
+}
+
+export async function setConversationPinnedMessage(conversationId: string, pinnedMessageId: string | null) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not authenticated');
+
+  const { error: rpcError } = await supabase.rpc('set_conversation_pinned_message', {
+    p_conversation_id: conversationId,
+    p_pinned_message_id: pinnedMessageId,
+  });
+
+  if (rpcError) {
+    const lower = `${rpcError.message ?? ''} ${rpcError.details ?? ''} ${rpcError.hint ?? ''}`.toLowerCase();
+    const rpcMissing = rpcError.code === 'PGRST202' || lower.includes('could not find the function');
+
+    if (!rpcMissing) {
+      throw rpcError;
+    }
+
+    const { error } = await supabase
+      .from('conversations')
+      .update({ pinned_message_id: pinnedMessageId })
+      .eq('id', conversationId);
+
+    if (error) throw error;
+  }
+
+  const { data, error: fetchError } = await supabase
+    .from('conversations')
+    .select(`id, pinned_message_id, ${PINNED_MESSAGE_SELECT}`)
+    .eq('id', conversationId)
+    .maybeSingle();
+
+  if (fetchError) throw fetchError;
+  if (!data) {
+    throw new Error('Conversation pin update could not be verified');
+  }
+
+  if ((data.pinned_message_id ?? null) !== pinnedMessageId) {
+    throw new Error('Conversation pin update was not persisted');
+  }
+
+  const pinnedMessage = Array.isArray((data as any).pinned_message)
+    ? (data as any).pinned_message[0]
+    : (data as any).pinned_message;
+  const sender = Array.isArray(pinnedMessage?.sender) ? pinnedMessage.sender[0] : pinnedMessage?.sender;
+  if (sender?.id) profileCache.set(sender.id, sender);
+
+  return {
+    ...data,
+    pinned_message: pinnedMessage
+      ? {
+          ...pinnedMessage,
+          sender,
+        }
+      : null,
+  };
 }
 
 // Fetch conversation with participants and trip details for TripHub
@@ -258,9 +351,46 @@ export async function fetchConversationMessagesAfter(conversationId: string, aft
   return result;
 }
 
+export async function fetchMessageById(messageId: string) {
+  const { data: { user } } = await supabase.auth.getUser();
+  const { data, error } = await supabase
+    .from('messages')
+    .select(`
+      id,
+      conversation_id,
+      sender_id,
+      content,
+      attachments,
+      is_edited,
+      edited_at,
+      created_at,
+      client_id,
+      type,
+      sender:profiles!messages_sender_id_fkey(id, username, full_name, avatar_url)
+    `)
+    .eq('id', messageId)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) return null;
+
+  const blockedUserIds = await getBlockedIdsCached(Boolean(user));
+  if (data.sender_id && blockedUserIds.has(data.sender_id)) return null;
+
+  const sender = Array.isArray((data as any).sender) ? (data as any).sender[0] : (data as any).sender;
+  if (sender?.id) profileCache.set(sender.id, sender);
+
+  return {
+    ...data,
+    sender,
+  };
+}
+
 export async function sendMessage(conversationId: string, content: string, clientId?: string, attachments?: ChatAttachment[]) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
+
+  await enforceCurrentUserSocialWritePolicy(content);
 
   // Enforce block behavior for direct chats: if either side blocked, stop sending.
   const { data: convo, error: convoErr } = await supabase
@@ -274,6 +404,7 @@ export async function sendMessage(conversationId: string, content: string, clien
   if (convo?.conversation_type === 'direct') {
     const otherUserId = convo.user1_id === user.id ? convo.user2_id : convo.user1_id;
     if (otherUserId) {
+      await ensureCurrentUserCanStartDirectChat(otherUserId);
       const blocked = await isMessagingBlockedBetweenUsers(user.id, otherUserId);
       if (blocked) {
         throw new Error('You cannot send messages to this user.');
@@ -500,6 +631,8 @@ export async function fetchDirectConversation(otherUserId: string) {
 export async function createDirectConversation(otherUserId: string) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
+
+  await ensureCurrentUserCanStartDirectChat(otherUserId);
 
   // Always order user IDs to match DB constraint
   const [user1_id, user2_id] = [user.id, otherUserId].sort();

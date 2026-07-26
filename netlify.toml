@@ -11,3 +11,18 @@ status = 200
 [build]
 command = "npm run build"
 publish = "dist"
+
+[[headers]]
+for = "/.well-known/apple-app-site-association"
+[headers.values]
+Content-Type = "application/json"
+
+[[headers]]
+for = "/apple-app-site-association"
+[headers.values]
+Content-Type = "application/json"
+
+[[headers]]
+for = "/.well-known/assetlinks.json"
+[headers.values]
+Content-Type = "application/json"

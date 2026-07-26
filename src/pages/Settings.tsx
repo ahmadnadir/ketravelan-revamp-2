@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useCallback, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   ChevronLeft,
   Bell,
@@ -23,6 +23,7 @@ import { Card } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -42,6 +43,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import ParentalPinOnboarding from "@/components/ParentalPinOnboarding";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchUserPreferences, updateUserPreference } from "@/lib/userPreferences";
@@ -49,6 +51,13 @@ import { useEffect } from "react";
 import { syncPushNotifications } from "@/lib/pushNotifications";
 import { supabase } from "@/lib/supabase";
 import { Capacitor } from "@capacitor/core";
+import {
+  getEffectiveSocialFeaturesLevel,
+  getStoredSocialFeaturesLevel,
+  isMinorProfile,
+  setStoredSocialFeaturesLevel,
+  type SocialFeaturesLevel,
+} from "@/lib/familiesSafety";
 
 
 interface SettingItemProps {
@@ -84,7 +93,8 @@ const SettingItem = ({ icon, label, description, onClick, trailing, destructive 
 
 export default function Settings() {
   const navigate = useNavigate();
-  const { signOut, deleteAccount, user, profile, linkedProviders, linkGoogleIdentity, linkAppleIdentity, identityLinkingAvailable } = useAuth();
+  const location = useLocation();
+  const { signOut, deleteAccount, user, profile, linkedProviders, linkGoogleIdentity, linkAppleIdentity, identityLinkingAvailable, refreshProfile } = useAuth();
   const [showLogoutDialog, setShowLogoutDialog] = useState(false);
   const [showPasswordDialog, setShowPasswordDialog] = useState(false);
   const [showDeleteAccountDialog, setShowDeleteAccountDialog] = useState(false);
@@ -92,10 +102,62 @@ export default function Settings() {
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
   const [showLinkConflictDialog, setShowLinkConflictDialog] = useState(false);
   const [linkConflictProvider, setLinkConflictProvider] = useState<"Google" | "Apple">("Apple");
+  const [socialFeaturesLevel, setSocialFeaturesLevel] = useState<SocialFeaturesLevel>(() => getStoredSocialFeaturesLevel() || "full");
+  const [showSocialPinDialog, setShowSocialPinDialog] = useState(false);
+  const [socialPinInput, setSocialPinInput] = useState("");
+  const [pendingSocialFeaturesLevel, setPendingSocialFeaturesLevel] = useState<SocialFeaturesLevel | null>(null);
+  const [socialPinMode, setSocialPinMode] = useState<"create" | "verify">("verify");
+  const [isSavingSocialLevel, setIsSavingSocialLevel] = useState(false);
+  const [isResettingSocialPin, setIsResettingSocialPin] = useState(false);
+  const [showChangeSocialPinDialog, setShowChangeSocialPinDialog] = useState(false);
+  const [currentSocialPinInput, setCurrentSocialPinInput] = useState("");
+  const [newSocialPinInput, setNewSocialPinInput] = useState("");
+  const [socialPinChangeStep, setSocialPinChangeStep] = useState<"current" | "new">("current");
+  const [pendingSocialPinHash, setPendingSocialPinHash] = useState<string | null>(null);
+  const [isChangingSocialPin, setIsChangingSocialPin] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [isLinkingGoogle, setIsLinkingGoogle] = useState(false);
   const [isLinkingApple, setIsLinkingApple] = useState(false);
+
+  const isCreatingPinForSocialSetting = showSocialPinDialog && socialPinMode === "create";
+  const isVerifyingPinForSocialSetting = showSocialPinDialog && socialPinMode === "verify";
+  const isVerifyingPinForChangePin = showChangeSocialPinDialog && socialPinChangeStep === "current";
+  const isCreatingPinForChangePin = showChangeSocialPinDialog && socialPinChangeStep === "new" && !pendingSocialPinHash;
+  const showParentalPinPage = isCreatingPinForSocialSetting || isVerifyingPinForSocialSetting || isVerifyingPinForChangePin || isCreatingPinForChangePin;
+
+  const handleParentalPinOnboardingComplete = () => {
+    if (isCreatingPinForSocialSetting || isVerifyingPinForSocialSetting) {
+      setShowSocialPinDialog(false);
+      if (pendingSocialFeaturesLevel) {
+        setSocialFeaturesLevel(pendingSocialFeaturesLevel);
+        setStoredSocialFeaturesLevel(pendingSocialFeaturesLevel);
+        setPendingSocialFeaturesLevel(null);
+        toast.success("Family safety setting updated");
+      }
+      return;
+    }
+
+    if (isCreatingPinForChangePin) {
+      setShowChangeSocialPinDialog(false);
+      setSocialPinChangeStep("current");
+      setPendingSocialPinHash(null);
+      return;
+    }
+  };
+
+  const handleParentalPinOnboardingCancel = () => {
+    if (isCreatingPinForSocialSetting || isVerifyingPinForSocialSetting) {
+      setShowSocialPinDialog(false);
+      setPendingSocialFeaturesLevel(null);
+    }
+
+    if (isVerifyingPinForChangePin || isCreatingPinForChangePin) {
+      setShowChangeSocialPinDialog(false);
+      setSocialPinChangeStep("current");
+      setPendingSocialPinHash(null);
+    }
+  };
   
   // Notification settings state
   const [pushNotifications, setPushNotifications] = useState(true);
@@ -117,6 +179,36 @@ export default function Settings() {
   const hasGoogleProvider = linkedProviders.includes("google");
   const hasAppleProvider = linkedProviders.includes("apple");
   const identityLinkingDisabled = !identityLinkingAvailable;
+  const isMinorAccount = isMinorProfile(profile);
+  const socialAccessBlockedState = location.state as { socialAccessBlocked?: boolean; blockedPath?: string } | null;
+  const showSocialAccessBlockedNotice = Boolean(socialAccessBlockedState?.socialAccessBlocked);
+  const blockedPath = socialAccessBlockedState?.blockedPath || "";
+  const blockedFeatureLabel = blockedPath.startsWith("/chat")
+    ? "chat"
+    : blockedPath.startsWith("/community")
+      ? "community"
+      : blockedPath.startsWith("/create-story")
+        ? "story creation"
+        : "social features";
+  const pendingSocialLevelLabel = pendingSocialFeaturesLevel === "disabled"
+    ? "Disabled"
+    : pendingSocialFeaturesLevel === "full"
+      ? "Full Access"
+      : null;
+
+  const hashSocialPin = (pin: string) => {
+    let hash = 0;
+    for (let i = 0; i < pin.length; i += 1) {
+      hash = (hash << 5) - hash + pin.charCodeAt(i);
+      hash |= 0;
+    }
+    return `social-pin:${Math.abs(hash)}`;
+  };
+
+  const getStoredSocialPinHash = useCallback(() => {
+    const raw = (profile as { social_features_pin_hash?: unknown } | null)?.social_features_pin_hash;
+    return typeof raw === "string" && raw.trim().length > 0 ? raw : null;
+  }, [profile]);
 
   const isLinkConflictError = (message: string) => {
     const normalized = message.toLowerCase();
@@ -151,6 +243,10 @@ export default function Settings() {
 
     loadPreferences();
   }, [user?.id]);
+
+  useEffect(() => {
+    setSocialFeaturesLevel(getEffectiveSocialFeaturesLevel(isMinorAccount));
+  }, [isMinorAccount]);
 
   // Handle preference changes
   const handlePreferenceChange = async (key: "email_notifications" | "push_notifications" | "trip_reminders" | "is_public" | "show_trips_publicly", value: boolean) => {
@@ -375,8 +471,322 @@ export default function Settings() {
     }
   };
 
+  const handleSetSocialFeaturesLevel = (level: SocialFeaturesLevel) => {
+    if (level === socialFeaturesLevel) return;
+
+    setPendingSocialFeaturesLevel(level);
+    setSocialPinInput("");
+    setSocialPinMode(getStoredSocialPinHash() ? "verify" : "create");
+    setShowSocialPinDialog(true);
+  };
+
+  const handleConfirmSocialFeaturesLevelChange = useCallback(async () => {
+    if (!user?.id || !pendingSocialFeaturesLevel) {
+      setShowSocialPinDialog(false);
+      return;
+    }
+
+    if (!/^\d{4}$/.test(socialPinInput)) {
+      toast.error("PIN must be exactly 4 digits");
+      return;
+    }
+
+    const computedHash = hashSocialPin(socialPinInput);
+    const existingHash = getStoredSocialPinHash();
+
+    if (socialPinMode === "verify") {
+      if (!existingHash || existingHash !== computedHash) {
+        toast.error("Invalid PIN");
+        return;
+      }
+    }
+
+    try {
+      setIsSavingSocialLevel(true);
+
+      const updatePayload: { social_features_pin_hash?: string } = {};
+      if (socialPinMode === "create") {
+        updatePayload.social_features_pin_hash = computedHash;
+      }
+
+      if (Object.keys(updatePayload).length > 0) {
+        const { error: profileUpdateError } = await supabase
+          .from("profiles")
+          .update(updatePayload)
+          .eq("id", user.id);
+
+        if (profileUpdateError) {
+          throw profileUpdateError;
+        }
+        await refreshProfile();
+      }
+
+      setSocialFeaturesLevel(pendingSocialFeaturesLevel);
+      setStoredSocialFeaturesLevel(pendingSocialFeaturesLevel);
+      setShowSocialPinDialog(false);
+      setSocialPinInput("");
+      setPendingSocialFeaturesLevel(null);
+      toast.success("Family safety setting updated");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to update family safety setting";
+      toast.error(message);
+    } finally {
+      setIsSavingSocialLevel(false);
+    }
+  }, [
+    user,
+    pendingSocialFeaturesLevel,
+    socialPinInput,
+    socialPinMode,
+    refreshProfile,
+    getStoredSocialPinHash,
+  ]);
+
+  const handleForgotSocialPin = async () => {
+    if (!user?.email) {
+      toast.error("No email address found for this account");
+      return;
+    }
+
+    try {
+      setIsResettingSocialPin(true);
+      const { data, error } = await supabase.functions.invoke("send-social-pin-reset", {
+        body: {},
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      if (data && (data as { error?: string }).error) {
+        throw new Error((data as { error?: string }).error || "Failed to reset PIN");
+      }
+
+      await refreshProfile();
+      setSocialPinInput("");
+      toast.success("A new PIN has been emailed to you");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to reset PIN";
+      toast.error(message);
+    } finally {
+      setIsResettingSocialPin(false);
+    }
+  };
+
+  const openChangeSocialPinDialog = () => {
+    const existingHash = getStoredSocialPinHash();
+
+    if (!existingHash) {
+      setCurrentSocialPinInput("");
+      setNewSocialPinInput("");
+      setPendingSocialPinHash(null);
+      setSocialPinChangeStep("new");
+      setShowChangeSocialPinDialog(true);
+      return;
+    }
+
+    setCurrentSocialPinInput("");
+    setNewSocialPinInput("");
+    setPendingSocialPinHash(existingHash);
+    setSocialPinChangeStep("current");
+    setShowChangeSocialPinDialog(true);
+  };
+
+  const handleConfirmSocialPinChange = useCallback(async () => {
+    if (!user?.id) return;
+
+    const existingHash = pendingSocialPinHash || getStoredSocialPinHash();
+    if (!existingHash) {
+      toast.error("No PIN found. Create one first.");
+      return;
+    }
+
+    if (socialPinChangeStep === "current") {
+      if (!/^\d{4}$/.test(currentSocialPinInput)) {
+        toast.error("Current PIN must be exactly 4 digits");
+        return;
+      }
+
+      if (hashSocialPin(currentSocialPinInput) !== existingHash) {
+        toast.error("Current PIN is incorrect");
+        return;
+      }
+
+      setSocialPinChangeStep("new");
+      return;
+    }
+
+    if (!/^\d{4}$/.test(newSocialPinInput)) {
+      toast.error("New PIN must be exactly 4 digits");
+      return;
+    }
+
+    const newHash = hashSocialPin(newSocialPinInput);
+
+    try {
+      setIsChangingSocialPin(true);
+      const { error } = await supabase
+        .from("profiles")
+        .update({ social_features_pin_hash: newHash })
+        .eq("id", user.id);
+
+      if (error) throw error;
+
+      await refreshProfile();
+      setShowChangeSocialPinDialog(false);
+      setCurrentSocialPinInput("");
+      setNewSocialPinInput("");
+      setPendingSocialPinHash(null);
+      setSocialPinChangeStep("current");
+      toast.success("PIN updated successfully");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to update PIN";
+      toast.error(message);
+    } finally {
+      setIsChangingSocialPin(false);
+    }
+  }, [
+    user,
+    pendingSocialPinHash,
+    currentSocialPinInput,
+    newSocialPinInput,
+    socialPinChangeStep,
+    refreshProfile,
+    getStoredSocialPinHash,
+  ]);
+
+  useEffect(() => {
+    if (showParentalPinPage) return;
+    if (!showSocialPinDialog || isSavingSocialLevel) return;
+    if (socialPinInput.length !== 4) return;
+    void handleConfirmSocialFeaturesLevelChange();
+  }, [
+    socialPinInput,
+    showSocialPinDialog,
+    isSavingSocialLevel,
+    handleConfirmSocialFeaturesLevelChange,
+    showParentalPinPage,
+  ]);
+
+  useEffect(() => {
+    if (showParentalPinPage) return;
+    if (!showChangeSocialPinDialog || isChangingSocialPin) return;
+    if (socialPinChangeStep === "current" && currentSocialPinInput.length === 4) {
+      void handleConfirmSocialPinChange();
+      return;
+    }
+    if (socialPinChangeStep === "new" && newSocialPinInput.length === 4) {
+      void handleConfirmSocialPinChange();
+    }
+  }, [
+    currentSocialPinInput,
+    newSocialPinInput,
+    showChangeSocialPinDialog,
+    socialPinChangeStep,
+    isChangingSocialPin,
+    handleConfirmSocialPinChange,
+    showParentalPinPage,
+  ]);
+
   return (
-    <AppLayout>
+    <AppLayout
+      hideHeader={showParentalPinPage}
+      hideBottomNav={showParentalPinPage}
+      fullWidth={showParentalPinPage}
+      mainClassName={showParentalPinPage ? "px-0 sm:px-0" : undefined}
+    >
+      {showParentalPinPage && (
+        <ParentalPinOnboarding
+          mode={
+            isVerifyingPinForSocialSetting || isVerifyingPinForChangePin
+              ? "verify"
+              : "create"
+          }
+          closeIcon
+          onForgotPin={
+            isVerifyingPinForSocialSetting || isVerifyingPinForChangePin
+              ? handleForgotSocialPin
+              : undefined
+          }
+          isResettingPin={isResettingSocialPin}
+          showSafetyFooter={false}
+          heading={
+            isVerifyingPinForSocialSetting
+              ? "Enter parental control PIN"
+              : isVerifyingPinForChangePin
+                ? "Confirm parental PIN"
+                : isCreatingPinForChangePin
+                  ? "Choose a new parental PIN"
+                  : undefined
+          }
+          description={
+            isVerifyingPinForSocialSetting
+              ? `Enter your parental control PIN to change social access to ${pendingSocialLevelLabel || "this setting"}. This keeps child social settings protected until a parent approves the change.`
+              : isVerifyingPinForChangePin
+                ? "Confirm your current parental PIN to continue."
+                : isCreatingPinForChangePin
+                  ? "Choose a new 4-digit parental PIN to replace the existing one."
+                  : undefined
+          }
+          submitLabel={
+            isVerifyingPinForSocialSetting || isVerifyingPinForChangePin
+              ? "Verify"
+              : undefined
+          }
+          mandatory={false}
+          onComplete={handleParentalPinOnboardingComplete}
+          onCancel={handleParentalPinOnboardingCancel}
+          onVerify={
+            isVerifyingPinForSocialSetting
+              ? async (pin) => {
+                if (!user?.id || !pendingSocialFeaturesLevel) {
+                  toast.error("Unable to verify PIN.");
+                  return false;
+                }
+
+                if (!/^\d{4}$/.test(pin)) {
+                  toast.error("PIN must be exactly 4 digits");
+                  return false;
+                }
+
+                const computedHash = hashSocialPin(pin);
+                const existingHash = getStoredSocialPinHash();
+
+                if (!existingHash || existingHash !== computedHash) {
+                  toast.error("Invalid PIN");
+                  return false;
+                }
+
+                // Let onComplete apply the setting and show the success toast once.
+                return true;
+              }
+              : isVerifyingPinForChangePin
+                ? async (pin) => {
+                  const existingHash = getStoredSocialPinHash();
+                  if (!existingHash) {
+                    toast.error("No existing PIN found.");
+                    return false;
+                  }
+
+                  if (!/^\d{4}$/.test(pin)) {
+                    toast.error("PIN must be exactly 4 digits");
+                    return false;
+                  }
+
+                  if (hashSocialPin(pin) !== existingHash) {
+                    toast.error("Current PIN is incorrect");
+                    return false;
+                  }
+
+                  setPendingSocialPinHash(null);
+                  setSocialPinChangeStep("new");
+                  return false;
+                }
+                : undefined
+          }
+        />
+      )}
+
       {/* Page Header with Back Button */}
       <div className="flex items-center gap-3 mb-4">
         <button
@@ -390,6 +800,15 @@ export default function Settings() {
       </div>
 
       <div className="space-y-4">
+        {showSocialAccessBlockedNotice && (
+          <Card className="border-destructive/40 bg-destructive/5 p-3">
+            <p className="text-sm font-semibold text-destructive">Social features are disabled</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Access to {blockedFeatureLabel} is currently blocked for this child account. Switch Social Features Level to Full Access to enable it.
+            </p>
+          </Card>
+        )}
+
         {/* Notifications Section */}
         <Card className="overflow-hidden border-border/50">
           <div className="px-4 py-3 border-b border-border/50">
@@ -521,6 +940,59 @@ export default function Settings() {
               description="Manage users you have blocked"
               onClick={() => navigate("/settings/blocked-users")}
             />
+          </div>
+        </Card>
+
+        {/* Family Safety Section */}
+        <Card className="overflow-hidden border-border/50">
+          <div className="px-4 py-3 border-b border-border/50">
+            <div className="flex items-center gap-2">
+              <Shield className="h-4 w-4 text-primary" />
+              <h2 className="font-semibold text-sm text-foreground">Family Safety</h2>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Manage child social access controls on this device.
+            </p>
+          </div>
+          <div className="p-4 space-y-3">
+            <div className="rounded-lg border border-border/60 p-3">
+              <p className="text-sm font-medium text-foreground">Social Features Level</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                {isMinorAccount
+                  ? "Child account detected from date of birth."
+                  : "No child account detected. These controls still apply on this device."}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                A 4-digit PIN is required to change this setting.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={socialFeaturesLevel === "disabled" ? "default" : "outline"}
+                  onClick={() => handleSetSocialFeaturesLevel("disabled")}
+                >
+                  Disabled
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={socialFeaturesLevel === "full" ? "default" : "outline"}
+                  onClick={() => handleSetSocialFeaturesLevel("full")}
+                >
+                  Full Access
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={openChangeSocialPinDialog}
+                >
+                  Change PIN
+                </Button>
+              </div>
+            </div>
+
           </div>
         </Card>
 
@@ -695,7 +1167,7 @@ export default function Settings() {
 
         {/* App Version */}
         <p className="text-center text-xs text-muted-foreground pt-4 pb-6">
-          Version 1.0.0
+          Version {__APP_VERSION__}
         </p>
       </div>
 
@@ -892,6 +1364,202 @@ export default function Settings() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {!showParentalPinPage && (
+        <Dialog
+          open={showSocialPinDialog}
+          onOpenChange={(open) => {
+            setShowSocialPinDialog(open);
+            if (!open) {
+              setSocialPinInput("");
+              setPendingSocialFeaturesLevel(null);
+            }
+          }}
+        >
+        <DialogContent className="sm:max-w-[425px] max-h-[calc(100dvh-2rem)] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              {socialPinMode === "create" ? "Create parental control PIN" : "Enter parental control PIN"}
+            </DialogTitle>
+            <DialogDescription>
+              {socialPinMode === "create"
+                ? "Create a 4-digit parental PIN to keep child social settings safe. This PIN is required to change the child’s social access controls and can be reset by email if you forget it."
+                : pendingSocialLevelLabel
+                  ? `Enter your parental control PIN to change social access to ${pendingSocialLevelLabel}. This keeps child social settings protected until a parent approves the change.`
+                  : "Enter your parental control PIN to continue. This keeps child social safety settings locked and prevents changes without parental approval."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="rounded-lg border border-border/70 bg-muted p-3 text-sm">
+              <p className="text-xs text-muted-foreground">
+                The PIN protects child social access controls on this device. It is used only for parental control actions and will not be shown again after setup.
+              </p>
+            </div>
+
+            <div className="flex justify-center">
+              <InputOTP
+                maxLength={4}
+                value={socialPinInput}
+                onChange={(value) => setSocialPinInput(value.replace(/\D/g, "").slice(0, 4))}
+                disabled={isSavingSocialLevel}
+                autoFocus
+              >
+                <InputOTPGroup>
+                  <InputOTPSlot index={0} mask />
+                  <InputOTPSlot index={1} mask />
+                  <InputOTPSlot index={2} mask />
+                  <InputOTPSlot index={3} mask />
+                </InputOTPGroup>
+              </InputOTP>
+            </div>
+
+            <p className="text-center text-xs text-muted-foreground">
+              {isSavingSocialLevel
+                ? "Verifying PIN..."
+                : "This will continue automatically after 4 digits."}
+            </p>
+
+            <div className="flex justify-end">
+              <div className="flex items-center gap-2">
+                {socialPinMode === "verify" && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={handleForgotSocialPin}
+                    disabled={isSavingSocialLevel || isResettingSocialPin}
+                    className="h-10 px-4 text-sm font-medium text-muted-foreground hover:bg-transparent hover:text-muted-foreground transition-none"
+                  >
+                    {isResettingSocialPin ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Sending...
+                      </>
+                    ) : (
+                      "Forgot PIN?"
+                    )}
+                  </Button>
+                )}
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setShowSocialPinDialog(false)}
+                  disabled={isSavingSocialLevel || isResettingSocialPin}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+      )}
+
+      {!showParentalPinPage && (
+        <Dialog
+          open={showChangeSocialPinDialog}
+          onOpenChange={(open) => {
+            setShowChangeSocialPinDialog(open);
+            if (!open) {
+              setCurrentSocialPinInput("");
+              setNewSocialPinInput("");
+              setPendingSocialPinHash(null);
+              setSocialPinChangeStep("current");
+            }
+          }}
+        >
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>
+              {socialPinChangeStep === "current" ? "Confirm parental PIN" : "Choose a new parental PIN"}
+            </DialogTitle>
+            <DialogDescription>
+              {socialPinChangeStep === "current"
+                ? "Confirm your current 4-digit parental PIN to continue. This ensures only a parent can update the PIN used for child social safety settings."
+                : "Choose a new 4-digit parental PIN to replace the current one. This PIN will continue protecting changes to child social access settings."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="rounded-lg border border-border/70 bg-muted p-3 text-sm">
+              <p className="text-xs text-muted-foreground">
+                If you forget your current PIN, use Reset PIN to receive a new one by email. This PIN is only needed for parental control changes.
+              </p>
+            </div>
+            <div className="flex justify-center">
+              {socialPinChangeStep === "current" ? (
+                <InputOTP
+                  maxLength={4}
+                  value={currentSocialPinInput}
+                  onChange={(value) => setCurrentSocialPinInput(value.replace(/\D/g, "").slice(0, 4))}
+                  disabled={isChangingSocialPin}
+                  autoFocus
+                >
+                  <InputOTPGroup>
+                    <InputOTPSlot index={0} mask />
+                    <InputOTPSlot index={1} mask />
+                    <InputOTPSlot index={2} mask />
+                    <InputOTPSlot index={3} mask />
+                  </InputOTPGroup>
+                </InputOTP>
+              ) : (
+                <InputOTP
+                  maxLength={4}
+                  value={newSocialPinInput}
+                  onChange={(value) => setNewSocialPinInput(value.replace(/\D/g, "").slice(0, 4))}
+                  disabled={isChangingSocialPin}
+                  autoFocus
+                >
+                  <InputOTPGroup>
+                    <InputOTPSlot index={0} mask />
+                    <InputOTPSlot index={1} mask />
+                    <InputOTPSlot index={2} mask />
+                    <InputOTPSlot index={3} mask />
+                  </InputOTPGroup>
+                </InputOTP>
+              )}
+            </div>
+
+            <p className="text-center text-xs text-muted-foreground">
+              {isChangingSocialPin
+                ? "Updating PIN..."
+                : socialPinChangeStep === "current"
+                  ? "This will continue automatically after 4 digits."
+                  : "This will save automatically after 4 digits."}
+            </p>
+
+            <div className="flex justify-end">
+              <div className="flex items-center gap-2">
+                {socialPinChangeStep === "current" && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={handleForgotSocialPin}
+                    disabled={isChangingSocialPin || isResettingSocialPin}
+                    className="h-10 px-4 text-sm font-medium text-muted-foreground hover:bg-transparent hover:text-muted-foreground transition-none"
+                  >
+                    {isResettingSocialPin ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Sending...
+                      </>
+                    ) : (
+                      "Forgot PIN?"
+                    )}
+                  </Button>
+                )}
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setShowChangeSocialPinDialog(false)}
+                  disabled={isChangingSocialPin || isResettingSocialPin}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+        </Dialog>
+      )}
     </AppLayout>
   );
 }

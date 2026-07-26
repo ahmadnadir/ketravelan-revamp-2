@@ -190,6 +190,15 @@ export default function TripDetails() {
   const [isCancellingTrip, setIsCancellingTrip] = useState(false);
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const [isScrolled, setIsScrolled] = useState(false);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      setIsScrolled(window.scrollY > 200);
+    };
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
 
   // Fetch trip details with React Query
   const isSimulatedLoading = useSimulatedLoading(700);
@@ -506,6 +515,7 @@ export default function TripDetails() {
 
   const nextLightboxImage = () => {
     if (images.length <= 1) return;
+    resetLightboxZoom();
     setLightboxDirection(1);
     setLightboxAnimating(true);
     setLightboxIndex((prev) => (prev + 1) % images.length);
@@ -584,7 +594,7 @@ export default function TripDetails() {
     setLightboxOpen(true);
   };
 
-  const getTouchDistance = (touches: TouchList) => {
+  const getTouchDistance = (touches: React.TouchList) => {
     if (touches.length < 2) return null;
     const [firstTouch, secondTouch] = [touches[0], touches[1]];
     if (!firstTouch || !secondTouch) return null;
@@ -1244,35 +1254,39 @@ export default function TripDetails() {
               <X className="h-5 w-5 text-white" />
             </button>
             
+            <div className="inline-flex items-center justify-center">
+              <img
+                src={images[lightboxIndex]}
+                alt={`Gallery image ${lightboxIndex + 1}`}
+                onDoubleClick={toggleLightboxZoom}
+                className={cn(
+                  "max-h-[calc(90vh-2rem)] max-w-[calc(95vw-2rem)] object-contain transition-all duration-300 ease-out",
+                  lightboxAnimating
+                    ? (lightboxDirection === 1 ? "opacity-0 translate-x-6" : "opacity-0 -translate-x-6")
+                    : "opacity-100 translate-x-0"
+                )}
+                style={{ transform: `scale(${lightboxScale})` }}
+              />
+            </div>
+
             {images.length > 1 && (
               <>
                 <button
                   onClick={prevLightboxImage}
                   className="absolute left-4 top-1/2 z-50 h-12 w-12 -translate-y-1/2 rounded-full border border-white/35 bg-black/35 backdrop-blur-md shadow-lg flex items-center justify-center hover:bg-black/50 transition-colors"
+                  aria-label="Previous image"
                 >
                   <ChevronLeft className="h-6 w-6 text-white" />
                 </button>
                 <button
                   onClick={nextLightboxImage}
                   className="absolute right-4 top-1/2 z-50 h-12 w-12 -translate-y-1/2 rounded-full border border-white/35 bg-black/35 backdrop-blur-md shadow-lg flex items-center justify-center hover:bg-black/50 transition-colors"
+                  aria-label="Next image"
                 >
                   <ChevronRight className="h-6 w-6 text-white" />
                 </button>
               </>
             )}
-            
-            <img
-              src={images[lightboxIndex]}
-              alt={`Gallery image ${lightboxIndex + 1}`}
-              onDoubleClick={toggleLightboxZoom}
-              className={cn(
-                "max-w-full max-h-full object-contain transition-all duration-300 ease-out",
-                lightboxAnimating
-                  ? (lightboxDirection === 1 ? "opacity-0 translate-x-6" : "opacity-0 -translate-x-6")
-                  : "opacity-100 translate-x-0"
-              )}
-              style={{ transform: `scale(${lightboxScale})` }}
-            />
 
             <div className="absolute bottom-4 right-4 z-50 flex items-center gap-2">
               <button
@@ -2195,20 +2209,33 @@ export default function TripDetails() {
         </div>
       )}
 
+      {/* Sticky Header - Desktop Only */}
+      {isScrolled && (
+        <div className="fixed top-16 left-0 right-0 z-30 hidden md:flex items-center gap-4 px-6 py-3 bg-background border-b border-border/50 backdrop-blur-sm">
+          <Link to={backLink} className="shrink-0">
+            <button className="flex items-center justify-center h-10 w-10 rounded-lg hover:bg-secondary transition-colors">
+              <ChevronLeft className="h-5 w-5 text-foreground" />
+            </button>
+          </Link>
+          <h2 className="text-lg font-semibold text-foreground truncate">{tripData.title}</h2>
+        </div>
+      )}
+
       {/* Sticky CTA Bar */}
       {isDbTrip && !isOrganizer && (
         <div
           className={cn(
-            "fixed bottom-above-nav lg:bottom-0 left-0 right-0 z-40 bg-background border-t border-border/50",
+            "fixed left-0 right-0 z-40 bg-background border-t border-border/50",
+            user ? "bottom-above-nav lg:bottom-0" : "bottom-0",
             user ? "lg:left-60" : "lg:left-0"
           )}
         >
           <div
             className={cn(
-              "mx-auto px-4 py-3",
+              "mx-auto px-4 pt-3",
               user
-                ? "container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl"
-                : "w-full px-16 sm:px-32 lg:px-[14rem] xl:px-[16rem]"
+                ? "container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl pb-3"
+                : "w-full px-4 pb-[max(0.9rem,env(safe-area-inset-bottom))] sm:px-8 lg:px-[14rem] xl:px-[16rem]"
             )}
           >
             <div

@@ -4,6 +4,7 @@ import type { StoryDraft } from "@/hooks/useStoryDraft";
 import { getTravelStyleByIdOrLabel } from "@/data/travelStyles";
 import { filterItemsByBlockedRelationship } from "@/lib/moderation";
 import { uploadImageFromDataUrl } from "@/lib/imageStorage";
+import { enforceCurrentUserSocialWritePolicy } from "@/lib/familiesSafety";
 
 const FALLBACK_FLAG = "🌍";
 const FALLBACK_AVATAR = "";
@@ -809,6 +810,8 @@ export async function createDiscussion(input: {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
 
+  await enforceCurrentUserSocialWritePolicy(`${input.title}\n${input.body || ""}`);
+
   const { data, error } = await supabase
     .from("discussions")
     .insert({
@@ -846,6 +849,8 @@ export async function createDiscussion(input: {
 export async function createDiscussionReply(discussionId: string, body: string, parentReplyId?: string) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
+
+  await enforceCurrentUserSocialWritePolicy(body);
 
   // Calculate depth based on parent reply
   let depth = 0;
@@ -1071,6 +1076,7 @@ export async function publishStoryFromDraft(draft: StoryDraft) {
 
   const content = buildStoryContent(draft);
   const contentText = content.text || draft.title;
+  await enforceCurrentUserSocialWritePolicy(contentText);
   const excerpt = toExcerpt(contentText);
   const readingTime = estimateReadingTime(contentText);
   const storyTypes = deriveStoryTypes(draft);
@@ -1206,6 +1212,8 @@ export async function updateStory(storyId: string, updates: Partial<Story>) {
 export async function createStoryComment(storyId: string, body: string, parentCommentId?: string) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
+
+  await enforceCurrentUserSocialWritePolicy(body);
 
   let depth = 0;
   if (parentCommentId) {

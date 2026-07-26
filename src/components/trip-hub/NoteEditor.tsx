@@ -45,6 +45,8 @@ export function NoteEditor({
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [showLinkDialog, setShowLinkDialog] = useState(false);
   const [pendingLinkUrl, setPendingLinkUrl] = useState<string | null>(null);
+  const [useMirrorLayer, setUseMirrorLayer] = useState(true);
+  const shouldRenderMirror = useMirrorLayer && content.length > 0;
   
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const titleRef = useRef<HTMLInputElement>(null);
@@ -132,6 +134,32 @@ export function NoteEditor({
       setTimeout(() => titleRef.current?.focus(), 100);
     }
   }, [open]);
+
+  // Mirror rendering can drift on mobile keyboards; use native textarea rendering for touch devices.
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mediaQuery = window.matchMedia("(hover: hover) and (pointer: fine)");
+
+    const applyPreference = () => {
+      setUseMirrorLayer(mediaQuery.matches);
+    };
+
+    applyPreference();
+
+    if (typeof mediaQuery.addEventListener === "function") {
+      mediaQuery.addEventListener("change", applyPreference);
+    } else {
+      mediaQuery.addListener(applyPreference);
+    }
+
+    return () => {
+      if (typeof mediaQuery.removeEventListener === "function") {
+        mediaQuery.removeEventListener("change", applyPreference);
+      } else {
+        mediaQuery.removeListener(applyPreference);
+      }
+    };
+  }, []);
 
   // Debounced save
   useEffect(() => {
@@ -287,10 +315,14 @@ export function NoteEditor({
     return singleTokenLinkPattern.test(candidate) ? candidate : null;
   };
 
-  const handleContentScroll = () => {
-    if (!contentRef.current || !contentMirrorRef.current) return;
+  const syncMirrorScroll = () => {
+    if (!shouldRenderMirror || !contentRef.current || !contentMirrorRef.current) return;
     contentMirrorRef.current.scrollTop = contentRef.current.scrollTop;
     contentMirrorRef.current.scrollLeft = contentRef.current.scrollLeft;
+  };
+
+  const handleContentScroll = () => {
+    syncMirrorScroll();
   };
 
   // Handle title Enter key - move focus to body
@@ -321,6 +353,7 @@ export function NoteEditor({
       setTimeout(() => {
         contentRef.current?.focus();
         contentRef.current?.setSelectionRange(cursorPos, cursorPos);
+        syncMirrorScroll();
       }, 0);
     }
   };
@@ -350,9 +383,11 @@ export function NoteEditor({
       }
     }
 
-    const maybeLink = getLinkAtCursor(value, pos);
-    if (maybeLink) {
-      requestOpenLink(maybeLink);
+    if (useMirrorLayer) {
+      const maybeLink = getLinkAtCursor(value, pos);
+      if (maybeLink) {
+        requestOpenLink(maybeLink);
+      }
     }
   };
 
@@ -389,6 +424,7 @@ export function NoteEditor({
         setTimeout(() => {
           const newPos = newContent.length - afterCursor.length;
           textarea.setSelectionRange(newPos, newPos);
+          syncMirrorScroll();
         }, 0);
         return;
       }
@@ -413,9 +449,24 @@ export function NoteEditor({
         setTimeout(() => {
           const newPos = cursorPos + 1 + prefix.length;
           textarea.setSelectionRange(newPos, newPos);
+          syncMirrorScroll();
         }, 0);
       }
     }
+  };
+
+  const handleContentKeyUp = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key !== "Enter") return;
+
+    const textarea = contentRef.current;
+    if (!textarea || useMirrorLayer) return;
+
+    const atEnd = textarea.selectionStart === textarea.value.length;
+    if (!atEnd) return;
+
+    requestAnimationFrame(() => {
+      textarea.scrollTop = textarea.scrollHeight;
+    });
   };
 
   // Insert formatting or convert selection
@@ -455,6 +506,7 @@ export function NoteEditor({
         textarea.focus();
         const newEnd = start + formattedLines.join("\n").length;
         textarea.setSelectionRange(start, newEnd);
+        syncMirrorScroll();
       }, 10);
     } else {
       // Insert new list item
@@ -474,9 +526,18 @@ export function NoteEditor({
         textarea.focus();
         const length = newContent.length;
         textarea.setSelectionRange(length, length);
+        syncMirrorScroll();
       }, 10);
     }
   };
+
+  useEffect(() => {
+    if (!open || !shouldRenderMirror || !contentMirrorRef.current || !contentRef.current) return;
+    const frame = requestAnimationFrame(() => {
+      syncMirrorScroll();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [content, open, shouldRenderMirror]);
 
   return (
     <>
@@ -575,15 +636,15 @@ export function NoteEditor({
               />
 
               <div className="relative min-h-[50vh]">
-                {content.length > 0 && (
+                {shouldRenderMirror && (
                   <div
                     ref={contentMirrorRef}
                     aria-hidden="true"
                     className="pointer-events-none absolute inset-0 z-20 overflow-hidden whitespace-pre-wrap break-words text-base sm:text-lg leading-relaxed text-foreground"
                   >
                     {content.split("\n").map((line, lineIndex) => (
-                      <div key={`line-${lineIndex}`}>
-                        {renderLinkifiedLine(line, lineIndex)}
+                      <div key={`line-${lineIndex}`} className="min-h-[1.5em]">
+                        {line.length > 0 ? renderLinkifiedLine(line, lineIndex) : <span>&nbsp;</span>}
                       </div>
                     ))}
                   </div>
@@ -595,11 +656,14 @@ export function NoteEditor({
                   onChange={handleContentChange}
                   onClick={handleContentClick}
                   onKeyDown={handleContentKeyDown}
+                  onKeyUp={handleContentKeyUp}
                   onScroll={handleContentScroll}
                   placeholder="Start typing..."
                   className={cn(
-                    "relative z-10 w-full min-h-[50vh] border-none outline-none resize-none leading-relaxed bg-transparent text-base sm:text-lg placeholder:text-muted-foreground/50",
-                    content.length > 0 && "text-transparent caret-foreground selection:bg-primary/25"
+                    "relative z-10 w-full min-h-[50vh] border-none outline-none resize-none overflow-y-auto whitespace-pre-wrap break-words leading-relaxed bg-transparent text-base sm:text-lg placeholder:text-muted-foreground/50",
+                    shouldRenderMirror
+                      ? "text-transparent caret-foreground selection:bg-primary/25"
+                      : "text-foreground"
                   )}
                 />
               </div>

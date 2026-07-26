@@ -51,6 +51,11 @@ verify_jwt = false
 # No import map needed; using direct URLs for Deno modules
 entrypoint = "./functions/send-password-reset/index.ts"
 
+[functions.send-social-pin-reset]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/send-social-pin-reset/index.ts"
+
 [functions.send-trip-created-email]
 enabled = true
 verify_jwt = false
@@ -188,4 +193,9 @@ entrypoint = "./functions/send-join-request-received/index.ts"
 enabled = true
 verify_jwt = false
 entrypoint = "./functions/diagnose-payment-notification/index.ts"
+
+[functions.send-broadcast-push]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/send-broadcast-push/index.ts"
 

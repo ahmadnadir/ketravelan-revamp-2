@@ -120,6 +120,10 @@ export default function EditProfile() {
   const [originalUsername, setOriginalUsername] = useState<string>("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const dateOfBirthDisplay = profile?.date_of_birth
+    ? new Date(profile.date_of_birth).toLocaleDateString()
+    : "Not set";
+
   useEffect(() => {
     if (!authLoading && user) {
       if (profile) {
@@ -515,9 +519,9 @@ export default function EditProfile() {
   }
 
   return (
-    <AppLayout>
-      <header className="sticky top-0 z-50 glass border-b border-border/50 -mx-4 sm:-mx-6 px-4 sm:px-6">
-        <div className="flex items-center justify-between h-14">
+    <AppLayout fullWidth>
+      <header className="sticky top-0 z-50 glass border-b border-border/50 w-full">
+        <div className="flex h-14 items-center justify-between px-4 sm:px-6 lg:px-8">
           <div className="flex items-center gap-2 sm:gap-3">
             <button onClick={() => navigate(-1)}>
               <div className="h-8 w-8 sm:h-9 sm:w-9 rounded-full bg-secondary flex items-center justify-center">
@@ -544,7 +548,7 @@ export default function EditProfile() {
         </div>
       </header>
 
-      <div className="py-4 sm:py-6 space-y-4 sm:space-y-6">
+      <div className="mx-auto w-full max-w-5xl px-4 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-4 sm:space-y-6">
         <div className="flex flex-col items-center">
           <input
             ref={fileInputRef}
@@ -613,6 +617,18 @@ export default function EditProfile() {
               />
             </div>
             <p className="text-xs text-muted-foreground">Email cannot be changed</p>
+          </div>
+
+          <div className="space-y-1.5 sm:space-y-2">
+            <Label htmlFor="dateOfBirth" className="text-xs sm:text-sm">Date of Birth</Label>
+            <Input
+              id="dateOfBirth"
+              value={dateOfBirthDisplay}
+              disabled
+              readOnly
+              className="h-10 sm:h-11 rounded-xl text-sm bg-muted/50 cursor-not-allowed"
+            />
+            <p className="text-xs text-muted-foreground">Date of birth cannot be edited here</p>
           </div>
 
           <div className="space-y-1.5 sm:space-y-2">

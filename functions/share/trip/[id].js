@@ -1,6 +1,7 @@
 const DEFAULT_OG_IMAGE = "https://ketravelan.com/ketravelan_icon.jpeg";
 const DEFAULT_SUPABASE_URL = "https://sspvqhleqlycsiniywkg.supabase.co";
 const DEFAULT_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNzcHZxaGxlcWx5Y3Npbml5d2tnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MDU4NjEsImV4cCI6MjA4Mjk4MTg2MX0.yMDAvpxbvfhcCXNtiPnMg8z5DL-yNixNND4naGPZBXw";
+const BOT_UA_PATTERN = /(facebookexternalhit|facebot|threadsbot|twitterbot|linkedinbot|slackbot|discordbot|telegrambot|skypeuripreview|googlebot|bingbot|applebot|whatsapp|meta-externalagent|meta-externalfetcher)/i;
 
 function escapeHtml(value) {
   return String(value || "")
@@ -122,6 +123,8 @@ function normalizeImageUrl(image, origin) {
 export async function onRequest(context) {
   const requestUrl = new URL(context.request.url);
   const origin = requestUrl.origin;
+  const userAgent = context.request.headers.get("user-agent") || "";
+  const isBot = BOT_UA_PATTERN.test(userAgent);
   const id = context.params?.id || "";
   const queryTripId = requestUrl.searchParams.get("tripId") || requestUrl.searchParams.get("trip_id");
   const imageParam = requestUrl.searchParams.get("image") || "";
@@ -137,9 +140,13 @@ export async function onRequest(context) {
     (destination ? `Trip to ${destination}.` : "Trip details and itinerary.");
   const image = normalizeImageUrl(tripMeta?.cover_image, origin);
 
-  const canonicalIdentifier = String(tripMeta?.slug || resolvedId || baseIdentifier || "").trim();
+  const canonicalIdentifier = String(tripMeta?.id || resolvedId || baseIdentifier || "").trim();
   const tripPath = buildTripPath(canonicalIdentifier);
   const tripUrl = `${origin}${tripPath}`;
+
+  if (!isBot) {
+    return Response.redirect(tripUrl, 302);
+  }
 
   const html = `<!doctype html>
 <html lang="en">
@@ -163,13 +170,9 @@ export async function onRequest(context) {
     <meta name="twitter:title" content="${escapeHtml(title)}" />
     <meta name="twitter:description" content="${escapeHtml(description)}" />
     <meta name="twitter:image" content="${escapeHtml(image)}" />
-    <meta http-equiv="refresh" content="0; url=${escapeHtml(tripUrl)}" />
-    <script>
-      window.location.replace(${JSON.stringify(tripUrl)});
-    </script>
   </head>
   <body>
-    <p>Redirecting to <a href="${escapeHtml(tripUrl)}">${escapeHtml(tripUrl)}</a></p>
+    <p>Open this trip: <a href="${escapeHtml(tripUrl)}">${escapeHtml(tripUrl)}</a></p>
   </body>
 </html>`;
 

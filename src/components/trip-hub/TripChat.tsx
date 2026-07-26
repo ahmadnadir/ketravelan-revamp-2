@@ -32,7 +32,7 @@ export function TripChat({ conversationId, tripTitle = "Group Chat", tripImageUr
   });
 
   return (
-    <div className="w-full py-4 sm:py-6 space-y-4">
+    <div className="w-full pt-0 pb-2 sm:pb-3 space-y-2">
       {messagesContent}
       <div ref={messagesEndRef} />
     </div>

@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef, useMemo, type ReactNode } from "react";
-import { ChevronLeft, Check, Clock, ArrowDown, ChevronDown, Pencil, Trash2, Undo2 } from "lucide-react";
+import { useState, useEffect, useRef, useMemo, useLayoutEffect, type ReactNode } from "react";
+import { ChevronLeft, Check, Clock, ArrowDown, ChevronDown, Pencil, Trash2, Undo2, Reply, Pin, PinOff, Copy } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -8,18 +8,19 @@ import { cn } from "@/lib/utils";
 import { ChatComposer, type TripMember } from "@/components/chat/ChatComposer";
 import type { ChatAttachment } from "@/lib/conversations";
 import { MessageAttachments } from "@/components/chat/MessageAttachments";
-import { fetchConversationMessages, fetchConversationMessagesAfter, subscribeToMessages, sendMessage, editOwnMessage, unsendOwnMessage, deleteOwnMessage } from "@/lib/conversations";
+import { fetchConversationById, fetchConversationMessages, fetchConversationMessagesAfter, fetchMessageById, setConversationPinnedMessage, subscribeToMessages, sendMessage, editOwnMessage, unsendOwnMessage, deleteOwnMessage } from "@/lib/conversations";
 import { parseMessageForDisplay } from "@/lib/chatMentions";
 import { supabase } from "@/lib/supabase";
 import { markConversationReadOptimistically } from "@/lib/chatReadService";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { Textarea } from "@/components/ui/textarea";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { REPORT_REASON_OPTIONS, submitReport, blockUserViaApi, type ReportReasonValue } from "@/lib/moderation";
+import { Haptics, ImpactStyle } from "@capacitor/haptics";
+import type { RealtimeChannel } from "@supabase/supabase-js";
 
 export interface ChatPageMessage {
   id: string;
@@ -35,6 +36,11 @@ export interface ChatPageMessage {
   type?: 'user' | 'system';
   systemData?: { action: string; details?: string };
 }
+
+type ConversationWithPinnedMessage = {
+  pinned_message_id?: string | null;
+  pinned_message?: ChatPageMessage | null;
+} | null;
 
 type ConversationListItem = {
   created_at?: string;
@@ -99,6 +105,9 @@ export function ChatPage({
   const LOAD_MORE_STEP = 120;
   const REFRESH_THROTTLE_MS = 30000;
   const LONG_PRESS_MS = 450;
+  const MAX_SWIPE_REPLY_X = 88;
+  const SWIPE_REPLY_X_THRESHOLD = 56;
+  const SWIPE_REPLY_Y_TOLERANCE = 24;
 
   const canUseMessageActions = (message: ChatPageMessage): boolean => {
     if (message.sender_id !== currentUserId) return false;
@@ -200,9 +209,9 @@ export function ChatPage({
     return (
       <div
         data-date-label={label}
-        className={cn("relative z-10 flex justify-center pointer-events-none", isFirst ? "mt-1 mb-3" : "my-2")}
+        className={cn("relative z-10 flex justify-center pointer-events-none", isFirst ? "mt-2 mb-4" : "my-3")}
       >
-        <span className="rounded-lg border border-[#d6d6d6] bg-white px-3 py-1 text-[11px] font-medium tracking-[0.01em] text-[#5f6368] shadow-[0_1px_2px_rgba(0,0,0,0.08)]">
+        <span className="rounded-full border border-[#d6d6d6] bg-white px-3 py-0.5 text-[11px] font-medium tracking-[0.01em] text-[#111b21] shadow-[0_1px_2px_rgba(11,20,26,0.12)]">
           {label}
         </span>
       </div>
@@ -216,20 +225,28 @@ export function ChatPage({
   const [scrollDateLabel, setScrollDateLabel] = useState("");
   const scrollDateTimeoutRef = useRef<number | null>(null);
   const [actionMenu, setActionMenu] = useState<{ messageId: string; x: number; y: number } | null>(null);
+  const [actionMenuPosition, setActionMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const [hoveredMessageId, setHoveredMessageId] = useState<string | null>(null);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState('');
   const [confirmAction, setConfirmAction] = useState<{ type: 'unsend' | 'delete'; messageId: string } | null>(null);
+  const [replyTarget, setReplyTarget] = useState<ChatPageMessage | null>(null);
+  const [pinnedMessageId, setPinnedMessageId] = useState<string | null>(null);
+  const [fetchedPinnedMessage, setFetchedPinnedMessage] = useState<ChatPageMessage | null>(null);
+  const [mobileActionMessageId, setMobileActionMessageId] = useState<string | null>(null);
   const [reportTarget, setReportTarget] = useState<{ messageId: string; reportedUserId: string } | null>(null);
   const [reportReason, setReportReason] = useState<ReportReasonValue>('spam');
   const [reportDescription, setReportDescription] = useState('');
   const [confirmReport, setConfirmReport] = useState(false);
   const [isSubmittingAction, setIsSubmittingAction] = useState(false);
+  const [jumpHighlightMessageId, setJumpHighlightMessageId] = useState<string | null>(null);
+  const [swipePreview, setSwipePreview] = useState<{ messageId: string; offset: number; dragging: boolean } | null>(null);
   const [visibleCount, setVisibleCount] = useState(MAX_RENDERED_MESSAGES);
   const [activeConversationId, setActiveConversationId] = useState(conversationId);
   const queryClient = useQueryClient();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const unsubscribeRef = useRef<(() => void) | null>(null);
+  const conversationChannelRef = useRef<RealtimeChannel | null>(null);
   const pollInFlightRef = useRef(false);
   const latestSnapshotRef = useRef<string>('');
   const lastRealtimeAtRef = useRef(0);
@@ -237,6 +254,16 @@ export function ChatPage({
   const lastListRefreshAtRef = useRef(0);
   const lastThreadRefreshAtRef = useRef(0);
   const longPressTimerRef = useRef<number | null>(null);
+  const swipeReplyRef = useRef<{
+    messageId: string;
+    startX: number;
+    startY: number;
+    triggered: boolean;
+    cancelled: boolean;
+  } | null>(null);
+  const messageElementRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const actionMenuRef = useRef<HTMLDivElement | null>(null);
+  const menuOpenedByTouchRef = useRef(false);
   const mentionUserIdByUsername = useMemo(() => {
     const map = new Map<string, string>();
     tripMembers.forEach((member) => {
@@ -254,6 +281,10 @@ export function ChatPage({
 
   // Combine messages for display (confirmed + pending)
   const allMessages = useMemo(() => [...confirmedMessages, ...pendingMessages], [confirmedMessages, pendingMessages]);
+  const pinnedMessage = useMemo(() => {
+    if (!pinnedMessageId) return null;
+    return allMessages.find((message) => message.id === pinnedMessageId) || fetchedPinnedMessage || null;
+  }, [allMessages, pinnedMessageId, fetchedPinnedMessage]);
   const renderedMessages = useMemo(
     () => (allMessages.length > visibleCount ? allMessages.slice(-visibleCount) : allMessages),
     [allMessages, visibleCount],
@@ -263,6 +294,116 @@ export function ChatPage({
     () => (actionMenu ? allMessages.find((msg) => msg.id === actionMenu.messageId) || null : null),
     [actionMenu, allMessages],
   );
+  const mobileActionMessage = useMemo(
+    () => (mobileActionMessageId ? allMessages.find((msg) => msg.id === mobileActionMessageId) || null : null),
+    [mobileActionMessageId, allMessages],
+  );
+
+  const isMobileLikePointer = () => {
+    if (typeof window === 'undefined' || !window.matchMedia) return false;
+    return window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+  };
+
+
+  const triggerLongPressHaptic = () => {
+    void Haptics.impact({ style: ImpactStyle.Medium })
+      .catch(() => Haptics.selectionChanged())
+      .catch(() => {
+        if (typeof navigator === 'undefined' || typeof navigator.vibrate !== 'function') return;
+        navigator.vibrate(12);
+      });
+  };
+
+  useEffect(() => {
+    if (!pinnedMessageId) {
+      setFetchedPinnedMessage(null);
+      return;
+    }
+
+    const existingMessage = allMessages.find((message) => message.id === pinnedMessageId);
+    if (existingMessage) {
+      setFetchedPinnedMessage(existingMessage);
+      return;
+    }
+
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const message = await fetchMessageById(pinnedMessageId);
+        if (!cancelled) {
+          setFetchedPinnedMessage((message as ChatPageMessage | null) || null);
+        }
+      } catch (error) {
+        console.error('Failed to fetch pinned message:', error);
+        if (!cancelled) setFetchedPinnedMessage(null);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [allMessages, pinnedMessageId]);
+
+  const scrollToMessage = (messageId: string) => {
+    const target = messageElementRefs.current.get(messageId);
+    if (!target) return false;
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return true;
+  };
+
+  const summarizeMessage = (message: ChatPageMessage) => {
+    const cleaned = (message.content || '').trim().replace(/\s+/g, ' ');
+    if (!cleaned && Array.isArray(message.attachments) && message.attachments.length > 0) {
+      return 'Attachment';
+    }
+    return cleaned || 'Message';
+  };
+
+  const getReplyAttachment = (attachments?: ChatAttachment[]) => {
+    if (!Array.isArray(attachments)) return null;
+    const candidate = attachments.find((attachment) => attachment.type === 'reply');
+    if (!candidate) return null;
+    return {
+      messageId: candidate.messageId || '',
+      senderName: candidate.senderName || 'Unknown',
+      preview: candidate.preview || '',
+    };
+  };
+
+  const getRenderableAttachments = (attachments?: ChatAttachment[]) => {
+    if (!Array.isArray(attachments)) return [];
+    return attachments.filter((attachment) => attachment.type !== 'reply');
+  };
+
+  const isUuid = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+
+  const copyMessageContent = async (message: ChatPageMessage) => {
+    const text = (message.content || '').trim();
+    if (!text) {
+      toast.error('No text to copy');
+      return;
+    }
+
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.setAttribute('readonly', 'true');
+        textarea.style.position = 'fixed';
+        textarea.style.left = '-9999px';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+      }
+      toast.success('Message copied');
+    } catch {
+      toast.error('Unable to copy message');
+    }
+  };
 
   // Memoize avatar URLs per user to prevent re-generation and blinking
   const avatarCache = useRef<Map<string, string>>(new Map());
@@ -283,6 +424,8 @@ export function ChatPage({
         status: 'sent' as const,
       } as ChatPageMessage;
     });
+
+  const normalizeMessage = (message: unknown): ChatPageMessage => normalizeMessages([message])[0];
 
   const mergeById = (prev: ChatPageMessage[], incoming: ChatPageMessage[]) => {
     const map = new Map<string, ChatPageMessage>();
@@ -313,6 +456,64 @@ export function ChatPage({
     setConfirmedMessages((prev) => mergeById(prev, normalizedMsgs));
     queryClient.setQueryData(['messages', activeConversationId], normalizedMsgs);
     return true;
+  };
+
+  const showJumpHighlight = (messageId: string) => {
+    setJumpHighlightMessageId(messageId);
+    window.setTimeout(() => {
+      setJumpHighlightMessageId((current) => (current === messageId ? null : current));
+    }, 1600);
+  };
+
+  const ensureMessageVisibleInWindow = (messageId: string) => {
+    const index = allMessages.findIndex((message) => message.id === messageId);
+    if (index === -1) return false;
+
+    const requiredVisibleCount = allMessages.length - index;
+    if (requiredVisibleCount > visibleCount) {
+      setVisibleCount((prev) => Math.max(prev, requiredVisibleCount));
+    }
+
+    return true;
+  };
+
+  const jumpToMessage = async (messageId: string) => {
+    if (!messageId) return;
+
+    const tryScrollWithRetry = (attemptsLeft = 8) => {
+      if (scrollToMessage(messageId)) {
+        showJumpHighlight(messageId);
+        return;
+      }
+
+      if (attemptsLeft <= 0) {
+        toast.error('Message not found in current history');
+        return;
+      }
+
+      window.setTimeout(() => tryScrollWithRetry(attemptsLeft - 1), 80);
+    };
+
+    if (ensureMessageVisibleInWindow(messageId)) {
+      tryScrollWithRetry();
+      return;
+    }
+
+    if (!activeConversationId) return;
+
+    try {
+      const deepHistory = await fetchConversationMessages(activeConversationId, 500);
+      applyServerMessages(deepHistory as unknown[]);
+      setVisibleCount((prev) => Math.max(prev, 500));
+
+      window.setTimeout(() => {
+        ensureMessageVisibleInWindow(messageId);
+        tryScrollWithRetry();
+      }, 100);
+    } catch (error) {
+      console.error('Failed to load deeper history for jump:', error);
+      toast.error('Unable to load older messages');
+    }
   };
 
   // Track scroll position to show/hide scroll-to-bottom button
@@ -367,16 +568,60 @@ export function ChatPage({
   }, [scrollContainerRef, isLoading]);
 
   useEffect(() => {
-    const closeMenu = () => setActionMenu(null);
+    const closeMenu = () => {
+      if (menuOpenedByTouchRef.current) return;
+      setActionMenu(null);
+    };
     window.addEventListener('click', closeMenu);
-    window.addEventListener('scroll', closeMenu, true);
-    window.addEventListener('resize', closeMenu);
+    window.addEventListener('scroll', () => setActionMenu(null), true);
+    window.addEventListener('resize', () => setActionMenu(null));
     return () => {
       window.removeEventListener('click', closeMenu);
-      window.removeEventListener('scroll', closeMenu, true);
-      window.removeEventListener('resize', closeMenu);
+      window.removeEventListener('scroll', () => setActionMenu(null), true);
+      window.removeEventListener('resize', () => setActionMenu(null));
     };
   }, []);
+
+  useEffect(() => {
+    if (!actionMenu) {
+      setActionMenuPosition(null);
+      return;
+    }
+    setActionMenuPosition({ x: actionMenu.x, y: actionMenu.y });
+  }, [actionMenu]);
+
+  useLayoutEffect(() => {
+    if (!actionMenu || !actionMenuRef.current) return;
+
+    const rect = actionMenuRef.current.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const padding = 12;
+
+    const nextX = Math.min(
+      Math.max(actionMenu.x, padding),
+      Math.max(padding, viewportWidth - rect.width - padding),
+    );
+    const nextY = Math.min(
+      Math.max(actionMenu.y, padding),
+      Math.max(padding, viewportHeight - rect.height - padding),
+    );
+
+    if (!actionMenuPosition || actionMenuPosition.x !== nextX || actionMenuPosition.y !== nextY) {
+      setActionMenuPosition({ x: nextX, y: nextY });
+    }
+  }, [actionMenu, actionMenuPosition]);
+
+  useEffect(() => {
+    if (!mobileActionMessageId) return;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [mobileActionMessageId]);
 
   // Scroll to bottom helper
   const scrollToBottom = (instant = false) => {
@@ -399,6 +644,34 @@ export function ChatPage({
 
     const setupChat = async () => {
       try {
+        const conversation = await fetchConversationById(activeConversationId);
+        if (isMounted) {
+          const conversationData = conversation as ConversationWithPinnedMessage;
+          setPinnedMessageId(conversationData?.pinned_message_id || null);
+          setFetchedPinnedMessage(conversationData?.pinned_message ? normalizeMessage(conversationData.pinned_message) : null);
+        }
+
+        if (conversationChannelRef.current) {
+          conversationChannelRef.current.unsubscribe();
+          conversationChannelRef.current = null;
+        }
+
+        const conversationChannel = supabase
+          .channel(`conversation-pin-${activeConversationId}`)
+          .on('postgres_changes', {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'conversations',
+            filter: `id=eq.${activeConversationId}`,
+          }, (payload) => {
+            const nextPinned = (payload.new as { pinned_message_id?: string | null } | null)?.pinned_message_id || null;
+            setPinnedMessageId(nextPinned);
+            if (!nextPinned) setFetchedPinnedMessage(null);
+          })
+          .subscribe();
+
+        conversationChannelRef.current = conversationChannel;
+
         // Cache-then-network: show cached messages instantly, skip skeleton on revisit
         const cached = queryClient.getQueryData<ChatPageMessage[]>(['messages', activeConversationId]);
         if (cached && cached.length > 0) {
@@ -462,8 +735,64 @@ export function ChatPage({
       if (unsubscribeRef.current) {
         unsubscribeRef.current();
       }
+      if (conversationChannelRef.current) {
+        conversationChannelRef.current.unsubscribe();
+        conversationChannelRef.current = null;
+      }
     };
   }, [activeConversationId]);
+  const togglePinnedMessage = async (messageId: string) => {
+    if (!activeConversationId) return;
+
+    const targetMessage = allMessages.find((message) => message.id === messageId);
+    if (!targetMessage) {
+      toast.error('Message not found');
+      return;
+    }
+
+    if (targetMessage.status === 'sending' || targetMessage.status === 'failed') {
+      toast.error('Please wait until the message is sent before pinning');
+      return;
+    }
+
+    if (!isUuid(targetMessage.id)) {
+      toast.error('This message is not ready to be pinned yet');
+      return;
+    }
+
+    const nextPinned = pinnedMessageId === messageId ? null : messageId;
+    const previousPinned = pinnedMessageId;
+    const previousPinnedMessage = fetchedPinnedMessage;
+    setPinnedMessageId(nextPinned);
+    setFetchedPinnedMessage(nextPinned ? normalizeMessage(targetMessage) : null);
+
+    try {
+      const updatedConversation = await setConversationPinnedMessage(activeConversationId, nextPinned);
+      const updatedData = updatedConversation as ConversationWithPinnedMessage;
+      setPinnedMessageId(updatedData?.pinned_message_id || null);
+      setFetchedPinnedMessage(updatedData?.pinned_message ? normalizeMessage(updatedData.pinned_message) : null);
+      toast.success(nextPinned ? 'Message pinned' : 'Message unpinned');
+    } catch (error: unknown) {
+      setPinnedMessageId(previousPinned);
+      setFetchedPinnedMessage(previousPinnedMessage);
+
+      const message = error instanceof Error ? error.message : 'Failed to update pinned message';
+      const lower = message.toLowerCase();
+
+      if (lower.includes('pinned_message_id') || lower.includes('column') || lower.includes('schema cache')) {
+        toast.error('Pinned message backend is not ready yet. Please run the latest Supabase migration.');
+        return;
+      }
+
+      if (lower.includes('must belong to the same conversation')) {
+        toast.error('Only messages from this chat can be pinned.');
+        return;
+      }
+
+      toast.error(message);
+    }
+  };
+
 
   // Mark conversation as read optimistically so unread badges disappear instantly.
   useEffect(() => {
@@ -539,7 +868,7 @@ export function ChatPage({
   };
 
   const handleMessageContextMenu = (event: React.MouseEvent, message: ChatPageMessage) => {
-    const canOpen = canUseMessageActions(message) || (!canUseMessageActions(message) && message.sender_id !== currentUserId && Boolean(messageReportType));
+    const canOpen = message.type !== 'system';
     if (!canOpen) return;
     event.preventDefault();
     event.stopPropagation();
@@ -649,15 +978,112 @@ export function ChatPage({
   };
 
   const handleMessageTouchStart = (event: React.TouchEvent, message: ChatPageMessage) => {
-    const canOpen = canUseMessageActions(message) || (!canUseMessageActions(message) && message.sender_id !== currentUserId && Boolean(messageReportType));
+    const canOpen = message.type !== 'system';
     if (!canOpen) return;
     const touch = event.touches[0];
     if (!touch) return;
 
+    // Prevent text selection and native context menu
+    event.preventDefault();
+
+    swipeReplyRef.current = {
+      messageId: message.id,
+      startX: touch.clientX,
+      startY: touch.clientY,
+      triggered: false,
+      cancelled: false,
+    };
+    setSwipePreview({ messageId: message.id, offset: 0, dragging: true });
+
     clearLongPress();
     longPressTimerRef.current = window.setTimeout(() => {
-      openActionMenu(message.id, touch.clientX, touch.clientY);
+      if (isMobileLikePointer()) {
+        triggerLongPressHaptic();
+        setMobileActionMessageId(message.id);
+      } else {
+        menuOpenedByTouchRef.current = true;
+        openActionMenu(message.id, touch.clientX, touch.clientY);
+        window.setTimeout(() => {
+          menuOpenedByTouchRef.current = false;
+        }, 50);
+      }
     }, LONG_PRESS_MS);
+  };
+
+  const handleMessageTouchMove = (event: React.TouchEvent, message: ChatPageMessage) => {
+    const swipeState = swipeReplyRef.current;
+    const touch = event.touches[0];
+    if (!swipeState || !touch || swipeState.messageId !== message.id || swipeState.cancelled) return;
+
+    // Prevent text selection during swipe
+    event.preventDefault();
+
+    const deltaX = touch.clientX - swipeState.startX;
+    const deltaY = Math.abs(touch.clientY - swipeState.startY);
+
+    // Cancel gesture if user is clearly scrolling vertically.
+    if (deltaY > SWIPE_REPLY_Y_TOLERANCE) {
+      swipeState.cancelled = true;
+      clearLongPress();
+      setSwipePreview((current) => {
+        if (!current || current.messageId !== message.id) return current;
+        return { ...current, offset: 0, dragging: false };
+      });
+      return;
+    }
+
+    const nextOffset = Math.max(0, Math.min(deltaX, MAX_SWIPE_REPLY_X));
+    setSwipePreview((current) => {
+      if (!current || current.messageId !== message.id) {
+        return { messageId: message.id, offset: nextOffset, dragging: true };
+      }
+      if (current.offset === nextOffset && current.dragging) return current;
+      return { ...current, offset: nextOffset, dragging: true };
+    });
+
+    // Any deliberate horizontal move should stop long-press menu activation.
+    if (deltaX > 18) {
+      clearLongPress();
+    }
+
+    if (swipeState.triggered || deltaX < SWIPE_REPLY_X_THRESHOLD) return;
+
+    swipeState.triggered = true;
+    clearLongPress();
+    if (isMobileLikePointer()) {
+      void Haptics.selectionChanged().catch(() => {});
+    }
+
+    setReplyTarget(message);
+    setActionMenu(null);
+    setMobileActionMessageId(null);
+    event.preventDefault();
+  };
+
+  const handleMessageTouchEnd = (event: React.TouchEvent) => {
+    event.preventDefault();
+    clearLongPress();
+    setSwipePreview((current) => {
+      if (!current) return null;
+      return { ...current, offset: 0, dragging: false };
+    });
+    window.setTimeout(() => {
+      setSwipePreview((current) => (current && current.dragging ? current : null));
+    }, 180);
+    swipeReplyRef.current = null;
+  };
+
+  const handleMessageTouchCancel = (event: React.TouchEvent) => {
+    event.preventDefault();
+    clearLongPress();
+    setSwipePreview((current) => {
+      if (!current) return null;
+      return { ...current, offset: 0, dragging: false };
+    });
+    window.setTimeout(() => {
+      setSwipePreview((current) => (current && current.dragging ? current : null));
+    }, 180);
+    swipeReplyRef.current = null;
   };
 
   const submitReportAction = async () => {
@@ -704,8 +1130,9 @@ export function ChatPage({
       toast.error('You can only edit within 1 minute');
       return;
     }
-    if (Array.isArray(message.attachments) && message.attachments.length > 0) {
-      toast.error('Editing attachment messages is not supported');
+    const hasNonReplyAttachments = getRenderableAttachments(message.attachments).length > 0;
+    if (hasNonReplyAttachments) {
+      toast.error('Editing media/document messages is not supported');
       return;
     }
     if (isUnsentMessage(message)) {
@@ -715,12 +1142,15 @@ export function ChatPage({
 
     setEditingMessageId(message.id);
     setEditingValue(message.content);
+    setReplyTarget(null);
     setActionMenu(null);
+    setMobileActionMessageId(null);
+    setTimeout(() => scrollToBottom(), 50);
   };
 
-  const submitEditMessage = async () => {
+  const submitEditMessage = async (nextRawValue?: string) => {
     if (!editingMessageId) return;
-    const nextContent = editingValue.trim();
+    const nextContent = (nextRawValue ?? editingValue).trim();
     if (!nextContent) {
       toast.error('Message cannot be empty');
       return;
@@ -809,6 +1239,12 @@ export function ChatPage({
         await deleteOwnMessage(confirmAction.messageId);
         setConfirmedMessages((prev) => prev.filter((msg) => msg.id !== confirmAction.messageId));
         setPendingMessages((prev) => prev.filter((msg) => msg.id !== confirmAction.messageId));
+        if (replyTarget?.id === confirmAction.messageId) {
+          setReplyTarget(null);
+        }
+        if (pinnedMessageId === confirmAction.messageId) {
+          setPinnedMessageId(null);
+        }
         updateMessageThreadCache((messages) => messages.filter((msg) => msg.id !== confirmAction.messageId));
         removeConversationListPreviewForMessage(confirmAction.messageId);
         refreshMessagesInBackground();
@@ -827,6 +1263,27 @@ export function ChatPage({
   // Handle sending messages
   const handleSend = async (message: string, atts?: ChatAttachment[], mentionedUserIds?: string[]) => {
     if (!currentUserId) return;
+
+    if (editingMessageId) {
+      const nextContent = message.trim();
+      if (!nextContent) return;
+      setEditingValue(nextContent);
+      await submitEditMessage(nextContent);
+      return;
+    }
+
+    const activeReply = replyTarget;
+    setReplyTarget(null);
+
+    const replyMetadata: ChatAttachment[] = activeReply
+      ? [{
+          type: 'reply',
+          messageId: activeReply.id,
+          senderName: activeReply.sender?.full_name || activeReply.sender?.username || (activeReply.sender_id === currentUserId ? 'You' : 'Unknown'),
+          preview: summarizeMessage(activeReply).slice(0, 140),
+        }]
+      : [];
+    const outgoingAttachments = [...replyMetadata, ...(atts || [])];
 
     let targetConversationId = activeConversationId;
     if (!targetConversationId) {
@@ -861,7 +1318,7 @@ export function ChatPage({
       created_at: new Date().toISOString(),
       client_id: clientId,
       status: "sending",
-      attachments: atts || []
+      attachments: outgoingAttachments
     };
 
     // Add to pending immediately
@@ -870,7 +1327,7 @@ export function ChatPage({
 
     // Send in background - subscription will move it from pending to confirmed
     try {
-      const saved = await sendMessage(targetConversationId, message, clientId, atts || []);
+      const saved = await sendMessage(targetConversationId, message, clientId, outgoingAttachments);
       const normalizedSaved: ChatPageMessage = {
         ...(saved as ChatPageMessage),
         sender: Array.isArray(saved?.sender) ? (saved.sender as unknown[])[0] as ChatPageMessage["sender"] : saved?.sender,
@@ -909,10 +1366,16 @@ export function ChatPage({
       }
     } catch (err) {
       console.error('Failed to send message:', err);
-      // Mark as failed
-      setPendingMessages((prev) =>
-        prev.map(m => m.id === tempId ? { ...m, status: "failed" } : m)
-      );
+      const isPolicyError = err instanceof Error && err.name === 'FamiliesPolicyError';
+      if (isPolicyError) {
+        setPendingMessages((prev) => prev.filter((m) => m.id !== tempId));
+      } else {
+        // Mark as failed
+        setPendingMessages((prev) =>
+          prev.map(m => m.id === tempId ? { ...m, status: "failed" } : m)
+        );
+      }
+      toast.error(err instanceof Error ? err.message : 'Failed to send message');
       refreshConversationListInBackground();
     }
   };
@@ -962,19 +1425,181 @@ export function ChatPage({
           {headerActions}
         </div>
       </div>
+      {pinnedMessage && (
+        <div className="w-full bg-white px-3 py-1.5 sm:px-4 lg:px-6 xl:px-8">
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 px-0 text-left"
+            onClick={() => void jumpToMessage(pinnedMessage.id)}
+          >
+            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[#cfd3d7] bg-[#f5f7f8] shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]">
+              <Pin className="h-3.5 w-3.5 text-[#3e4a56]" />
+            </div>
+            <div className="min-w-0">
+              <p className="line-clamp-1 text-[13px] leading-5 text-[#111b21]">{summarizeMessage(pinnedMessage)}</p>
+            </div>
+          </button>
+        </div>
+      )}
     </header>
   );
 
+  const mobileActionSheet = mobileActionMessage ? (
+    <div className="fixed inset-0 z-[140] md:hidden">
+      <button
+        type="button"
+        className="absolute inset-0 bg-black/35"
+        onClick={() => setMobileActionMessageId(null)}
+        aria-label="Close message actions"
+      />
+
+      <div className="absolute inset-x-0 bottom-0 max-h-[80vh] overflow-hidden rounded-t-2xl border border-border bg-background shadow-2xl">
+        <div className="mx-auto mb-3 mt-2 h-1.5 w-10 rounded-full bg-muted" />
+        <div className="max-h-[calc(80vh-22px)] overflow-y-auto px-2 pb-[max(env(safe-area-inset-bottom),0.5rem)]">
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-sm hover:bg-accent"
+            onClick={() => {
+              setReplyTarget(mobileActionMessage);
+              setMobileActionMessageId(null);
+            }}
+          >
+            <Reply className="h-4 w-4" />
+            Reply
+          </button>
+
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-sm hover:bg-accent"
+            onClick={() => {
+              void copyMessageContent(mobileActionMessage);
+              setMobileActionMessageId(null);
+            }}
+          >
+            <Copy className="h-4 w-4" />
+            Copy
+          </button>
+
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-sm hover:bg-accent"
+            onClick={() => {
+              void togglePinnedMessage(mobileActionMessage.id);
+              setMobileActionMessageId(null);
+            }}
+          >
+            {pinnedMessageId === mobileActionMessage.id ? (
+              <><PinOff className="h-4 w-4" />Unpin</>
+            ) : (
+              <><Pin className="h-4 w-4" />Pin message</>
+            )}
+          </button>
+
+          {canUseMessageActions(mobileActionMessage) && (
+            <>
+              <div className="my-1 h-px bg-border" />
+              {!isUnsentMessage(mobileActionMessage) && (
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-sm hover:bg-accent"
+                  onClick={() => {
+                    beginEditMessage(mobileActionMessage);
+                    setMobileActionMessageId(null);
+                  }}
+                >
+                  <Pencil className="h-4 w-4" />
+                  Edit
+                </button>
+              )}
+
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-sm hover:bg-accent"
+                onClick={() => {
+                  setConfirmAction({ type: 'unsend', messageId: mobileActionMessage.id });
+                  setMobileActionMessageId(null);
+                }}
+              >
+                <Undo2 className="h-4 w-4" />
+                Unsend
+              </button>
+
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-sm text-destructive hover:bg-accent"
+                onClick={() => {
+                  setConfirmAction({ type: 'delete', messageId: mobileActionMessage.id });
+                  setMobileActionMessageId(null);
+                }}
+              >
+                <Trash2 className="h-4 w-4" />
+                Delete
+              </button>
+            </>
+          )}
+
+          {mobileActionMessage.sender_id !== currentUserId && messageReportType && (
+            <>
+              <div className="my-1 h-px bg-border" />
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-sm hover:bg-accent"
+                onClick={() => {
+                  setReportTarget({
+                    messageId: String(mobileActionMessage.id),
+                    reportedUserId: String(mobileActionMessage.sender_id),
+                  });
+                  setMobileActionMessageId(null);
+                }}
+              >
+                Report Message
+              </button>
+
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-sm text-destructive hover:bg-accent"
+                onClick={() => {
+                  void blockUserFromMessage(String(mobileActionMessage.sender_id));
+                  setMobileActionMessageId(null);
+                }}
+                disabled={isSubmittingAction}
+              >
+                Block User
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  ) : null;
+
   // Footer component
   const footerContent = (
-    <div className="bg-background/95 backdrop-blur-sm border-t border-border/50 w-full">
-      <ChatComposer
-        onSend={handleSend}
-        tripMembers={tripMembers}
-        disabled={!canSend}
-        placeholder={canSend ? "Type a message..." : (blockedMessage || "Messaging is disabled for this user")}
-      />
-    </div>
+    <>
+      <div className="bg-background/95 backdrop-blur-sm border-t border-border/50 w-full">
+        <ChatComposer
+          onSend={handleSend}
+          tripMembers={tripMembers}
+          disabled={!canSend}
+          placeholder={canSend ? "Type a message..." : (blockedMessage || "Messaging is disabled for this user")}
+          replyTo={replyTarget ? {
+            senderName: replyTarget.sender?.full_name || replyTarget.sender?.username || (replyTarget.sender_id === currentUserId ? 'You' : 'Unknown'),
+            content: summarizeMessage(replyTarget),
+          } : undefined}
+          onCancelReply={() => setReplyTarget(null)}
+          editState={editingMessageId ? {
+            active: true,
+            value: editingValue,
+            onChange: setEditingValue,
+            onCancel: () => {
+              setEditingMessageId(null);
+              setEditingValue('');
+            },
+          } : undefined}
+        />
+      </div>
+      {mobileActionSheet}
+    </>
   );
 
   // Render messages
@@ -1027,17 +1652,16 @@ export function ChatPage({
     </div>
   ) : (
     <>
-      {/* WhatsApp-style sticky scroll date overlay */}
-      <div className="sticky top-2 z-30 flex justify-center pointer-events-none">
-        <span
-          className={cn(
-            "rounded-lg border border-[#d6d6d6] bg-white px-3 py-1 text-[11px] font-medium tracking-[0.01em] text-[#5f6368] shadow-[0_1px_2px_rgba(0,0,0,0.08)] transition-opacity duration-300",
-            scrollDateLabel ? "opacity-100" : "opacity-0"
-          )}
+      {/* Show sticky date only when available so it doesn't reserve extra gap */}
+      {scrollDateLabel && (
+        <div
+          className="sticky top-2 z-10 flex justify-center pointer-events-none"
         >
-          {scrollDateLabel || "\u00A0"}
-        </span>
-      </div>
+          <span className="rounded-full border border-[#d6d6d6] bg-white px-3 py-0.5 text-[11px] font-medium tracking-[0.01em] text-[#111b21] shadow-[0_1px_2px_rgba(11,20,26,0.12)] transition-opacity duration-300 opacity-100">
+            {scrollDateLabel}
+          </span>
+        </div>
+      )}
 
       {hiddenMessagesCount > 0 && (
         <div className="mb-3 flex justify-center">
@@ -1062,6 +1686,7 @@ export function ChatPage({
         const dateSeparatorLabel = msg.created_at ? formatDateSeparatorLabel(String(msg.created_at)) : "";
         const isOwn = msg.sender_id === currentUserId;
         const isSystem = msg.type === 'system';
+        const isPinnedChatMessage = pinnedMessageId === msg.id;
         const canOpenMenuForMessage = canUseMessageActions(msg) || (msg.sender_id !== currentUserId && Boolean(messageReportType));
         const timeLabel = currentDate
           ? currentDate.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
@@ -1087,8 +1712,17 @@ export function ChatPage({
           );
         }
 
+        const replyMeta = getReplyAttachment(msg.attachments);
+        const renderableAttachments = getRenderableAttachments(msg.attachments);
+
         return (
-          <div key={String(msg.id)}>
+          <div
+            key={String(msg.id)}
+            ref={(element) => {
+              if (element) messageElementRefs.current.set(String(msg.id), element);
+              else messageElementRefs.current.delete(String(msg.id));
+            }}
+          >
             {showDateSeparator && dateSeparatorLabel && (
               renderDateSeparator(dateSeparatorLabel, index === 0)
             )}
@@ -1119,17 +1753,27 @@ export function ChatPage({
 
                   <div
                     className={cn(
-                      "relative px-4 py-2 rounded-2xl border shadow-sm",
+                      "relative px-4 py-2 rounded-2xl border shadow-sm select-none will-change-transform",
+                      swipePreview?.messageId === String(msg.id) && !swipePreview.dragging && "transition-transform duration-150 ease-out",
                       isOwn
                         ? "bg-black text-white border-black rounded-br-sm"
-                        : "bg-white text-foreground border-border rounded-bl-sm"
+                        : "bg-white text-foreground border-border rounded-bl-sm",
+                      jumpHighlightMessageId === String(msg.id) && "ring-2 ring-gray-600 ring-offset-2 ring-offset-background"
                     )}
-                    style={{ wordBreak: "break-word", overflowWrap: "anywhere" }}
+                    style={{
+                      transform: swipePreview?.messageId === String(msg.id) ? `translateX(${swipePreview.offset}px)` : undefined,
+                      wordBreak: "break-word",
+                      overflowWrap: "anywhere",
+                      WebkitUserSelect: "none",
+                      userSelect: "none",
+                      WebkitTouchCallout: "none",
+                      touchAction: "manipulation",
+                    }}
                     onContextMenu={(event) => handleMessageContextMenu(event, msg)}
                     onTouchStart={(event) => handleMessageTouchStart(event, msg)}
-                    onTouchMove={clearLongPress}
-                    onTouchEnd={clearLongPress}
-                    onTouchCancel={clearLongPress}
+                    onTouchMove={(event) => handleMessageTouchMove(event, msg)}
+                    onTouchEnd={handleMessageTouchEnd}
+                    onTouchCancel={handleMessageTouchCancel}
                   >
                     {canOpenMenuForMessage && (
                       <button
@@ -1156,6 +1800,21 @@ export function ChatPage({
                       "pr-5 text-sm sm:text-base leading-snug whitespace-pre-wrap",
                       isUnsentMessage(msg) && "italic opacity-80"
                     )}>
+                      {replyMeta && (
+                        <button
+                          type="button"
+                          onClick={() => replyMeta.messageId && void jumpToMessage(replyMeta.messageId)}
+                          className={cn(
+                            "mb-2 block w-full rounded-lg border px-2.5 py-1.5 text-left",
+                            isOwn
+                              ? "border-gray-500/90 bg-white/10"
+                              : "border-gray-500 bg-black/5"
+                          )}
+                        >
+                          <p className={cn("text-[11px] font-semibold", isOwn ? "text-white/85" : "text-muted-foreground")}>{replyMeta.senderName}</p>
+                          <p className={cn("line-clamp-1 text-xs", isOwn ? "text-white/90" : "text-foreground/80")}>{replyMeta.preview}</p>
+                        </button>
+                      )}
                       {(() => {
                         const parts = parseMessageForDisplay(msg.content);
                         return parts.map((part, idx) =>
@@ -1180,14 +1839,17 @@ export function ChatPage({
                         );
                       })()}
                     </div>
-                    {Array.isArray(msg.attachments) && msg.attachments.length > 0 && (
-                      <MessageAttachments attachments={msg.attachments} isOwn={isOwn} />
+                    {renderableAttachments.length > 0 && (
+                      <MessageAttachments attachments={renderableAttachments} isOwn={isOwn} />
                     )}
                   </div>
                   <div className={cn(
                     "flex items-center gap-1 text-[10px] sm:text-[11px] px-2 mt-0.5",
                     isOwn ? "justify-end text-muted-foreground/80" : "text-muted-foreground/80"
                   )}>
+                    {isPinnedChatMessage && (
+                      <Pin className="h-3 w-3 text-black-700" aria-label="Pinned message" />
+                    )}
                     {msg.is_edited && !isUnsentMessage(msg) && <span>Edited</span>}
                     <span>{timeLabel}</span>
                     {isOwn && (
@@ -1208,16 +1870,60 @@ export function ChatPage({
 
       {actionMenu && actionMessage && (
         <div
-          className="fixed z-[70] min-w-[164px] rounded-xl border border-border bg-popover p-1.5 shadow-2xl"
-          style={{ left: actionMenu.x, top: actionMenu.y }}
+          ref={actionMenuRef}
+          className="fixed z-[90] min-w-[180px] max-h-[65vh] overflow-y-auto rounded-2xl bg-[#111b21] p-2 shadow-[0_20px_60px_rgba(0,0,0,0.3)] backdrop-blur-sm"
+          style={{ left: actionMenuPosition?.x ?? actionMenu.x, top: actionMenuPosition?.y ?? actionMenu.y }}
           onClick={(event) => event.stopPropagation()}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
         >
-          {canUseMessageActions(actionMessage) ? (
-            <>
+          <>
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm text-white hover:bg-white/15"
+              onClick={() => {
+                setReplyTarget(actionMessage);
+                setActionMenu(null);
+              }}
+            >
+              <Reply className="h-4 w-4" />
+              Reply
+            </button>
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm text-white hover:bg-white/15"
+              onClick={() => {
+                void copyMessageContent(actionMessage);
+                setActionMenu(null);
+              }}
+            >
+              <Copy className="h-4 w-4" />
+              Copy
+            </button>
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm text-white hover:bg-white/15"
+              onClick={() => {
+                void togglePinnedMessage(actionMessage.id);
+                setActionMenu(null);
+              }}
+            >
+              {pinnedMessageId === actionMessage.id ? (
+                <><PinOff className="h-4 w-4" />Unpin</>
+              ) : (
+                <><Pin className="h-4 w-4" />Pin message</>
+              )}
+            </button>
+
+            {canUseMessageActions(actionMessage) && (
+              <>
+                <div className="my-1 h-px bg-white/20" />
               {!isUnsentMessage(actionMessage) && (
                 <button
                   type="button"
-                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-accent"
+                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm text-white hover:bg-white/15"
                   onClick={() => beginEditMessage(actionMessage)}
                 >
                   <Pencil className="h-4 w-4" />
@@ -1226,7 +1932,7 @@ export function ChatPage({
               )}
               <button
                 type="button"
-                className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-accent"
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm text-white hover:bg-white/15"
                 onClick={() => {
                   setConfirmAction({ type: 'unsend', messageId: actionMessage.id });
                   setActionMenu(null);
@@ -1237,7 +1943,7 @@ export function ChatPage({
               </button>
               <button
                 type="button"
-                className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-destructive hover:bg-accent"
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm text-red-400 hover:bg-white/15"
                 onClick={() => {
                   setConfirmAction({ type: 'delete', messageId: actionMessage.id });
                   setActionMenu(null);
@@ -1246,13 +1952,15 @@ export function ChatPage({
                 <Trash2 className="h-4 w-4" />
                 Delete
               </button>
-            </>
-          ) : (
-            actionMessage.sender_id !== currentUserId && messageReportType && (
+              </>
+            )}
+
+            {actionMessage.sender_id !== currentUserId && messageReportType && (
               <>
+                <div className="my-1 h-px bg-white/20" />
                 <button
                   type="button"
-                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-accent"
+                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm text-white hover:bg-white/15"
                   onClick={() => {
                     setReportTarget({
                       messageId: String(actionMessage.id),
@@ -1265,62 +1973,17 @@ export function ChatPage({
                 </button>
                 <button
                   type="button"
-                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-destructive hover:bg-accent"
+                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm text-red-400 hover:bg-white/15"
                   onClick={() => void blockUserFromMessage(String(actionMessage.sender_id))}
                   disabled={isSubmittingAction}
                 >
                   Block User
                 </button>
               </>
-            )
-          )}
+            )}
+          </>
         </div>
       )}
-
-      <Dialog
-        open={Boolean(editingMessageId)}
-        onOpenChange={(open) => {
-          if (!open) {
-            setEditingMessageId(null);
-            setEditingValue('');
-          }
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Edit message</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            <Input
-              value={editingValue}
-              onChange={(event) => setEditingValue(event.target.value)}
-              placeholder="Update your message"
-              autoFocus
-              maxLength={2000}
-            />
-            <div className="flex justify-end gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => {
-                  setEditingMessageId(null);
-                  setEditingValue('');
-                }}
-                disabled={isSubmittingAction}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="button"
-                onClick={() => void submitEditMessage()}
-                disabled={isSubmittingAction || !editingValue.trim()}
-              >
-                Save
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
 
       <Dialog
         open={Boolean(reportTarget)}
@@ -1417,6 +2080,22 @@ export function ChatPage({
 
   return {
     headerContent,
+    tripPinnedContent: !showBackButton && pinnedMessage ? (
+      <div className="w-full bg-white px-3 py-1.5 sm:px-4 lg:px-6 xl:px-8">
+        <button
+          type="button"
+          className="flex w-full items-center gap-2 px-0 text-left"
+          onClick={() => void jumpToMessage(pinnedMessage.id)}
+        >
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[#cfd3d7] bg-[#f5f7f8] shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]">
+            <Pin className="h-3.5 w-3.5 text-[#3e4a56]" />
+          </div>
+          <div className="min-w-0">
+            <p className="line-clamp-1 text-[13px] leading-5 text-[#111b21]">{summarizeMessage(pinnedMessage)}</p>
+          </div>
+        </button>
+      </div>
+    ) : null,
     messagesContent,
     footerContent,
     messagesEndRef,
@@ -1425,7 +2104,12 @@ export function ChatPage({
       <button
         type="button"
         onClick={() => scrollToBottom()}
-        className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+5.2rem)] right-4 z-50 flex h-10 w-10 items-center justify-center rounded-full bg-zinc-500 text-white shadow-[0_8px_22px_rgba(0,0,0,0.28)] ring-2 ring-white/70 hover:bg-zinc-600 active:scale-95 transition"
+        className={cn(
+          "fixed z-50 flex h-10 w-10 items-center justify-center rounded-full bg-zinc-500 text-white shadow-[0_8px_22px_rgba(0,0,0,0.28)] ring-2 ring-white/70 hover:bg-zinc-600 active:scale-95 transition",
+          replyTarget || editingMessageId
+            ? "bottom-[calc(env(safe-area-inset-bottom,0px)+8.1rem)] right-3"
+            : "bottom-[calc(env(safe-area-inset-bottom,0px)+5.2rem)] right-4"
+        )}
         aria-label="Scroll to bottom"
       >
         <ArrowDown className="h-5 w-5" />

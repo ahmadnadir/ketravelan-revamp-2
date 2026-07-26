@@ -23,12 +23,14 @@ export default function AuthCallback() {
     username?: string | null;
     country?: string | null;
     location?: string | null;
+    date_of_birth?: string | null;
   } | null) => {
     if (!profile) return false;
     if (profile.onboarding_completed) return true;
     const hasName = Boolean((profile.full_name || "").trim() || (profile.username || "").trim());
     const hasLocation = Boolean((profile.country || "").trim() || (profile.location || "").trim());
-    return hasName && hasLocation;
+    const hasDateOfBirth = Boolean((profile.date_of_birth || "").trim());
+    return hasName && hasLocation && hasDateOfBirth;
   };
 
   useEffect(() => {
@@ -144,7 +146,7 @@ export default function AuthCallback() {
           const userId = data.session.user.id;
           const { data: profile, error: profileError } = await supabase
             .from('profiles')
-            .select('onboarding_completed, full_name, username, country, location')
+            .select('onboarding_completed, full_name, username, country, location, date_of_birth')
             .eq('id', userId)
             .maybeSingle();
           if (profileError) {

@@ -33,9 +33,11 @@ export default function Auth() {
     const username = typeof profileToCheck.username === "string" ? profileToCheck.username : "";
     const country = typeof profileToCheck.country === "string" ? profileToCheck.country : "";
     const location = typeof profileToCheck.location === "string" ? profileToCheck.location : "";
+    const dateOfBirth = typeof profileToCheck.date_of_birth === "string" ? profileToCheck.date_of_birth : "";
     const hasName = Boolean(fullName.trim() || username.trim());
     const hasLocation = Boolean(country.trim() || location.trim());
-    return hasName && hasLocation;
+    const hasDateOfBirth = Boolean(dateOfBirth.trim());
+    return hasName && hasLocation && hasDateOfBirth;
   }, []);
 
   const [mode, setMode] = useState<"login" | "signup">(

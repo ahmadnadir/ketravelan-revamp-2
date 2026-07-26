@@ -39,6 +39,12 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
     }
   }
 
+  if (!profile.date_of_birth || !profile.date_of_birth.trim()) {
+    if (path !== "/onboarding") {
+      return <Navigate to="/onboarding" replace />;
+    }
+  }
+
   // Restrict Explore page access
   if (path === "/explore") {
     if (!profile.email_confirmed) {
