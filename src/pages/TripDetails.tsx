@@ -28,7 +28,6 @@ import {
   ZoomOut,
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
-import { SegmentedControl } from "@/components/shared/SegmentedControl";
 import { PillChip } from "@/components/shared/PillChip";
 import { AvatarRow } from "@/components/shared/AvatarRow";
 import { Button } from "@/components/ui/button";
@@ -70,6 +69,11 @@ import { BreadcrumbSchema } from "@/components/seo/BreadcrumbSchema";
 import { OrganizationSchema } from "@/components/seo/OrganizationSchema";
 import { FAQSchema } from "@/components/seo/FAQSchema";
 import { getLoadErrorFeedback } from "@/lib/requestErrors";
+import { useScrollProgress } from "@/hooks/useScrollProgress";
+import { useStickyHeader } from "@/hooks/useStickyHeader";
+import { TripGallery } from "@/components/trip-details/TripGallery";
+import { FloatingNavigation } from "@/components/trip-details/FloatingNavigation";
+import { TripSectionNavigation } from "@/components/trip-details/TripSectionNavigation";
 
 const iconMap: Record<string, any> = {
   car: Car,
@@ -190,15 +194,36 @@ export default function TripDetails() {
   const [isCancellingTrip, setIsCancellingTrip] = useState(false);
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
-  const [isScrolled, setIsScrolled] = useState(false);
+  const [heroHeight, setHeroHeight] = useState(0);
+  const mobileHeroRef = useRef<HTMLDivElement | null>(null);
+  const { scrollY } = useScrollProgress({ containerSelector: ".app-shell-content" });
+  const floatingTransitionStart = heroHeight > 0 ? Math.round(heroHeight * 0.52) : 140;
+  const floatingTransitionEnd = heroHeight > 0 ? Math.round(heroHeight * 0.78) : 240;
+  const mobileHeader = useStickyHeader({
+    scrollY,
+    transitionStart: floatingTransitionStart,
+    transitionEnd: Math.max(floatingTransitionEnd, floatingTransitionStart + 40),
+    topResetThreshold: 2,
+  });
 
   useEffect(() => {
-    const handleScroll = () => {
-      setIsScrolled(window.scrollY > 200);
+    const heroNode = mobileHeroRef.current;
+    if (!heroNode || typeof ResizeObserver === "undefined") return;
+
+    const syncHeroHeight = () => {
+      setHeroHeight(heroNode.getBoundingClientRect().height);
     };
-    window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
+
+    syncHeroHeight();
+    const observer = new ResizeObserver(syncHeroHeight);
+    observer.observe(heroNode);
+    window.addEventListener("resize", syncHeroHeight, { passive: true });
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", syncHeroHeight);
+    };
+  }, [id]);
 
   // Fetch trip details with React Query
   const isSimulatedLoading = useSimulatedLoading(700);
@@ -676,6 +701,7 @@ export default function TripDetails() {
     if (images.length === 0) return null;
 
     const collageHeightClass = "h-[18.5rem] sm:h-[21rem] md:h-[24rem] lg:h-[25rem]";
+    const tileRadiusClass = "rounded-[22px]";
 
     if (images.length === 1) {
       return (
@@ -683,8 +709,8 @@ export default function TripDetails() {
           type="button"
           onClick={() => openLightboxAt(0)}
           className={cn(
-            "group relative block w-full overflow-hidden rounded-3xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primary",
-            collageHeightClass
+            "group relative block w-full aspect-[16/9] overflow-hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+            tileRadiusClass
           )}
           aria-label="Open trip photo"
         >
@@ -693,32 +719,38 @@ export default function TripDetails() {
             alt={`${tripData.title} photo`}
             className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
           />
-          <div className="absolute inset-0 bg-black/0 transition-colors duration-300 group-hover:bg-black/20" />
-          <div className="pointer-events-none absolute bottom-4 right-4 rounded-full bg-white/85 p-2.5 text-foreground opacity-0 shadow-sm backdrop-blur transition-opacity duration-300 group-hover:opacity-100">
-            <ZoomIn className="h-4 w-4" />
-          </div>
+          <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/45 via-black/15 to-transparent" />
         </button>
       );
     }
 
     if (images.length === 2) {
       return (
-        <div className={cn("grid grid-cols-2 gap-2 md:gap-3", collageHeightClass)}>
-          {images.slice(0, 2).map((img, index) => (
-            <button
-              key={index}
-              type="button"
-              onClick={() => openLightboxAt(index)}
-              className="group relative block h-full overflow-hidden rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-              aria-label={`Open photo ${index + 1}`}
-            >
-              <img
-                src={img}
-                alt={`${tripData.title} photo ${index + 1}`}
-                className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-              />
-            </button>
-          ))}
+        <div className={cn("grid grid-cols-5 gap-2 md:gap-3", collageHeightClass)}>
+          <button
+            type="button"
+            onClick={() => openLightboxAt(0)}
+            className={cn("group relative col-span-3 block h-full overflow-hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-primary", tileRadiusClass)}
+            aria-label="Open photo 1"
+          >
+            <img
+              src={images[0]}
+              alt={`${tripData.title} photo 1`}
+              className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+            />
+          </button>
+          <button
+            type="button"
+            onClick={() => openLightboxAt(1)}
+            className={cn("group relative col-span-2 block h-full overflow-hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-primary", tileRadiusClass)}
+            aria-label="Open photo 2"
+          >
+            <img
+              src={images[1]}
+              alt={`${tripData.title} photo 2`}
+              className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+            />
+          </button>
         </div>
       );
     }
@@ -729,7 +761,7 @@ export default function TripDetails() {
           <button
             type="button"
             onClick={() => openLightboxAt(0)}
-            className="group relative block h-full min-h-[12rem] overflow-hidden rounded-2xl md:col-span-3 md:row-span-2 md:min-h-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            className={cn("group relative block h-full min-h-[12rem] overflow-hidden md:col-span-3 md:row-span-2 md:min-h-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary", tileRadiusClass)}
             aria-label="Open photo 1"
           >
             <img
@@ -742,7 +774,7 @@ export default function TripDetails() {
           <button
             type="button"
             onClick={() => openLightboxAt(1)}
-            className="group relative block h-full min-h-[8rem] overflow-hidden rounded-2xl md:col-span-2 md:min-h-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            className={cn("group relative block h-full min-h-[8rem] overflow-hidden md:col-span-2 md:min-h-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary", tileRadiusClass)}
             aria-label="Open photo 2"
           >
             <img
@@ -755,7 +787,7 @@ export default function TripDetails() {
           <button
             type="button"
             onClick={() => openLightboxAt(2)}
-            className="group relative block h-full min-h-[8rem] overflow-hidden rounded-2xl md:col-span-2 md:min-h-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            className={cn("group relative block h-full min-h-[8rem] overflow-hidden md:col-span-2 md:min-h-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary", tileRadiusClass)}
             aria-label="Open photo 3"
           >
             <img
@@ -768,15 +800,52 @@ export default function TripDetails() {
       );
     }
 
+    if (images.length === 4) {
+      return (
+        <div className={cn("grid grid-cols-3 grid-rows-2 gap-2 md:gap-3", collageHeightClass)}>
+          <button
+            type="button"
+            onClick={() => openLightboxAt(0)}
+            className={cn("group relative col-span-3 block h-full overflow-hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-primary", tileRadiusClass)}
+            aria-label="Open photo 1"
+          >
+            <img
+              src={images[0]}
+              alt={`${tripData.title} photo 1`}
+              className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+            />
+          </button>
+          {images.slice(1, 4).map((img, idx) => {
+            const imageIndex = idx + 1;
+            return (
+              <button
+                key={imageIndex}
+                type="button"
+                onClick={() => openLightboxAt(imageIndex)}
+                className={cn("group relative block h-full overflow-hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-primary", tileRadiusClass)}
+                aria-label={`Open photo ${imageIndex + 1}`}
+              >
+                <img
+                  src={img}
+                  alt={`${tripData.title} photo ${imageIndex + 1}`}
+                  className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                />
+              </button>
+            );
+          })}
+        </div>
+      );
+    }
+
     const visibleCount = Math.min(images.length, 5);
     const hiddenCount = Math.max(images.length - visibleCount, 0);
 
     return (
-      <div className={cn("grid grid-cols-2 gap-2 md:grid-cols-4 md:grid-rows-2 md:gap-3", collageHeightClass)}>
+      <div className={cn("grid grid-cols-4 grid-rows-2 gap-2 md:gap-3", collageHeightClass)}>
         <button
           type="button"
           onClick={() => openLightboxAt(0)}
-          className="group relative col-span-2 row-span-2 block h-full overflow-hidden rounded-2xl md:col-span-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          className={cn("group relative col-span-2 row-span-2 block h-full overflow-hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-primary", tileRadiusClass)}
           aria-label="Open photo 1"
         >
           <img
@@ -795,7 +864,7 @@ export default function TripDetails() {
               key={imageIndex}
               type="button"
               onClick={() => openLightboxAt(imageIndex)}
-              className="group relative block h-full min-h-[7.75rem] overflow-hidden rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primary md:min-h-0"
+              className={cn("group relative block h-full min-h-[7.75rem] overflow-hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-primary md:min-h-0", tileRadiusClass)}
               aria-label={`Open photo ${imageIndex + 1}`}
             >
               <img
@@ -825,12 +894,20 @@ export default function TripDetails() {
     description: tripData?.description,
   });
   const shareText = tripData ? `Check out this trip: ${tripData.title} to ${tripData.destination}` : "Check out this trip!";
+  const explicitReturnPath = searchParams.get("return");
   const returnTo = searchParams.get("from");
   const returnTab = searchParams.get("tab");
   const allowedExploreTabs = new Set(["upcoming", "past"]);
   const allowedMyTripsTabs = new Set(["upcoming", "previous", "draft"]);
   const backParams = new URLSearchParams();
   let backBasePath = "/explore";
+
+  const safeReturnPath = explicitReturnPath
+    && explicitReturnPath.startsWith("/")
+    && !explicitReturnPath.startsWith("//")
+    && !explicitReturnPath.includes("://")
+    ? explicitReturnPath
+    : null;
 
   if (returnTo === "my-trips") {
     backBasePath = "/my-trips";
@@ -847,10 +924,106 @@ export default function TripDetails() {
     backParams.set("tab", returnTab);
   }
 
-  const backLink = backParams.toString()
+  const fallbackBackLink = backParams.toString()
     ? `${backBasePath}?${backParams.toString()}`
     : backBasePath;
-  const backLabel = returnTo === "my-trips" ? "Back to My Trips" : "Back to Explore";
+  const backLink = safeReturnPath || fallbackBackLink;
+  const backLabel = safeReturnPath
+    ? safeReturnPath.startsWith("/profile")
+      ? "Back to Profile"
+      : safeReturnPath.startsWith("/my-trips")
+        ? "Back to My Trips"
+        : safeReturnPath.startsWith("/explore")
+          ? "Back to Explore"
+          : safeReturnPath.startsWith("/approvals")
+            ? "Back to Approvals"
+            : "Back"
+    : (returnTo === "my-trips" ? "Back to My Trips" : "Back to Explore");
+  const mobileActionBtnBase = "h-9 w-9 rounded-full flex items-center justify-center transition-all duration-[250ms] [transition-timing-function:cubic-bezier(0.2,0.8,0.2,1)]";
+  const mobileActionBtnHero = "border border-white/40 bg-black/30 text-white shadow-lg backdrop-blur-md";
+  const mobileActionBtnBar = "bg-white/85 text-foreground";
+
+  const renderMobileHeaderActions = (variant: "hero" | "bar") => {
+    if (isDraftTrip) return null;
+
+    const actionTone = variant === "hero" ? mobileActionBtnHero : mobileActionBtnBar;
+
+    return (
+      <>
+        <button
+          onClick={handleFavourite}
+          className={cn(mobileActionBtnBase, actionTone, isAnimating && "scale-110")}
+          aria-label="Toggle favourite"
+        >
+          <Heart
+            className={cn(
+              "h-4.5 w-4.5 transition-all duration-300",
+              isFavourited
+                ? "fill-destructive text-destructive scale-110"
+                : (variant === "hero" ? "fill-transparent text-white" : "fill-transparent text-foreground")
+            )}
+          />
+        </button>
+        <button
+          onClick={handleShare}
+          className={cn(mobileActionBtnBase, actionTone)}
+          aria-label="Share trip"
+        >
+          <Share2 className="h-4.5 w-4.5" />
+        </button>
+
+        {isDbTrip && !isOrganizer && dbTrip?.creator_id && (
+          <ModerationMenu
+            reportType="TRIP"
+            targetId={String(dbTrip.id)}
+            reportedUserId={String(dbTrip.creator_id)}
+            targetLabel="Trip"
+            reportLabel="Report Trip"
+            trigger={
+              <button
+                type="button"
+                className={cn(mobileActionBtnBase, actionTone)}
+                aria-label="Trip actions"
+              >
+                <MoreVertical className="h-4.5 w-4.5" strokeWidth={2.5} />
+              </button>
+            }
+          />
+        )}
+
+        {isDbTrip && isOrganizer && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                className={cn(mobileActionBtnBase, actionTone)}
+                aria-label="Trip actions"
+              >
+                <MoreVertical className="h-4.5 w-4.5" strokeWidth={2.5} />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-[12rem]">
+              <DropdownMenuItem onSelect={() => setShowInviteModal(true)}>
+                Invite by email
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onSelect={() => setShowCancelConfirm(true)}
+                className="text-destructive focus:text-destructive"
+                disabled={isCancellingTrip}
+              >
+                {isCancellingTrip ? "Cancelling..." : "Cancel trip"}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+      </>
+    );
+  };
+
+  const isNearTop = scrollY <= 2;
+  const showDesktopGlassHeader = !isNearTop && scrollY <= 120;
+  const showDesktopStickyHeader = scrollY > 120;
+  const showDesktopHeader = showDesktopGlassHeader || showDesktopStickyHeader;
 
   const handleShare = async () => {
     if (navigator.share) {
@@ -1510,160 +1683,50 @@ export default function TripDetails() {
       )}
 
       <AppLayout wideLayout>
+        <FloatingNavigation
+          title={tripData.title}
+          backLink={backLink}
+          backLabel={backLabel}
+          rightActions={renderMobileHeaderActions("bar")}
+          visible={mobileHeader.showFloatingNavigation}
+          opacity={mobileHeader.opacity}
+          translateY={mobileHeader.translateY}
+          scale={mobileHeader.scale}
+          blurPx={mobileHeader.blurPx}
+          shadowOpacity={mobileHeader.shadowOpacity}
+        />
         <div className="pb-36">
         {images.length > 0 && (
           <>
-            {/* Mobile hero - full bleed like the reference screenshot */}
-            <div className="-mx-5 overflow-hidden md:hidden sm:-mx-6">
-              <div
-                className="relative isolate"
-                onTouchStart={handleSwipeStart}
-                onTouchEnd={(event) => handleSwipeEnd(event, nextMobileImage, prevMobileImage)}
-              >
-                <button
-                  type="button"
-                  onClick={() => openLightboxAt(mobileImageIndex)}
-                  className="group relative block h-[18.5rem] w-full overflow-hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                  aria-label="Open trip photo"
-                >
-                  <img
-                    src={images[mobileImageIndex]}
-                    alt={`${tripData.title} photo`}
-                    className="h-full w-full object-cover transition-transform duration-500 group-active:scale-[1.02]"
-                  />
-                </button>
-
-                <div className="pointer-events-none absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-black/45 via-black/20 to-transparent" />
-                <div className="pointer-events-none absolute inset-x-0 bottom-0 h-36 bg-gradient-to-t from-black/55 via-black/25 to-transparent" />
-
-                {images.length > 1 && (
-                  <div className="absolute left-1/2 top-4 z-20 -translate-x-1/2 rounded-full border border-white/35 bg-black/35 px-3 py-1 text-xs font-semibold text-white backdrop-blur-md">
-                    {mobileImageIndex + 1} / {images.length}
-                  </div>
-                )}
-
-                {images.length > 1 && (
+            <TripGallery
+              images={images}
+              title={tripData.title}
+              activeIndex={mobileImageIndex}
+              containerRef={mobileHeroRef}
+              onOpenImage={() => openLightboxAt(mobileImageIndex)}
+              onSelectImage={setMobileImageIndex}
+              onPrevImage={prevMobileImage}
+              onNextImage={nextMobileImage}
+              onTouchStart={handleSwipeStart}
+              onTouchEnd={(event) => handleSwipeEnd(event, nextMobileImage, prevMobileImage)}
+              topOverlay={
+                mobileHeader.showHeroActions ? (
                   <>
-                    <button
-                      type="button"
-                      onClick={prevMobileImage}
-                      className="absolute left-3 top-1/2 z-20 -translate-y-1/2 h-11 w-11 rounded-full border border-white/40 bg-black/30 shadow-lg backdrop-blur-md flex items-center justify-center"
-                      aria-label="Previous photo"
+                    <Link
+                      to={backLink}
+                      className="absolute top-3 left-3 z-20 h-10 w-10 rounded-full border border-white/40 bg-black/30 backdrop-blur-md shadow-lg flex items-center justify-center"
+                      aria-label={backLabel}
                     >
                       <ChevronLeft className="h-5 w-5 text-white" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={nextMobileImage}
-                      className="absolute right-3 top-1/2 z-20 -translate-y-1/2 h-11 w-11 rounded-full border border-white/40 bg-black/30 shadow-lg backdrop-blur-md flex items-center justify-center"
-                      aria-label="Next photo"
-                    >
-                      <ChevronRight className="h-5 w-5 text-white" />
-                    </button>
-                  </>
-                )}
+                    </Link>
 
-                <Link
-                  to={backLink}
-                  className="absolute top-3 left-3 z-20 h-10 w-10 rounded-full border border-white/40 bg-black/30 backdrop-blur-md shadow-lg flex items-center justify-center"
-                >
-                  <ChevronLeft className="h-5 w-5 text-white" />
-                </Link>
-
-                {!isDraftTrip && (
-                  <div className="absolute top-3 right-3 z-20 flex gap-1.5">
-                    <button
-                      onClick={handleShare}
-                      className="h-10 w-10 rounded-full border border-white/40 bg-black/30 backdrop-blur-md shadow-lg flex items-center justify-center transition-transform active:scale-95"
-                    >
-                      <Share2 className="h-5 w-5 text-white" />
-                    </button>
-                    <button
-                      onClick={handleFavourite}
-                      className={`h-10 w-10 rounded-full border border-white/40 bg-black/30 backdrop-blur-md shadow-lg flex items-center justify-center transition-all duration-300 ${isAnimating ? 'scale-125' : ''}`}
-                    >
-                      <Heart
-                        className={`h-5 w-5 transition-all duration-300 ${
-                          isFavourited
-                            ? 'fill-destructive text-destructive scale-110'
-                            : 'fill-transparent text-white'
-                        }`}
-                      />
-                    </button>
-                    {isDbTrip && !isOrganizer && dbTrip?.creator_id && (
-                      <ModerationMenu
-                        reportType="TRIP"
-                        targetId={String(dbTrip.id)}
-                        reportedUserId={String(dbTrip.creator_id)}
-                        targetLabel="Trip"
-                        reportLabel="Report Trip"
-                        trigger={
-                          <button
-                            type="button"
-                            className="h-10 w-10 rounded-full border border-white/40 bg-black/30 backdrop-blur-md shadow-lg flex items-center justify-center transition-transform active:scale-95 text-white"
-                            aria-label="Trip actions"
-                          >
-                            <MoreVertical className="h-5 w-5 text-white" strokeWidth={2.5} />
-                          </button>
-                        }
-                      />
-                    )}
-                    {isDbTrip && isOrganizer && (
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <button
-                            className="h-10 w-10 rounded-full border border-white/40 bg-black/30 backdrop-blur-md shadow-lg flex items-center justify-center transition-transform active:scale-95"
-                            aria-label="Trip actions"
-                          >
-                            <MoreVertical className="h-6 w-6 text-white scale-125" strokeWidth={3} />
-                          </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="min-w-[12rem]">
-                          <DropdownMenuItem onSelect={() => setShowInviteModal(true)}>
-                            Invite by email
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            onSelect={() => setShowCancelConfirm(true)}
-                            className="text-destructive focus:text-destructive"
-                            disabled={isCancellingTrip}
-                          >
-                            {isCancellingTrip ? "Cancelling..." : "Cancel trip"}
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    )}
-                  </div>
-                )}
-
-                {images.length > 1 && (
-                  <div className="absolute bottom-3 left-1/2 z-20 -translate-x-1/2 w-[84%] overflow-x-auto">
-                    <div className="mx-auto flex w-max items-center gap-1.5 rounded-2xl border border-white/35 bg-black/30 px-1.5 py-1.5 shadow-2xl backdrop-blur-md">
-                      {images.map((img, index) => (
-                        <button
-                          key={`mobile-trip-thumb-${index}`}
-                          type="button"
-                          onClick={() => setMobileImageIndex(index)}
-                          className={cn(
-                            "relative h-10 w-[4.3rem] overflow-hidden rounded-lg border transition-all",
-                            mobileImageIndex === index
-                              ? "border-white ring-2 ring-white/90"
-                              : "border-white/35 opacity-90"
-                          )}
-                          aria-label={`View photo ${index + 1}`}
-                        >
-                          <img
-                            src={img}
-                            alt={`${tripData.title} thumbnail ${index + 1}`}
-                            className="h-full w-full object-cover"
-                          />
-                        </button>
-                      ))}
+                    <div className="absolute top-3 right-3 z-20 flex gap-1.5">
+                      {renderMobileHeaderActions("hero")}
                     </div>
-                  </div>
-                )}
-              </div>
-            </div>
+                  </>
+                ) : null
+              }
+            />
 
             {/* Desktop/tablet collage */}
             <div className="hidden md:block lg:px-[14rem] xl:px-[16rem]">
@@ -1671,15 +1734,17 @@ export default function TripDetails() {
                 {renderCollage()}
 
                 {/* Back Button */}
-                <Link
-                  to={backLink}
-                  className="absolute top-3 left-3 h-9 w-9 rounded-full bg-card/80 backdrop-blur-sm flex items-center justify-center sm:top-4 sm:left-4 sm:h-10 sm:w-10"
-                >
-                  <ChevronLeft className="h-4 w-4 sm:h-5 sm:w-5 text-foreground" />
-                </Link>
+                {!showDesktopHeader && (
+                  <Link
+                    to={backLink}
+                    className="absolute top-3 left-3 h-9 w-9 rounded-full bg-card/80 backdrop-blur-sm flex items-center justify-center sm:top-4 sm:left-4 sm:h-10 sm:w-10"
+                  >
+                    <ChevronLeft className="h-4 w-4 sm:h-5 sm:w-5 text-foreground" />
+                  </Link>
+                )}
 
                 {/* Actions */}
-                {!isDraftTrip && (
+                {!isDraftTrip && !showDesktopHeader && (
                   <div className="absolute top-3 right-3 flex gap-1.5 sm:top-4 sm:right-4 sm:gap-2">
                     <button
                       onClick={handleShare}
@@ -1846,13 +1911,8 @@ export default function TripDetails() {
 
 
           {/* Tabs */}
-          <SegmentedControl
-            options={[
-              { label: "Overview", value: "overview" },
-              { label: "Itinerary", value: "itinerary" },
-              { label: "Members", value: "members" },
-            ]}
-            value={activeTab}
+          <TripSectionNavigation
+            activeTab={activeTab}
             onChange={setActiveTab}
           />
 
@@ -2210,14 +2270,120 @@ export default function TripDetails() {
       )}
 
       {/* Sticky Header - Desktop Only */}
-      {isScrolled && (
-        <div className="fixed top-16 left-0 right-0 z-30 hidden md:flex items-center gap-4 px-6 py-3 bg-background border-b border-border/50 backdrop-blur-sm">
-          <Link to={backLink} className="shrink-0">
-            <button className="flex items-center justify-center h-10 w-10 rounded-lg hover:bg-secondary transition-colors">
-              <ChevronLeft className="h-5 w-5 text-foreground" />
-            </button>
-          </Link>
-          <h2 className="text-lg font-semibold text-foreground truncate">{tripData.title}</h2>
+      {showDesktopHeader && (
+        <div
+          className={cn(
+            "fixed left-0 right-0 z-[65] hidden md:block px-6 lg:px-[14rem] xl:px-[16rem] transition-all duration-250",
+            showDesktopStickyHeader
+              ? "top-[var(--header-total-height)]"
+              : "top-[calc(var(--header-total-height)+0.65rem)]"
+          )}
+        >
+          <div
+            className={cn(
+              "flex items-center justify-between gap-3",
+              showDesktopStickyHeader
+                ? "rounded-xl border border-border/50 bg-background/95 px-4 py-2.5 shadow-sm backdrop-blur"
+                : "rounded-2xl border border-white/45 bg-white/70 px-3.5 py-2.5 shadow-lg backdrop-blur-xl"
+            )}
+          >
+            <div className="flex min-w-0 items-center gap-2.5">
+              <Link
+                to={backLink}
+                aria-label={backLabel}
+                className={cn(
+                  "flex h-9 w-9 items-center justify-center rounded-full transition-colors",
+                  showDesktopStickyHeader ? "hover:bg-secondary" : "bg-white/85 hover:bg-white"
+                )}
+              >
+                <ChevronLeft className="h-5 w-5 text-foreground" />
+              </Link>
+              <h2 className="truncate text-base font-semibold text-foreground lg:text-lg">{tripData.title}</h2>
+            </div>
+
+            {!isDraftTrip && (
+              <div className="flex shrink-0 items-center gap-1.5">
+                <button
+                  onClick={handleFavourite}
+                  className={cn(
+                    "h-9 w-9 rounded-full flex items-center justify-center transition-all duration-300",
+                    showDesktopStickyHeader ? "hover:bg-secondary" : "bg-white/85 hover:bg-white",
+                    isAnimating ? "scale-125" : ""
+                  )}
+                  aria-label="Toggle favourite"
+                >
+                  <Heart
+                    className={cn(
+                      "h-4.5 w-4.5 transition-all duration-300",
+                      isFavourited ? "fill-destructive text-destructive scale-110" : "fill-transparent text-foreground"
+                    )}
+                  />
+                </button>
+
+                <button
+                  onClick={handleShare}
+                  className={cn(
+                    "h-9 w-9 rounded-full flex items-center justify-center transition-colors",
+                    showDesktopStickyHeader ? "hover:bg-secondary" : "bg-white/85 hover:bg-white"
+                  )}
+                  aria-label="Share trip"
+                >
+                  <Share2 className="h-4.5 w-4.5 text-foreground" />
+                </button>
+
+                {isDbTrip && !isOrganizer && dbTrip?.creator_id && (
+                  <ModerationMenu
+                    reportType="TRIP"
+                    targetId={String(dbTrip.id)}
+                    reportedUserId={String(dbTrip.creator_id)}
+                    targetLabel="Trip"
+                    reportLabel="Report Trip"
+                    trigger={
+                      <button
+                        type="button"
+                        className={cn(
+                          "h-9 w-9 rounded-full flex items-center justify-center transition-colors text-foreground",
+                          showDesktopStickyHeader ? "hover:bg-secondary" : "bg-white/85 hover:bg-white"
+                        )}
+                        aria-label="Trip actions"
+                      >
+                        <MoreVertical className="h-5 w-5 text-foreground" strokeWidth={2.5} />
+                      </button>
+                    }
+                  />
+                )}
+
+                {isDbTrip && isOrganizer && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        className={cn(
+                          "h-9 w-9 rounded-full flex items-center justify-center transition-colors",
+                          showDesktopStickyHeader ? "hover:bg-secondary" : "bg-white/85 hover:bg-white"
+                        )}
+                        aria-label="Trip actions"
+                      >
+                        <MoreVertical className="h-5 w-5 text-foreground" strokeWidth={2.5} />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="min-w-[12rem]">
+                      <DropdownMenuItem onSelect={() => setShowInviteModal(true)}>
+                        Invite by email
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        onSelect={() => setShowCancelConfirm(true)}
+                        className="text-destructive focus:text-destructive"
+                        disabled={isCancellingTrip}
+                      >
+                        {isCancellingTrip ? "Cancelling..." : "Cancel trip"}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
