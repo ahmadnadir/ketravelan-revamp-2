@@ -20,6 +20,25 @@ Release date: 2026-08-04
 - Preserved sticky top action navigation (back/favorite/share/more) while scrolling.
 - Decoupled tab section pin-state logic from top action header visibility to prevent regressions.
 
+## Additional product updates included in v2.5.2
+
+- Trip Card travel styles update:
+  - Improved travel style rendering and display consistency on cards.
+  - Travel styles and related chips were cleaned up to reduce clutter and improve scanability.
+- Home currency logic enhancement:
+  - Improved currency conversion and display handling for user home currency flows.
+  - Better handling of converted totals and budget display consistency.
+- Trip Details previous-route logic:
+  - Improved return-path behavior so back navigation returns users to the correct previous screen context.
+  - Added cleaner return parameter handling and fallback routing.
+- Feedback system rollout:
+  - Added in-app feedback/report form with screenshot attachments.
+  - Added confirmation email with reference ID and key report details.
+  - Added successful submission toast behavior aligned with the app's standard notification style.
+- Navigation architecture improvements:
+  - Added reusable scroll/header hooks and modular trip-details navigation components.
+  - Improved mobile scroll transitions and reduced competing sticky/floating nav behaviors.
+
 ## Version metadata
 
 - Web/app package version updated to `2.5.2`.
