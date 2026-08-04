@@ -114,17 +114,17 @@ const getDefaultAvatar = (seed: string) => {
   return `https://api.dicebear.com/7.x/notionists/svg?seed=${encodeURIComponent(seed)}`;
 };
 
-// Helper to format date as DDMMYY
-const formatDateDDMMYY = (date: string | Date): string => {
+// Helper to format date as D Mon, YYYY
+const formatDateDDMMYYYY = (date: string | Date): string => {
   const dateObj = typeof date === "string" ? new Date(date) : date;
   if (isNaN(dateObj.getTime())) return "";
-  
+
+  const day = dateObj.getDate();
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const month = months[dateObj.getMonth()];
-  const day = dateObj.getDate();
   const year = dateObj.getFullYear();
-  
-  return `${month} ${day}, ${year}`;
+
+  return `${day} ${month} ${year}`;
 };
 
 // Generate contextual value proposition based on trip data
@@ -458,15 +458,44 @@ export default function TripDetails() {
   // Transform trip members from DB to UI format
   const transformedMembers = useMemo(() => {
     if (dbTrip?.trip_members) {
-      return dbTrip.trip_members
-        .filter((member: any) => !member.left_at)
-        .map((member: any) => ({
-          id: member.user?.id || '',
+      const isAdminMember = (member: any) => {
+        const normalizedRole = String(member?.role || '').toLowerCase();
+        return Boolean(member?.is_admin || normalizedRole === 'organizer' || normalizedRole === 'admin');
+      };
+
+      const activeMembers = dbTrip.trip_members.filter((member: any) => !member.left_at);
+      const activeAdmins = activeMembers.filter((member: any) => isAdminMember(member));
+      const hasMultipleAdmins = activeAdmins.length > 1;
+      const firstAdminId = activeAdmins[0]?.user?.id;
+
+      return activeMembers.map((member: any) => {
+        const memberId = member.user?.id || '';
+        const isCreator = String(memberId) === String(dbTrip.creator_id || '');
+
+        let roleLabel = 'Member';
+        if (isAdminMember(member)) {
+          if (isCreator) {
+            roleLabel = 'Host';
+          } else if (hasMultipleAdmins) {
+            roleLabel = 'Co-Host';
+          } else {
+            roleLabel = 'Host';
+          }
+
+          // Fallback when creator is not in the active member list:
+          // first admin is the Host, remaining admins are Co-Host.
+          if (!dbTrip.creator_id && hasMultipleAdmins) {
+            roleLabel = String(memberId) === String(firstAdminId || '') ? 'Host' : 'Co-Host';
+          }
+        }
+
+        return {
+          id: memberId,
           name: member.user?.full_name || member.user?.username || 'User',
           imageUrl: member.user?.avatar_url || getDefaultAvatar(member.user?.id || member.user?.full_name || 'User'),
-          role: member.is_admin ? 'Organizer' : 'Member',
-          descriptor: member.role || '',
-        }));
+          role: roleLabel,
+        };
+      });
     }
     return [];
   }, [dbTrip]);
@@ -1399,7 +1428,7 @@ export default function TripDetails() {
               },
               {
                 question: `When does the trip to ${tripData.destination} start?`,
-                answer: `The trip starts on ${dbTrip?.start_date ? new Date(dbTrip.start_date).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }) : "a date to be confirmed"}. Please refer to the trip details for the complete itinerary.`,
+                answer: `The trip starts on ${dbTrip?.start_date ? new Date(dbTrip.start_date).toLocaleDateString("en-GB", { year: "numeric", month: "long", day: "numeric" }) : "a date to be confirmed"}. Please refer to the trip details for the complete itinerary.`,
               },
               {
                 question: `Who is organizing this trip to ${tripData.destination}?`,
@@ -1540,7 +1569,7 @@ export default function TripDetails() {
                   if (selectedDate) {
                     toast({
                       title: "Date Selected",
-                      description: `You've selected ${selectedDate.toLocaleDateString()}`,
+                      description: `You've selected ${selectedDate.toLocaleDateString("en-GB")}`,
                     });
                     setShowCalendar(false);
                   }
@@ -1856,9 +1885,9 @@ export default function TripDetails() {
                       const endDate = dbTrip?.end_date || tripData.endDate;
                       
                       if (startDate) {
-                        const formattedStart = formatDateDDMMYY(startDate);
+                        const formattedStart = formatDateDDMMYYYY(startDate);
                         if (endDate) {
-                          const formattedEnd = formatDateDDMMYY(endDate);
+                          const formattedEnd = formatDateDDMMYYYY(endDate);
                           return `${formattedStart} - ${formattedEnd}`;
                         }
                         return formattedStart;
@@ -2152,9 +2181,6 @@ export default function TripDetails() {
                           <div className="flex-1 min-w-0">
                             <p className="font-medium text-foreground text-sm sm:text-base truncate">{member.name}</p>
                             <p className="text-xs sm:text-sm text-muted-foreground">{member.role}</p>
-                            {member.descriptor && (
-                              <p className="text-xs text-muted-foreground/70">{member.descriptor}</p>
-                            )}
                           </div>
                         </Link>
                       ) : (
@@ -2171,9 +2197,6 @@ export default function TripDetails() {
                           <div className="flex-1 min-w-0">
                             <p className="font-medium text-foreground text-sm sm:text-base truncate">{member.name}</p>
                             <p className="text-xs sm:text-sm text-muted-foreground">{member.role}</p>
-                            {member.descriptor && (
-                              <p className="text-xs text-muted-foreground/70">{member.descriptor}</p>
-                            )}
                           </div>
                         </div>
                       )}

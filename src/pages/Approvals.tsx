@@ -154,7 +154,7 @@ export default function Approvals() {
         tripTitle: req.trip?.title || '',
         tripImage: req.trip?.cover_image || '',
         tripDate: req.trip?.start_date && req.trip?.end_date
-          ? `${format(new Date(req.trip.start_date), 'MMM d')}-${format(new Date(req.trip.end_date), 'd, yyyy')}`
+          ? `${format(new Date(req.trip.start_date), 'd MMM yyyy')} - ${format(new Date(req.trip.end_date), 'd MMM yyyy')}`
           : 'Date TBD',
         requester: {
           id: req.user?.id || '',
@@ -212,7 +212,7 @@ export default function Approvals() {
         tripTitle: invite.trip?.title || '',
         tripImage: invite.trip?.cover_image || '',
         tripDate: invite.trip?.start_date && invite.trip?.end_date
-          ? `${format(new Date(invite.trip.start_date), 'MMM d')}-${format(new Date(invite.trip.end_date), 'd, yyyy')}`
+          ? `${format(new Date(invite.trip.start_date), 'd MMM yyyy')} - ${format(new Date(invite.trip.end_date), 'd MMM yyyy')}`
           : 'Date TBD',
         inviter: {
           id: invite.inviter?.id || '',
@@ -250,7 +250,7 @@ export default function Approvals() {
     if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)} mins ago`;
     if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)} hours ago`;
     if (diffInSeconds < 604800) return `${Math.floor(diffInSeconds / 86400)} days ago`;
-    return format(date, 'MMM d, yyyy');
+    return format(date, 'd MMM yyyy');
   };
 
   const filteredApprovals = useMemo(() => {

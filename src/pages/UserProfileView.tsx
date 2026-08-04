@@ -543,7 +543,8 @@ const UserProfilePage = () => {
                             {trip.end_date
                               ? new Date(
                                   trip.end_date
-                                ).toLocaleDateString(undefined, {
+                                ).toLocaleDateString("en-GB", {
+                                  day: "numeric",
                                   month: "short",
                                   year: "numeric",
                                 })

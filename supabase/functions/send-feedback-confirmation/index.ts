@@ -225,13 +225,15 @@ serve(async (req: Request) => {
     const firstName = profile?.full_name?.trim().split(" ")[0] || "Traveler";
     const areaLabel = AREA_LABELS[report.area] || report.area;
     const typeLabel = TYPE_LABELS[report.report_type] || report.report_type;
-    const submittedDate = new Date(report.created_at).toLocaleString("en-US", {
-      year: "numeric",
-      month: "short",
+    const submittedAt = new Date(report.created_at);
+    const submittedDate = `${submittedAt.toLocaleDateString("en-GB", {
       day: "numeric",
+      month: "short",
+      year: "numeric",
+    })} ${submittedAt.toLocaleTimeString("en-US", {
       hour: "numeric",
       minute: "2-digit",
-    });
+    })}`;
     const highlights = [
       `<tr><td style="padding:0 0 10px"><strong style="color:#0f172a">Reference ID:</strong> <span style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace">${escapeHtml(report.reference_code)}</span></td></tr>`,
       `<tr><td style="padding:0 0 10px"><strong style="color:#0f172a">Feedback about:</strong> ${escapeHtml(areaLabel)}</td></tr>`,

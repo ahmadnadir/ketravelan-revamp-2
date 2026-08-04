@@ -35,7 +35,7 @@ function expenseReducer(state: ExpenseData[], action: ExpenseAction): ExpenseDat
             status,
             ...(receiptUrl && { receiptUrl }),
             ...(payerNote && { payerNote }),
-            ...(receiptUrl && { uploadedAt: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) }),
+            ...(receiptUrl && { uploadedAt: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) }),
           };
         }) || [];
         

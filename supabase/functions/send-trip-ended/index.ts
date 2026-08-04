@@ -58,6 +58,14 @@ function escapeHtml(v: string) {
     .replaceAll("'", "&#39;");
 }
 
+function formatTripDate(date: Date): string {
+  const day = date.getDate();
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const month = months[date.getMonth()];
+  const year = date.getFullYear();
+  return `${day} ${month} ${year}`;
+}
+
 async function sendResendRawEmail(opts: { to: string; subject: string; html: string; text?: string }) {
   const payload: Record<string, unknown> = {
     from: RESEND_FROM,
@@ -213,7 +221,7 @@ serve(async (req: Request) => {
     const tripUrl = `${SITE_ORIGIN}/trip/${tripIdentifier}`;
     const endDate = trip.end_date ? new Date(trip.end_date) : null;
     const endDateStr = endDate
-      ? endDate.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })
+      ? formatTripDate(endDate)
       : "recently";
 
     const subject = `Trip wrapped: ${trip.title}`;

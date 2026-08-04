@@ -315,7 +315,7 @@ export default function CreateTrip() {
   const formatDateLabel = (value: string): string => {
     const parsed = parseDraftDate(value);
     if (!parsed) return "Select date";
-    return parsed.toLocaleDateString("en-US", {
+    return parsed.toLocaleDateString("en-GB", {
       month: "short",
       day: "numeric",
       year: "numeric",

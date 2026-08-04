@@ -186,7 +186,7 @@ export default function Onboarding() {
     const parsed = parseIsoDate(value);
     if (!parsed) return "Select date of birth";
 
-    return new Date(parsed.year, parsed.month - 1, parsed.day).toLocaleDateString(undefined, {
+    return new Date(parsed.year, parsed.month - 1, parsed.day).toLocaleDateString("en-GB", {
       day: "numeric",
       month: "short",
       year: "numeric",

@@ -80,20 +80,57 @@ const COPY: Record<ReportType, { detailsLabel: string; detailsHint: string; plac
 const MAX_FILES = 3;
 const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024;
 
-function collectContext() {
-  return {
-    platform: /android/i.test(navigator.userAgent)
-      ? "android"
-      : /iphone|ipad|ipod/i.test(navigator.userAgent)
-        ? "ios"
-        : "web",
-    app_version: import.meta.env.VITE_APP_VERSION ?? "unknown",
+async function collectContext() {
+  const fallbackPlatform = /android/i.test(navigator.userAgent)
+    ? "android"
+    : /iphone|ipad|ipod/i.test(navigator.userAgent)
+      ? "ios"
+      : "web";
+
+  const context: Record<string, string | boolean> = {
+    platform: fallbackPlatform,
+    app_version: __APP_VERSION__ || import.meta.env.VITE_APP_VERSION || "unknown",
     user_agent: navigator.userAgent,
     route: window.location.pathname + window.location.search,
     locale: navigator.language,
     viewport: `${window.innerWidth}x${window.innerHeight}`,
     reported_at: new Date().toISOString(),
   };
+
+  try {
+    const { Capacitor } = await import("@capacitor/core");
+    context.platform = Capacitor.getPlatform() || fallbackPlatform;
+
+    if (Capacitor.isNativePlatform()) {
+      const [{ App }, { Device }] = await Promise.all([
+        import("@capacitor/app"),
+        import("@capacitor/device"),
+      ]);
+
+      const [appInfoResult, deviceInfoResult] = await Promise.allSettled([
+        App.getInfo(),
+        Device.getInfo(),
+      ]);
+
+      if (appInfoResult.status === "fulfilled") {
+        const appInfo = appInfoResult.value;
+        if (appInfo.version) context.app_version = appInfo.version;
+        if (appInfo.build) context.app_build = appInfo.build;
+      }
+
+      if (deviceInfoResult.status === "fulfilled") {
+        const deviceInfo = deviceInfoResult.value;
+        if (deviceInfo.model) context.device_model = deviceInfo.model;
+        if (deviceInfo.operatingSystem) context.device_os = deviceInfo.operatingSystem;
+        if (deviceInfo.osVersion) context.device_os_version = deviceInfo.osVersion;
+        context.device_is_virtual = Boolean(deviceInfo.isVirtual);
+      }
+    }
+  } catch {
+    // Keep graceful web/native fallback context when plugin info is unavailable.
+  }
+
+  return context;
 }
 
 interface ReportFormProps {
@@ -224,7 +261,7 @@ export default function ReportForm({
           wants_reply: wantsReply,
           contact_email: wantsReply ? user.email ?? null : null,
           trip_id: tripId ?? null,
-          context: collectContext(),
+          context: await collectContext(),
         })
         .select("id, reference_code")
         .single();

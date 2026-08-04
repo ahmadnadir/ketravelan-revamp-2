@@ -14,7 +14,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@/components/ui/drawer";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
@@ -23,6 +22,21 @@ import { isTripSaved, saveTrip, unsaveTrip } from "@/lib/savedTrips";
 import { buildPublicUrl, buildTripShareUrl } from "@/lib/publicUrl";
 
 const DEFAULT_TRIP_IMAGE = "/default-trip-photo.jpeg";
+
+const formatTripDateLabel = (value: string): string => {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return "TBA";
+
+  const parsedDate = new Date(trimmed);
+  if (Number.isNaN(parsedDate.getTime())) return trimmed;
+
+  const day = parsedDate.getDate();
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const month = months[parsedDate.getMonth()];
+  const year = parsedDate.getFullYear();
+
+  return `${day} ${month} ${year}`;
+};
 
 interface TripCardProps {
   id: string;
@@ -145,8 +159,8 @@ export function TripCard({
   const safeImageUrl = hasImage ? imageUrl : DEFAULT_TRIP_IMAGE;
   const safeTitle = title && title.trim() !== "" ? title : "Untitled Trip";
   const safeDestination = destination && destination.trim() !== "" ? destination : "Unknown Destination";
-  const safeStartDate = startDate && startDate.trim() !== "" ? startDate : "TBA";
-  const safeEndDate = endDate && endDate.trim() !== "" ? endDate : "TBA";
+  const safeStartDate = startDate && startDate.trim() !== "" ? formatTripDateLabel(startDate) : "TBA";
+  const safeEndDate = endDate && endDate.trim() !== "" ? formatTripDateLabel(endDate) : "TBA";
   const safeSlotsLeft = typeof slotsLeft === "number" && slotsLeft >= 0 ? slotsLeft : "?";
   const safeTotalSlots = typeof totalSlots === "number" && totalSlots > 0 ? totalSlots : "?";
   const safeTravelStyles = Array.isArray(travel_styles) && travel_styles.length > 0 ? travel_styles : [];
@@ -623,26 +637,24 @@ export function TripCard({
         )}
 
         {isMobile && (
-          <Drawer open={stylesOverflowOpen} onOpenChange={setStylesOverflowOpen}>
-            <DrawerContent className="rounded-t-3xl">
-              <DrawerHeader>
-                <DrawerTitle>Travel Styles</DrawerTitle>
-              </DrawerHeader>
-              <div className="px-4 pb-6">
-                <div className="flex flex-wrap gap-2">
-                  {resolvedTravelStyles.map((style, index) => (
-                    <span
-                      key={`drawer-${style.key}-${index}`}
-                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs border border-border/60 text-muted-foreground"
-                    >
-                      {style.icon ? <span>{style.icon}</span> : <Tag className="h-3 w-3 shrink-0" />}
-                      <span>{style.label}</span>
-                    </span>
-                  ))}
-                </div>
+          <Dialog open={stylesOverflowOpen} onOpenChange={setStylesOverflowOpen}>
+            <DialogContent className="sm:max-w-md w-[calc(100%-2rem)] rounded-2xl">
+              <DialogHeader>
+                <DialogTitle>Travel Styles</DialogTitle>
+              </DialogHeader>
+              <div className="flex flex-wrap gap-2 pt-2">
+                {resolvedTravelStyles.map((style, index) => (
+                  <span
+                    key={`dialog-${style.key}-${index}`}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs border border-border/60 text-muted-foreground"
+                  >
+                    {style.icon ? <span>{style.icon}</span> : <Tag className="h-3 w-3 shrink-0" />}
+                    <span>{style.label}</span>
+                  </span>
+                ))}
               </div>
-            </DrawerContent>
-          </Drawer>
+            </DialogContent>
+          </Dialog>
         )}
 
         {/* Footer - pinned to bottom */}

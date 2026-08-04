@@ -121,7 +121,7 @@ export default function EditProfile() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const dateOfBirthDisplay = profile?.date_of_birth
-    ? new Date(profile.date_of_birth).toLocaleDateString()
+    ? new Date(profile.date_of_birth).toLocaleDateString("en-GB")
     : "Not set";
 
   useEffect(() => {

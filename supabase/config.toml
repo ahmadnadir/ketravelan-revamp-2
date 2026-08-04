@@ -169,11 +169,6 @@ enabled = true
 verify_jwt = false
 entrypoint = "./functions/send-trip-recommendation/index.ts"
 
-[functions.send-notification-email-v2]
-enabled = true
-verify_jwt = false
-entrypoint = "./functions/send-notification-email-v2/index.ts"
-
 [functions.migrate-trip-images]
 enabled = true
 verify_jwt = false

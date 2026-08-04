@@ -53,16 +53,6 @@ export default function Feedback() {
               </div>
             </div>
 
-            <div className="rounded-[24px] border border-border/50 bg-white/85 px-5 py-4 text-left shadow-sm lg:bg-background/85">
-              <p className="text-sm font-medium text-foreground">What gets attached automatically</p>
-              <div className="mt-3 grid gap-2 text-sm text-muted-foreground sm:grid-cols-2 lg:grid-cols-1 lg:text-[13px]">
-                <p>Current screen and route</p>
-                <p>Device platform and viewport</p>
-                <p>App version and locale</p>
-                <p>Optional screenshots you choose</p>
-              </div>
-            </div>
-
             <div className="py-1 lg:pt-1">
               <img
                 src={feedbackIllustration}

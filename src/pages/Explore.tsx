@@ -292,8 +292,8 @@ export default function Explore() {
         title: trip.title ?? 'Untitled',
         destination: trip.destination ?? 'Unknown',
         imageUrl: trip.cover_image || '/default-trip-photo.jpeg',
-        startDate: hasStartDate ? new Date(trip.start_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'TBA',
-        endDate: hasEndDate ? new Date(trip.end_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'TBA',
+        startDate: trip.start_date || 'TBA',
+        endDate: trip.end_date || 'TBA',
         rawStartDate: trip.start_date,
         rawEndDate: trip.end_date,
         isOngoing,
@@ -470,7 +470,7 @@ export default function Explore() {
                   : appliedFilters.dates?.from
                     ? appliedFilters.dates.to
                       ? `${format(appliedFilters.dates.from, "MMM d")} – ${format(appliedFilters.dates.to, "MMM d")}`
-                      : format(appliedFilters.dates.from, "MMM d, yyyy")
+                      : format(appliedFilters.dates.from, "d MMM yyyy")
                     : "Add dates"}
               </span>
             </button>

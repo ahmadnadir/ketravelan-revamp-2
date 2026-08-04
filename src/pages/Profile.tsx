@@ -936,7 +936,7 @@ export default function Profile() {
                         </p>
                         <p className="text-xs text-muted-foreground mt-1">
                           {(trip.end_date || trip.start_date || trip.created_at)
-                            ? new Date(trip.end_date || trip.start_date || trip.created_at).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })
+                            ? new Date(trip.end_date || trip.start_date || trip.created_at).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })
                             : ''}
                         </p>
                       </div>

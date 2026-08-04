@@ -2550,10 +2550,12 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
         });
       }
       
-      const uploadedAt = new Date().toLocaleDateString('en-US', { 
-        month: 'short', day: 'numeric', year: 'numeric',
-        hour: 'numeric', minute: '2-digit'
-      });
+      const now = new Date();
+      const uploadedAt = `${now.toLocaleDateString('en-GB', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+      })} ${now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
       
       setExpenses(prev => prev.map(expense => {
         if (expense.id === expenseId) {

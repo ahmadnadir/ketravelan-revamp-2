@@ -62,7 +62,7 @@ export default function HelpArticleDetail() {
     );
   }
 
-  const formattedDate = new Date(article.updated_at).toLocaleDateString("en-US", {
+  const formattedDate = new Date(article.updated_at).toLocaleDateString("en-GB", {
     month: "long",
     day: "numeric",
     year: "numeric",

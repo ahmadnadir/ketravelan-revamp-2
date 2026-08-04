@@ -320,10 +320,12 @@ export function ExpenseDetailsModal({
     const savedFile = uploadedFile;
     const savedPreview = uploadPreview;
     const savedNote = uploadNote;
-    const submittedAt = new Date().toLocaleDateString('en-US', { 
-      month: 'short', day: 'numeric', year: 'numeric',
-      hour: 'numeric', minute: '2-digit'
-    });
+    const now = new Date();
+    const submittedAt = `${now.toLocaleDateString('en-GB', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    })} ${now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
     
     // Update local state for immediate UI feedback - mark as settled but not confirmed
     setMemberPayments(prev => 

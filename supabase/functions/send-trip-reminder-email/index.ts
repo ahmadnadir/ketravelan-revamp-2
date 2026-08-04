@@ -65,6 +65,14 @@ function escapeHtml(v: string) {
     .replaceAll("'", "&#39;");
 }
 
+function formatTripDate(date: Date): string {
+  const day = date.getDate();
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const month = months[date.getMonth()];
+  const year = date.getFullYear();
+  return `${day} ${month} ${year}`;
+}
+
 async function sendResendRawEmail(opts: { to: string; subject: string; html: string; text?: string }) {
   const payload: Record<string, unknown> = {
     from: RESEND_FROM,
@@ -246,7 +254,7 @@ serve(async (req: Request) => {
     
     // Format the start date nicely
     const startDate = trip.start_date ? new Date(trip.start_date) : null;
-    const dateStr = startDate ? startDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : 'TBA';
+    const dateStr = startDate ? formatTripDate(startDate) : 'TBA';
     
     const subject = `Get ready! Your trip to ${trip.destination} starts ${reminderCopy.timelineText} (${dateStr}) 🚀`;
     const greet = `Hi <strong>${escapeHtml(creatorName)}</strong>,<br><br>`;

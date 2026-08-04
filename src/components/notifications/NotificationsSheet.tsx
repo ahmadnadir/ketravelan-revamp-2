@@ -362,7 +362,7 @@ export function NotificationsSheet({ open, onOpenChange }: NotificationsSheetPro
     if (diffMins < 60) return `${diffMins} min ago`;
     if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
     if (diffDays < 7) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
-    return date.toLocaleDateString();
+    return date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
   };
 
   return (

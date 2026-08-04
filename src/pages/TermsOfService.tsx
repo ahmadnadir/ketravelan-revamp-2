@@ -64,7 +64,7 @@ export default function TermsOfService() {
           />
           <div className="mt-8 pt-6 border-t border-border/50">
             <p className="text-xs text-muted-foreground">
-              Last updated: {new Date(policy.last_updated).toLocaleDateString("en-US", {
+              Last updated: {new Date(policy.last_updated).toLocaleDateString("en-GB", {
                 year: "numeric",
                 month: "long",
                 day: "numeric",
