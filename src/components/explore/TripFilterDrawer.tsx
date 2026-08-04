@@ -45,6 +45,7 @@ interface TripFilterDrawerProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   filters: FilterState;
+  defaultCurrency: CurrencyCode;
   onApply: (filters: FilterState) => void;
   onReset: () => void;
   matchingCount: number;
@@ -54,6 +55,7 @@ export function TripFilterDrawer({
   open,
   onOpenChange,
   filters,
+  defaultCurrency,
   onApply,
   onReset,
   matchingCount,
@@ -62,7 +64,7 @@ export function TripFilterDrawer({
 
   // Local state for editing
   const [localFilters, setLocalFilters] = useState<FilterState>(filters);
-  const selectedCurrencyCode = localFilters.currency || "MYR";
+  const selectedCurrencyCode = localFilters.currency || defaultCurrency;
   const selectedCurrency = currencies.find((currency) => currency.code === selectedCurrencyCode);
   const [destinationQuery, setDestinationQuery] = useState("");
   const [showDestinationResults, setShowDestinationResults] = useState(false);
@@ -125,7 +127,10 @@ export function TripFilterDrawer({
   };
 
   const handleApply = () => {
-    onApply(localFilters);
+    onApply({
+      ...localFilters,
+      currency: localFilters.currency === defaultCurrency ? undefined : localFilters.currency,
+    });
     onOpenChange(false);
   };
 
@@ -136,7 +141,7 @@ export function TripFilterDrawer({
       flexibleDates: false,
       budgetRange: [0, 10000],
       categories: [],
-      currency: "MYR",
+      currency: undefined,
     };
     setLocalFilters(resetState);
     onReset();
@@ -286,7 +291,7 @@ export function TripFilterDrawer({
           <BudgetRangeSelector
             value={localFilters.budgetRange}
             onChange={(range) => setLocalFilters((prev) => ({ ...prev, budgetRange: range }))}
-            currency={(localFilters.currency || "MYR") as CurrencyCode}
+            currency={(localFilters.currency || defaultCurrency) as CurrencyCode}
           />
         </div>
 

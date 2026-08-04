@@ -1,10 +1,11 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import { useState, useRef, useEffect } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useState, useRef, useEffect, useMemo } from "react";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   MapPin,
   Camera,
+  Globe,
   Instagram,
   Youtube,
   Linkedin,
@@ -17,6 +18,7 @@ import {
   AlertCircle,
   Link2,
   CircleDollarSign,
+  BadgeCheck,
   User,
   MessageCircle,
   Trash2,
@@ -42,6 +44,7 @@ import { getCurrencyInfo, type CurrencyCode } from "@/lib/currencyUtils";
 import { cn } from "@/lib/utils";
 import { ImageCropModal } from "@/components/profile/ImageCropModal";
 import { uploadImageFromDataUrl } from "@/lib/imageStorage";
+import { countries } from "@/components/onboarding/CountrySelector";
 
 
 // Helper to map stored travel style id/label to display label + emoji for consistent rendering
@@ -89,6 +92,19 @@ const getDicebearSeedFromUrl = (url?: string | null) => {
 const buildDicebearChoices = (baseSeed: string) =>
   Array.from({ length: 12 }, (_, i) => buildDicebearAvatar(`${baseSeed}-${i + 1}`));
 
+const normalizeCountryName = (value?: string | null) => value?.trim().toLowerCase() || "";
+
+const getCountryFromDestination = (destination?: string | null) => {
+  if (!destination) return "";
+  const parts = destination.split(",").map((part) => part.trim()).filter(Boolean);
+  return parts.length > 1 ? parts[parts.length - 1] : destination.trim();
+};
+
+const getCountryFlag = (countryName: string) => {
+  const match = countries.find((country) => normalizeCountryName(country.name) === normalizeCountryName(countryName));
+  return match?.flag || "📍";
+};
+
 
 
 // AboutText component with Read more/less functionality
@@ -118,6 +134,7 @@ const AboutText = ({ text }: { text: string }) => {
 
 
 export default function Profile() {
+  const routerLocation = useLocation();
   const navigate = useNavigate();
   const { userId } = useParams(); // Get userId from URL parameter
   const { user, profile: currentUserProfile, loading, signOut, refreshProfile } = useAuth();
@@ -146,6 +163,7 @@ export default function Profile() {
   const [changePhotoOptionsOpen, setChangePhotoOptionsOpen] = useState(false);
   const [dicebearModalOpen, setDicebearModalOpen] = useState(false);
   const [dicebearChoices, setDicebearChoices] = useState<string[]>([]);
+  const [showCountriesModal, setShowCountriesModal] = useState(false);
   
   // Fetch other user's profile if viewing someone else's profile
   useEffect(() => {
@@ -257,6 +275,7 @@ export default function Profile() {
     : [];
   const previousTripsToRender = showAllPreviousTrips ? previousTrips : previousTrips.slice(0, 5);
   const hasMorePreviousTrips = previousTrips.length > 5;
+  const profileReturnPath = `${routerLocation.pathname}${routerLocation.search}`;
 
   const handleCoverPhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -645,12 +664,30 @@ export default function Profile() {
   const travelStyles = Array.isArray(profile.travel_styles) ? profile.travel_styles : [];
   const socialLinks = profile.social_links || {};
   const bio = profile.bio;
-  const countriesCount = profile.countries_visited || 0;
   const tripsCount = visibleTrips.length;
   const coverImageUrl = coverPhoto || DEFAULT_COVER_PHOTO;
   const coverImageDesktopUrl = coverPhoto || DEFAULT_DESKTOP_COVER_PHOTO;
   const homeCurrency = (profile.home_currency as CurrencyCode | undefined);
   const currencyInfo = homeCurrency ? getCurrencyInfo(homeCurrency) : undefined;
+
+  const visitedCountries = useMemo(() => {
+    const seen = new Map<string, { name: string; flag: string }>();
+
+    for (const trip of Array.isArray(visibleTrips) ? visibleTrips : []) {
+      const countryName = getCountryFromDestination(String(trip?.destination || "").trim());
+      const key = normalizeCountryName(countryName);
+      if (!key || seen.has(key)) continue;
+
+      seen.set(key, {
+        name: countryName,
+        flag: getCountryFlag(countryName),
+      });
+    }
+
+    return Array.from(seen.values());
+  }, [visibleTrips]);
+
+  const countriesCount = visitedCountries.length;
 
   return (
     <AppLayout showBottomNav={true} fullWidth mainClassName="px-0 sm:px-4">
@@ -812,14 +849,18 @@ export default function Profile() {
 
           {/* Stats Cards */}
           <div className="grid grid-cols-2 gap-3">
-            <Card className="p-3 text-center border-border/50">
-              <p className="text-xl font-bold text-foreground">{tripsCount}</p>
-              <p className="text-xs text-muted-foreground">Trips</p>
-            </Card>
-            <Card className="p-3 text-center border-border/50">
-              <p className="text-xl font-bold text-foreground">{countriesCount}</p>
-              <p className="text-xs text-muted-foreground">Countries</p>
-            </Card>
+            <Link to="/my-trips" className="block">
+              <Card className="p-3 text-center border-border/50 transition-colors hover:bg-muted/30">
+                <p className="text-xl font-bold text-foreground">{tripsCount}</p>
+                <p className="text-xs text-muted-foreground">Trips</p>
+              </Card>
+            </Link>
+            <button type="button" onClick={() => setShowCountriesModal(true)} className="block text-left">
+              <Card className="p-3 text-center border-border/50 transition-colors hover:bg-muted/30">
+                <p className="text-xl font-bold text-foreground">{countriesCount}</p>
+                <p className="text-xs text-muted-foreground">Countries</p>
+              </Card>
+            </button>
           </div>
 
           {/* About Me */}
@@ -873,8 +914,9 @@ export default function Profile() {
                 <Card className="p-6 text-center border-border/50">
                   <p className="text-sm text-muted-foreground">Trips are private</p>
                 </Card>
-              ) : previousTrips.length > 0 ? previousTripsToRender.map((trip: any) => (
-                <Link key={trip.id} to={`/trip/${trip.id}`}>
+              ) : previousTrips.length > 0 ? previousTripsToRender.map((trip: any) => {
+                const tripPathToken = trip?.slug || trip?.id;
+                const tripCardContent = (
                   <Card className="overflow-hidden border-border/50 hover:bg-muted/30 transition-colors">
                     <div className="flex gap-3 p-3">
                       <div className="h-16 w-20 rounded-lg overflow-hidden shrink-0">
@@ -900,8 +942,25 @@ export default function Profile() {
                       </div>
                     </div>
                   </Card>
-                </Link>
-              )) : (
+                );
+
+                if (!tripPathToken) {
+                  return (
+                    <div key={trip.id || trip.title || trip.destination}>
+                      {tripCardContent}
+                    </div>
+                  );
+                }
+
+                return (
+                  <Link
+                    key={trip.id || tripPathToken}
+                    to={`/trip/${tripPathToken}?${new URLSearchParams({ return: profileReturnPath }).toString()}`}
+                  >
+                    {tripCardContent}
+                  </Link>
+                );
+              }) : (
                 <Card className="p-6 text-center border-border/50">
                   <p className="text-sm text-muted-foreground">No previous trips yet</p>
                 </Card>
@@ -1054,6 +1113,7 @@ export default function Profile() {
           <Button
             type="button"
             className="w-full rounded-xl"
+
             onClick={() => {
               if (!uploadingAvatar) {
                 avatarInputRef.current?.click();
@@ -1111,6 +1171,71 @@ export default function Profile() {
             >
               Refresh options
             </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showCountriesModal} onOpenChange={setShowCountriesModal}>
+        <DialogContent className="max-w-4xl w-[94vw] border-border/50 p-0 overflow-hidden bg-background">
+          <DialogHeader className="relative flex flex-row items-start justify-between gap-3 p-4 sm:p-6 pb-4 border-b border-border/50 bg-gradient-to-br from-sky-50/70 via-background to-background pr-14 sm:pr-16">
+            <div className="flex items-start gap-3 sm:gap-4 min-w-0">
+              <div className="flex h-12 w-12 sm:h-16 sm:w-16 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-slate-100 via-slate-200 to-zinc-300 text-slate-500 shadow-sm ring-1 ring-slate-200/60">
+                <Globe className="h-6 w-6 sm:h-8 sm:w-8" />
+              </div>
+              <div className="min-w-0 pt-0.5">
+                <DialogTitle className="text-xl sm:text-3xl font-semibold tracking-tight">Visited Countries</DialogTitle>
+                <p className="mt-1 text-xs sm:text-base text-muted-foreground">
+                  {countriesCount} places in a flag wall.
+                </p>
+              </div>
+            </div>
+          </DialogHeader>
+
+          <div className="p-3 sm:p-6 max-h-[72vh] overflow-y-auto">
+            {visitedCountries.length > 0 ? (
+              <div className="grid grid-cols-2 gap-2.5 sm:gap-4 lg:grid-cols-3">
+                {visitedCountries.map((country, index) => (
+                  <div
+                    key={country.name}
+                    className={cn(
+                      "group relative aspect-[1.25/1] overflow-hidden rounded-[22px] border border-border/60 bg-card shadow-[0_10px_35px_rgba(15,23,42,0.06)] transition-all duration-200 hover:-translate-y-1 hover:shadow-[0_18px_42px_rgba(15,23,42,0.10)] sm:aspect-[1.45/1] sm:rounded-[28px]",
+                      index % 3 === 0 && "bg-gradient-to-br from-sky-50/90 via-background to-white",
+                      index % 3 === 1 && "bg-gradient-to-br from-emerald-50/90 via-background to-white",
+                      index % 3 === 2 && "bg-gradient-to-br from-amber-50/90 via-background to-white"
+                    )}
+                  >
+                    <div className="absolute inset-0 opacity-60 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.95),transparent_55%)]" />
+                    <div className="absolute -right-4 -bottom-4 h-24 w-24 rounded-full bg-white/60 blur-2xl" />
+                    <div className="relative flex h-full flex-col justify-between p-3 sm:p-5">
+                      <div className="flex items-center justify-between">
+                        <div className="rounded-full bg-white/85 px-2 py-1 text-[10px] sm:text-[11px] font-medium tracking-wide text-muted-foreground ring-1 ring-border/50 shadow-sm">
+                          Visited
+                        </div>
+                        <div className="flex h-7 w-7 sm:h-8 sm:w-8 items-center justify-center rounded-full bg-emerald-500 text-white shadow-md shadow-emerald-500/25 ring-2 ring-white/90">
+                          <BadgeCheck className="h-4 w-4 sm:h-5 sm:w-5" />
+                        </div>
+                      </div>
+
+                      <div className="flex flex-1 items-center justify-center px-1.5 sm:px-3">
+                        <div className="flex h-16 w-16 sm:h-24 sm:w-24 items-center justify-center rounded-full bg-white/85 text-4xl sm:text-5xl shadow-inner ring-1 ring-border/40">
+                          {country.flag}
+                        </div>
+                      </div>
+
+                      <div className="flex items-end justify-between gap-3">
+                        <span className="text-sm sm:text-lg font-semibold text-foreground leading-tight truncate">
+                          {country.name}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-3xl border border-dashed border-border/60 p-8 text-center bg-muted/20">
+                <p className="text-sm text-muted-foreground">No visited countries found yet.</p>
+              </div>
+            )}
           </div>
         </DialogContent>
       </Dialog>

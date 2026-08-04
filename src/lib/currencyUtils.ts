@@ -3,6 +3,8 @@ export type CurrencyCode =
   | "USD"
   | "EUR"
   | "IDR"
+  | "BND"
+  | "SAR"
   | "SGD"
   | "THB"
   | "VND"
@@ -27,6 +29,8 @@ export const currencies: CurrencyInfo[] = [
   { code: "USD", symbol: "$", name: "US Dollar", flag: "🇺🇸" },
   { code: "EUR", symbol: "€", name: "Euro", flag: "🇪🇺" },
   { code: "IDR", symbol: "Rp", name: "Indonesian Rupiah", flag: "🇮🇩" },
+  { code: "BND", symbol: "B$", name: "Brunei Dollar", flag: "🇧🇳" },
+  { code: "SAR", symbol: "﷼", name: "Saudi Riyal", flag: "🇸🇦" },
   { code: "SGD", symbol: "S$", name: "Singapore Dollar", flag: "🇸🇬" },
   { code: "THB", symbol: "฿", name: "Thai Baht", flag: "🇹🇭" },
   { code: "VND", symbol: "₫", name: "Vietnamese Dong", flag: "🇻🇳" },
@@ -55,6 +59,8 @@ export const conversionRatesToMYR: Record<CurrencyCode, number> = {
   USD: 4.04,
   EUR: 4.66,
   IDR: 0.000237,
+  BND: 3.17,
+  SAR: 1.09,
   SGD: 3.14,
   THB: 0.123,
   VND: 0.000183,
@@ -107,6 +113,20 @@ function writeCachedRates(rates: RatesMap) {
   }
 }
 
+async function resolveLiveRateToMYR(
+  currency: CurrencyCode,
+  toOtherCurrencies: Record<string, number>
+): Promise<number> {
+  if (currency === "MYR") return 1;
+
+  const fromMyR = toOtherCurrencies[currency];
+  if (typeof fromMyR === "number" && Number.isFinite(fromMyR) && fromMyR > 0) {
+    return 1 / fromMyR;
+  }
+
+  return conversionRatesToMYR[currency];
+}
+
 export async function getLiveConversionRatesToMYR(): Promise<RatesMap> {
   const cached = readCachedRates();
   if (cached && Date.now() - cached.ts < RATES_CACHE_TTL_MS) {
@@ -114,25 +134,20 @@ export async function getLiveConversionRatesToMYR(): Promise<RatesMap> {
   }
 
   try {
-    // Fetch rates from Frankfurter API (free, no API key required)
-    // https://api.frankfurter.app/latest?from=MYR returns rates FOR MYR (MYR -> other currencies)
-    const url = `https://api.frankfurter.app/latest?from=MYR`;
+    // Fetch rates via same-origin proxy (/api/fx-rates) to avoid browser CORS blocks.
+    // The proxy forwards to api.frankfurter.app server-side.
+    const url = `/api/fx-rates?from=MYR`;
     const res = await fetch(url);
     if (!res.ok) throw new Error(`Failed to fetch FX rates: ${res.status}`);
     const data = await res.json();
     const toOtherCurrencies: Record<string, number> = data?.rates || {};
 
     // Invert to get per-currency -> MYR conversion (e.g., USD_to_MYR = 1 / (MYR_to_USD))
-    const live: RatesMap = currencies.reduce((acc, currency) => {
-      if (currency.code === "MYR") {
-        acc[currency.code] = 1;
-      } else {
-        acc[currency.code] = toOtherCurrencies[currency.code]
-          ? 1 / toOtherCurrencies[currency.code]
-          : conversionRatesToMYR[currency.code];
-      }
-      return acc;
-    }, {} as RatesMap);
+    const live: RatesMap = {} as RatesMap;
+
+    for (const currency of currencies) {
+      live[currency.code] = await resolveLiveRateToMYR(currency.code, toOtherCurrencies);
+    }
 
     writeCachedRates(live);
     return live;
@@ -248,6 +263,8 @@ const destinationCurrencyMap: Record<string, CurrencyCode> = {
   'yogyakarta': 'IDR',
   'bandung': 'IDR',
   'surabaya': 'IDR',
+  'brunei': 'BND',
+  'bandar seri begawan': 'BND',
   
   // USA
   'united states': 'USD',
@@ -290,6 +307,17 @@ const destinationCurrencyMap: Record<string, CurrencyCode> = {
   'penang': 'MYR',
   'malacca': 'MYR',
   'kota kinabalu': 'MYR',
+
+  // Brunei
+  'brunei darussalam': 'BND',
+
+  // Saudi Arabia
+  'saudi arabia': 'SAR',
+  'riyadh': 'SAR',
+  'jeddah': 'SAR',
+  'mecca': 'SAR',
+  'makkah': 'SAR',
+  'medina': 'SAR',
 };
 
 export function suggestCurrencyFromDestination(destination: string): CurrencyCode | null {

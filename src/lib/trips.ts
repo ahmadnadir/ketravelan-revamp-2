@@ -15,10 +15,24 @@ function isSchemaDriftError(error: any): boolean {
   const message = `${error?.message ?? ''} ${error?.details ?? ''} ${error?.hint ?? ''}`.toLowerCase();
   return (
     error?.code === '42P01' ||
+    error?.code === '42703' ||
     error?.code === 'PGRST205' ||
+    error?.code === 'PGRST204' ||
     message.includes('relation "trips" does not exist') ||
     message.includes('relation "join_requests" does not exist') ||
-    message.includes('could not find the table')
+    message.includes('could not find the table') ||
+    message.includes('could not find the column') ||
+    message.includes('column') && message.includes('home_currency') && message.includes('does not exist') ||
+    message.includes('schema cache') && message.includes('home_currency')
+  );
+}
+
+function isMissingRpcError(error: any): boolean {
+  const message = `${error?.message ?? ''} ${error?.details ?? ''} ${error?.hint ?? ''}`.toLowerCase();
+  return (
+    error?.code === 'PGRST202' ||
+    message.includes('could not find the function') ||
+    message.includes('function') && message.includes('does not exist')
   );
 }
 
@@ -105,6 +119,12 @@ export interface TripFilters {
 }
 
 export async function fetchTrips(filters?: TripFilters) {
+  const normalizeTripPrice = (value: unknown): number | null => {
+    if (value === null || value === undefined || value === "") return null;
+    const parsed = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+
   // Select only essential fields to reduce payload size
   let query = supabase
     .from('trips')
@@ -117,11 +137,13 @@ export async function fetchTrips(filters?: TripFilters) {
       end_date,
       price,
       currency,
+      home_currency,
       visibility,
       creator_id,
       max_participants,
       current_participants,
       tags,
+      travel_styles,
       requirements,
       type,
       slug,
@@ -187,7 +209,11 @@ export async function fetchTrips(filters?: TripFilters) {
   const { data, error } = await query;
 
   if (error) throw error;
-  return filterItemsByBlockedRelationship(data || [], (trip: any) => trip.creator_id);
+  const visibleTrips = await filterItemsByBlockedRelationship(data || [], (trip: any) => trip.creator_id);
+  return visibleTrips.map((trip: any) => ({
+    ...trip,
+    price: normalizeTripPrice(trip.price),
+  }));
 }
 
 export async function fetchTripDetails(tripIdOrSlug: string) {
@@ -376,23 +402,111 @@ export type TripCurrencySettings = {
 };
 
 export async function getTripCurrencySettings(tripId: string): Promise<TripCurrencySettings> {
-  const { data, error } = await supabase
+  let data: any = null;
+  let error: any = null;
+
+  const primary = await supabase
     .from('trips')
-    .select('currency_settings')
+    .select('home_currency, currency_settings')
     .eq('id', tripId)
     .maybeSingle();
 
+  data = primary.data;
+  error = primary.error;
+
+  if (error && isSchemaDriftError(error)) {
+    const fallback = await supabase
+      .from('trips')
+      .select('currency_settings')
+      .eq('id', tripId)
+      .maybeSingle();
+    data = fallback.data;
+    error = fallback.error;
+  }
+
   if (error) throw error;
-  const settings = (data?.currency_settings as TripCurrencySettings) || { travel_currencies: [] };
-  return settings;
+  const rawSettings = (data?.currency_settings as Partial<TripCurrencySettings> | null) || null;
+  const travelCurrencies = Array.isArray(rawSettings?.travel_currencies)
+    ? (rawSettings?.travel_currencies as CurrencyCode[])
+    : [];
+
+  // Opportunistic backfill: if the dedicated column exists but is null while JSON has a value,
+  // sync it once so other consumers relying on trips.home_currency get the same value.
+  const resolvedFromJson = rawSettings?.home_currency as CurrencyCode | undefined;
+  const columnHomeCurrency = data?.home_currency as CurrencyCode | null | undefined;
+  if (!columnHomeCurrency && resolvedFromJson) {
+    const backfill = await supabase
+      .from('trips')
+      .update({ home_currency: resolvedFromJson })
+      .eq('id', tripId);
+
+    // Ignore schema-drift failures here (column might not exist in some environments).
+    if (backfill.error && !isSchemaDriftError(backfill.error)) {
+      console.warn('Failed to backfill trips.home_currency from currency_settings', backfill.error);
+    }
+  }
+
+  return {
+    home_currency: resolvedFromJson ?? columnHomeCurrency,
+    travel_currencies: travelCurrencies,
+  };
 }
 
 export async function updateTripCurrencySettings(tripId: string, settings: TripCurrencySettings) {
-  const { error } = await supabase
+  const normalizedTravelCurrencies = Array.isArray(settings.travel_currencies)
+    ? settings.travel_currencies
+    : [];
+
+  const normalizedHomeCurrency = settings.home_currency;
+
+  // Primary path: security-definer RPC (more resilient against RLS edge cases).
+  const rpcResult = await supabase.rpc('set_trip_currency_settings', {
+    p_trip_id: tripId,
+    p_home_currency: normalizedHomeCurrency ?? null,
+    p_travel_currencies: normalizedTravelCurrencies,
+  });
+
+  if (!rpcResult.error) return;
+  if (!isMissingRpcError(rpcResult.error)) {
+    throw rpcResult.error;
+  }
+
+  // Always persist JSON settings first (works across old/new schemas).
+  const jsonUpdate = await supabase
     .from('trips')
-    .update({ currency_settings: settings })
+    .update({
+      currency_settings: {
+        home_currency: normalizedHomeCurrency,
+        travel_currencies: normalizedTravelCurrencies,
+      },
+    })
     .eq('id', tripId);
-  if (error) throw error;
+
+  if (jsonUpdate.error) throw jsonUpdate.error;
+
+  // Then try to sync dedicated column explicitly.
+  const columnUpdate = await supabase
+    .from('trips')
+    .update({
+      home_currency: normalizedHomeCurrency,
+    })
+    .eq('id', tripId);
+
+  if (!columnUpdate.error) return;
+  if (!isSchemaDriftError(columnUpdate.error)) throw columnUpdate.error;
+
+  // If dedicated column is unavailable in this environment, we already wrote JSON above.
+  const fallback = await supabase
+    .from('trips')
+    .update({
+      currency_settings: {
+        home_currency: normalizedHomeCurrency,
+        travel_currencies: normalizedTravelCurrencies,
+      },
+    })
+    .eq('id', tripId);
+
+  if (fallback.error) throw fallback.error;
 }
 
 export async function createJoinRequest(tripId: string, message?: string) {

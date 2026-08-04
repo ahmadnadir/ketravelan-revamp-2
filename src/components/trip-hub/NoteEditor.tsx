@@ -24,7 +24,7 @@ interface NoteEditorProps {
   note: TripNoteDB;
   open: boolean;
   onClose: () => void;
-  onSave: (note: TripNoteDB) => Promise<void>;
+  onSave: (note: TripNoteDB, options?: { silent?: boolean }) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   tripId: string;
 }
@@ -195,7 +195,7 @@ export function NoteEditor({
         trip_id: tripId,
       };
 
-      onSave(updatedNote);
+      onSave(updatedNote, { silent: true });
       lastSavedContent.current = { title: title || "Untitled", content };
 
       setTimeout(() => {
@@ -224,7 +224,7 @@ export function NoteEditor({
         blocks,
         trip_id: tripId,
       };
-      onSave(updatedNote);
+      onSave(updatedNote, { silent: true });
     }
     onClose();
   };
@@ -301,20 +301,6 @@ export function NoteEditor({
     });
   };
 
-  const getLinkAtCursor = (text: string, cursorPos: number): string | null => {
-    const isBoundary = (char: string) => /\s/.test(char);
-    let start = cursorPos;
-    let end = cursorPos;
-
-    while (start > 0 && !isBoundary(text[start - 1])) start--;
-    while (end < text.length && !isBoundary(text[end])) end++;
-
-    const candidate = text.slice(start, end);
-    if (!candidate) return null;
-    const singleTokenLinkPattern = /^(https?:\/\/[^\s]+|(?:www\.)[^\s]+)$/i;
-    return singleTokenLinkPattern.test(candidate) ? candidate : null;
-  };
-
   const syncMirrorScroll = () => {
     if (!shouldRenderMirror || !contentRef.current || !contentMirrorRef.current) return;
     contentMirrorRef.current.scrollTop = contentRef.current.scrollTop;
@@ -383,12 +369,7 @@ export function NoteEditor({
       }
     }
 
-    if (useMirrorLayer) {
-      const maybeLink = getLinkAtCursor(value, pos);
-      if (maybeLink) {
-        requestOpenLink(maybeLink);
-      }
-    }
+    // External links should open only via explicit clicks on rendered link elements.
   };
 
   const handleContentChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {

@@ -2,7 +2,7 @@
 import { buildPublicUrl, buildTripShareUrl } from "@/lib/publicUrl";
 import { getExpectationIcon, getExpectationLabel } from "@/lib/expectationUtils";
 import { useState, useRef, useEffect, useCallback } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import {
   ChevronLeft,
   ChevronRight,
@@ -76,6 +76,7 @@ const steps = [
 ];
 
 export default function CreateTrip() {
+  const routerLocation = useLocation();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const [searchParams] = useSearchParams();
@@ -103,6 +104,11 @@ export default function CreateTrip() {
   const [datePickerField, setDatePickerField] = useState<"start" | "end" | null>(null);
   const [isLoadingTrip, setIsLoadingTrip] = useState(false);
   const [tripStatus, setTripStatus] = useState<'draft' | 'published' | null>(null);
+  const createTripReturnPath = `${routerLocation.pathname}${routerLocation.search}`;
+  const buildTripDetailsPath = (tripToken: string) => {
+    const returnQuery = new URLSearchParams({ return: createTripReturnPath }).toString();
+    return `/trip/${tripToken}?${returnQuery}`;
+  };
   // Store draft snapshot for share modal (since we clear draft before showing modal)
   const draftSnapshotRef = useRef<TripDraft | null>(null);
   // File input ref for gallery images
@@ -511,7 +517,7 @@ export default function CreateTrip() {
           title: 'Trip updated!',
           description: 'Your trip has been successfully updated.',
         });
-        navigate(`/trip/${publishedTrip.id}`);
+        navigate(buildTripDetailsPath(publishedTrip.id));
       } else {
         // Set these BEFORE clearDraft so the success modal can reference them
         setPublishedTripId(publishedTrip.id);
@@ -1301,7 +1307,7 @@ export default function CreateTrip() {
                 <Button
                   size="lg"
                   variant="outline"
-                  onClick={() => navigate(`/trip/${publishedTripId}`)}
+                  onClick={() => publishedTripId && navigate(buildTripDetailsPath(publishedTripId))}
                   className="w-full rounded-xl text-sm sm:text-base gap-2"
                 >
                   View Trip
@@ -1408,7 +1414,7 @@ export default function CreateTrip() {
                 <button
                   onClick={() => {
                     setShowShareModal(false);
-                    navigate(`/trip/${publishedTripId}`);
+                    if (publishedTripId) navigate(buildTripDetailsPath(publishedTripId));
                   }}
                   className="absolute right-3 top-3 h-7 w-7 rounded-full flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
                   aria-label="Close share dialog"
@@ -1454,7 +1460,7 @@ export default function CreateTrip() {
                       className="rounded-lg h-9 text-xs"
                       onClick={() => {
                         setShowShareModal(false);
-                        navigate(`/trip/${publishedTripId}`);
+                        if (publishedTripId) navigate(buildTripDetailsPath(publishedTripId));
                       }}
                     >
                       View Trip

@@ -34,6 +34,12 @@ export function getCurrencyFromLocale(): CurrencyCode {
     if (locale.startsWith("id")) {
       return "IDR";
     }
+    if (locale === "ms-bn") {
+      return "BND";
+    }
+    if (locale === "ar-sa") {
+      return "SAR";
+    }
     // US English
     if (locale === "en-us") {
       return "USD";
@@ -60,7 +66,7 @@ export function getCurrencyFromLocale(): CurrencyCode {
 // Get stored home currency or detect from locale
 function getInitialHomeCurrency(): CurrencyCode {
   const stored = localStorage.getItem(HOME_CURRENCY_KEY);
-  if (stored && ["MYR", "USD", "EUR", "IDR"].includes(stored)) {
+  if (stored && ["MYR", "USD", "EUR", "IDR", "BND", "SAR"].includes(stored)) {
     return stored as CurrencyCode;
   }
   return getCurrencyFromLocale();
@@ -488,14 +494,59 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const setHomeCurrency = (currency: CurrencyCode) => {
     localStorage.setItem(HOME_CURRENCY_KEY, currency);
     setHomeCurrencyState(currency);
-    // Optionally update profile in Supabase if home_currency field exists
-    if (user && profile) {
+    // Persist profile home currency and propagate to trips owned by this user.
+    if (user) {
       (async () => {
         try {
           await supabase
             .from('profiles')
             .update({ home_currency: currency })
             .eq('id', user.id);
+
+          const { data: creatorTrips, error: creatorTripsError } = await supabase
+            .from('trips')
+            .select('id')
+            .eq('creator_id', user.id);
+
+          if (creatorTripsError) throw creatorTripsError;
+
+          const ownedTripIds = Array.from(
+            new Set((creatorTrips || []).map((trip: any) => trip.id).filter(Boolean))
+          );
+
+          if (ownedTripIds.length > 0) {
+            const { error: tripsHomeCurrencyError } = await supabase
+              .from('trips')
+              .update({ home_currency: currency })
+              .in('id', ownedTripIds);
+
+            if (tripsHomeCurrencyError) throw tripsHomeCurrencyError;
+          }
+
+          // Keep per-trip JSON settings aligned with profile-wide update.
+          const { data: allTripsSettings, error: allTripsSettingsError } = await supabase
+            .from('trips')
+            .select('id, currency_settings')
+            .in('id', ownedTripIds);
+
+          if (allTripsSettingsError) throw allTripsSettingsError;
+
+          if (Array.isArray(allTripsSettings) && allTripsSettings.length > 0) {
+            await Promise.all(
+              allTripsSettings.map((trip: any) => {
+                const existingSettings = (trip?.currency_settings || {}) as Record<string, any>;
+                const mergedSettings = {
+                  ...existingSettings,
+                  home_currency: currency,
+                };
+                return supabase
+                  .from('trips')
+                  .update({ currency_settings: mergedSettings })
+                  .eq('id', trip.id);
+              })
+            );
+          }
+
           await refreshProfile();
         } catch (error) {
           console.error(error);

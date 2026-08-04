@@ -631,7 +631,7 @@ export default function Onboarding() {
                   <div className="mt-4 pt-4 border-t border-border animate-in fade-in duration-200">
                     <label className="text-sm font-medium mb-2 block">Override Currency</label>
                     <div className="grid grid-cols-4 gap-2">
-                      {(["MYR", "USD", "EUR", "IDR"] as CurrencyCode[]).map((code) => {
+                      {(["MYR", "USD", "EUR", "IDR", "BND", "SAR"] as CurrencyCode[]).map((code) => {
                         const info = getCurrencyInfo(code);
                         return (
                           <button

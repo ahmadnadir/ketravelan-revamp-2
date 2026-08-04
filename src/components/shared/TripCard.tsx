@@ -1,23 +1,26 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Calendar, MapPin, Users, Heart, Share2, Copy, MessageCircle, Check, Lock, Trash2, X, Tag } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { TripType } from "@/data/mockData";
 import { tripCategories } from "@/data/categories";
+import { getCurrencySymbol, type CurrencyCode } from "@/lib/currencyUtils";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@/components/ui/drawer";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { isTripSaved, saveTrip, unsaveTrip } from "@/lib/savedTrips";
 import { buildPublicUrl, buildTripShareUrl } from "@/lib/publicUrl";
-import { getExpectationIcon, getExpectationLabel } from "@/lib/expectationUtils";
 
 const DEFAULT_TRIP_IMAGE = "/default-trip-photo.jpeg";
 
@@ -31,9 +34,13 @@ interface TripCardProps {
   price: number;
   creatorId?: string;
   displayCurrency?: string;
+  currency?: string;
+  homeCurrency?: string;
+  home_currency?: string;
   slotsLeft: number;
   totalSlots: number;
   tags: string[];
+  travel_styles?: string[];
   isAlmostFull?: boolean;
   isOngoing?: boolean;
   tripType?: TripType;
@@ -57,9 +64,13 @@ export function TripCard({
   endDate,
   price,
   displayCurrency = "RM",
+  currency,
+  homeCurrency,
+  home_currency,
   slotsLeft,
   totalSlots,
   tags,
+  travel_styles,
   isAlmostFull,
   isOngoing,
   tripType,
@@ -74,10 +85,13 @@ export function TripCard({
   returnTab,
 }: TripCardProps) {
   const { user } = useAuth();
+  const location = useLocation();
+  const isMobile = useIsMobile();
   const [isFavourited, setIsFavourited] = useState(false);
   const [isAnimating, setIsAnimating] = useState(false);
   const [showLikeFx, setShowLikeFx] = useState(false);
   const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [stylesOverflowOpen, setStylesOverflowOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const suppressNavigationUntilRef = useRef(0);
@@ -135,16 +149,44 @@ export function TripCard({
   const safeEndDate = endDate && endDate.trim() !== "" ? endDate : "TBA";
   const safeSlotsLeft = typeof slotsLeft === "number" && slotsLeft >= 0 ? slotsLeft : "?";
   const safeTotalSlots = typeof totalSlots === "number" && totalSlots > 0 ? totalSlots : "?";
-  const safeTags = Array.isArray(tags) && tags.length > 0 ? tags : ["No tags"];
+  const safeTravelStyles = Array.isArray(travel_styles) && travel_styles.length > 0 ? travel_styles : [];
+  const resolvedTravelStyles = useMemo(
+    () =>
+      safeTravelStyles.map((style) => {
+        const normalizedStyle = style.toLowerCase();
+        const category = tripCategories.find(
+          (c) => c.id.toLowerCase() === normalizedStyle || c.label.toLowerCase() === normalizedStyle
+        );
+        return {
+          key: style,
+          label: category?.label || style,
+          icon: category?.icon,
+        };
+      }),
+    [safeTravelStyles]
+  );
+  const visibleTravelStyles = resolvedTravelStyles.slice(0, 3);
+  const extraTravelStylesCount = Math.max(0, resolvedTravelStyles.length - visibleTravelStyles.length);
+  const normalizeCurrencyLabel = (value?: string | null) => {
+    if (!value) return null;
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    if (/^[A-Za-z]{3}$/.test(trimmed)) {
+      return getCurrencySymbol(trimmed.toUpperCase() as CurrencyCode);
+    }
+    return trimmed;
+  };
+
+  const safeCurrency =
+    normalizeCurrencyLabel(home_currency ?? homeCurrency ?? currency ?? displayCurrency) || "RM";
   let safePrice: string | number | null = null;
   if (typeof price === "number" && price > 0) safePrice = price;
   else if (typeof price === "number" && price === 0) safePrice = "Free";
   else safePrice = "TBA";
-  const safeCurrency = displayCurrency && displayCurrency.trim() !== "" ? displayCurrency : "RM";
   const tripIdentifier = slug || id || "unknown";
   const returnParams = new URLSearchParams();
-  if (returnTo) returnParams.set("from", returnTo);
-  if (returnTab) returnParams.set("tab", returnTab);
+  const currentPath = `${location.pathname}${location.search}`;
+  returnParams.set("return", currentPath);
   const returnSuffix = returnParams.toString();
   const tripLink = returnSuffix
     ? `/trip/${tripIdentifier}?${returnSuffix}`
@@ -523,56 +565,84 @@ export function TripCard({
           <span className="truncate">{safeStartDate} - {safeEndDate}</span>
         </div>
 
-        {/* Tags */}
-        <div className="flex flex-wrap gap-1.5 sm:gap-2">
-          {safeTags.slice(0, 3).map((tag) => {
-            // Try standard category first, then fall back to expectation icon map
-            const category = tripCategories.find(
-              (c) => c.label.toLowerCase() === tag.toLowerCase()
-            );
-            const emoji = category?.icon || getExpectationIcon(tag);
-            return (
-              <span
-                key={tag}
-                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-secondary text-secondary-foreground"
-              >
-                {emoji
-                  ? <span>{emoji}</span>
-                  : <Tag className="h-3 w-3 shrink-0" />}
-                <span>{tag}</span>
-              </span>
-            );
-          })}
-          {Array.isArray(tags) && tags.length > 3 && (
-            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-secondary text-muted-foreground">
-              +{tags.length - 3} more
-            </span>
-          )}
-        </div>
-
-        {/* What to Expect */}
-        {Array.isArray(requirements) && requirements.length > 0 && (
+        {/* Travel Styles */}
+        {resolvedTravelStyles.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
-            {requirements.slice(0, 3).map((req, i) => {
-              const icon = getExpectationIcon(req);
+            {visibleTravelStyles.map((style, index) => {
               return (
                 <span
-                  key={i}
+                  key={`${style.key}-${index}`}
                   className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs border border-border/60 text-muted-foreground"
                 >
-                  {icon
-                    ? <span>{icon}</span>
+                  {style.icon
+                    ? <span>{style.icon}</span>
                     : <Tag className="h-3 w-3 shrink-0" />}
-                  <span>{getExpectationLabel(req)}</span>
+                  <span>{style.label}</span>
                 </span>
               );
             })}
-            {requirements.length > 3 && (
-              <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs border border-border/60 text-muted-foreground">
-                +{requirements.length - 3} more
-              </span>
+            {extraTravelStylesCount > 0 && (
+              isMobile ? (
+                <button
+                  type="button"
+                  onClick={() => setStylesOverflowOpen(true)}
+                  className="inline-flex items-center px-2.5 py-1 rounded-full text-xs border border-border/60 text-muted-foreground hover:bg-secondary"
+                  aria-label="Show all travel styles"
+                >
+                  +{extraTravelStylesCount} more
+                </button>
+              ) : (
+                <Popover open={stylesOverflowOpen} onOpenChange={setStylesOverflowOpen}>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      className="inline-flex items-center px-2.5 py-1 rounded-full text-xs border border-border/60 text-muted-foreground hover:bg-secondary"
+                      aria-label="Show all travel styles"
+                    >
+                      +{extraTravelStylesCount} more
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent align="start" className="w-64 p-3">
+                    <p className="text-xs font-medium text-foreground mb-2">Travel Styles</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {resolvedTravelStyles.map((style, index) => (
+                        <span
+                          key={`popover-${style.key}-${index}`}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs border border-border/60 text-muted-foreground"
+                        >
+                          {style.icon ? <span>{style.icon}</span> : <Tag className="h-3 w-3 shrink-0" />}
+                          <span>{style.label}</span>
+                        </span>
+                      ))}
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              )
             )}
           </div>
+        )}
+
+        {isMobile && (
+          <Drawer open={stylesOverflowOpen} onOpenChange={setStylesOverflowOpen}>
+            <DrawerContent className="rounded-t-3xl">
+              <DrawerHeader>
+                <DrawerTitle>Travel Styles</DrawerTitle>
+              </DrawerHeader>
+              <div className="px-4 pb-6">
+                <div className="flex flex-wrap gap-2">
+                  {resolvedTravelStyles.map((style, index) => (
+                    <span
+                      key={`drawer-${style.key}-${index}`}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs border border-border/60 text-muted-foreground"
+                    >
+                      {style.icon ? <span>{style.icon}</span> : <Tag className="h-3 w-3 shrink-0" />}
+                      <span>{style.label}</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </DrawerContent>
+          </Drawer>
         )}
 
         {/* Footer - pinned to bottom */}

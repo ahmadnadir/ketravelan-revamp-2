@@ -34,7 +34,7 @@ export const countries: Country[] = [
   { name: "Cambodia", flag: "🇰🇭", currency: "USD" },
   { name: "Myanmar", flag: "🇲🇲", currency: "USD" },
   { name: "Laos", flag: "🇱🇦", currency: "USD" },
-  { name: "Brunei", flag: "🇧🇳", currency: "USD" },
+  { name: "Brunei", flag: "🇧🇳", currency: "BND" },
   
   // East Asia
   { name: "Japan", flag: "🇯🇵", currency: "USD" },
@@ -52,7 +52,7 @@ export const countries: Country[] = [
   
   // Middle East
   { name: "United Arab Emirates", flag: "🇦🇪", currency: "USD" },
-  { name: "Saudi Arabia", flag: "🇸🇦", currency: "USD" },
+  { name: "Saudi Arabia", flag: "🇸🇦", currency: "SAR" },
   { name: "Qatar", flag: "🇶🇦", currency: "USD" },
   { name: "Turkey", flag: "🇹🇷", currency: "EUR" },
   

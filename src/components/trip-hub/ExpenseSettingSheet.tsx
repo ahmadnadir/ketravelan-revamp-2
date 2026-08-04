@@ -17,11 +17,12 @@ import {
 } from "@/components/ui/select";
 import { PillChip } from "@/components/shared/PillChip";
 import { CurrencyCode, currencies, travelCurrencies } from "@/lib/currencyUtils";
-import { useAuth } from "@/contexts/AuthContext";
 
 interface ExpenseSettingsSheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  homeCurrency: CurrencyCode;
+  onHomeCurrencyChange: (currency: CurrencyCode) => void;
   tripTravelCurrencies: CurrencyCode[];
   onTravelCurrenciesChange: (currencies: CurrencyCode[]) => void;
 }
@@ -29,13 +30,11 @@ interface ExpenseSettingsSheetProps {
 export function ExpenseSettingsSheet({
   open,
   onOpenChange,
+  homeCurrency,
+  onHomeCurrencyChange,
   tripTravelCurrencies,
   onTravelCurrenciesChange,
 }: ExpenseSettingsSheetProps) {
-  const { user, setHomeCurrency } = useAuth();
-  // Fix: Safely access homeCurrency if present, otherwise fallback to 'MYR'
-  const homeCurrency = (user && 'homeCurrency' in user ? (user as any).homeCurrency : undefined) || "MYR";
-
   const toggleTravelCurrency = (code: CurrencyCode) => {
     if (tripTravelCurrencies.includes(code)) {
       onTravelCurrenciesChange(tripTravelCurrencies.filter((c) => c !== code));
@@ -66,7 +65,7 @@ export function ExpenseSettingsSheet({
             </Label>
             <Select 
               value={homeCurrency} 
-              onValueChange={(val) => setHomeCurrency(val as CurrencyCode)}
+              onValueChange={(val) => onHomeCurrencyChange(val as CurrencyCode)}
             >
               <SelectTrigger className="h-12 rounded-xl">
                 <SelectValue />

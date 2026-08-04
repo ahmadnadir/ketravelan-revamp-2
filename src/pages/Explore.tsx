@@ -16,6 +16,7 @@ import type { TripCategoryId } from "@/data/categories";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useTrips } from "@/hooks/useTrips";
+import { useAuth } from "@/contexts/AuthContext";
 
 import { TripFilterDrawer, type FilterState } from "@/components/explore/TripFilterDrawer";
 import { AppliedFiltersBar } from "@/components/explore/AppliedFiltersBar";
@@ -24,19 +25,21 @@ import { useSimulatedLoading } from "@/hooks/useSimulatedLoading";
 import { convertPrice, getCurrencySymbol, getCurrencyInfo, type CurrencyCode } from "@/lib/currencyUtils";
 import { searchLocations, type LocationResult } from "@/lib/locationApi";
 
-const defaultFilters: FilterState = {
+const buildDefaultFilters = (): FilterState => ({
   destination: "",
   dates: undefined,
   flexibleDates: false,
   budgetRange: [0, 10000],
   categories: [],
-  currency: "MYR",
-};
+  currency: undefined,
+});
 
 type DesktopPanel = "where" | "when" | "budget" | "styles" | null;
 
 export default function Explore() {
   const isLoading = useSimulatedLoading(600);
+  const { homeCurrency } = useAuth();
+  const defaultCurrency = homeCurrency || "MYR";
   const [searchParams, setSearchParams] = useSearchParams();
   const [refreshProgress, setRefreshProgress] = useState(0);
   const [showTopBuffering, setShowTopBuffering] = useState(false);
@@ -96,8 +99,8 @@ export default function Explore() {
   }, []);
 
   // Applied filter state (affects results)
-  const [appliedFilters, setAppliedFilters] = useState<FilterState>(defaultFilters);
-  const selectedCurrency = (appliedFilters.currency || "MYR") as CurrencyCode;
+  const [appliedFilters, setAppliedFilters] = useState<FilterState>(() => buildDefaultFilters());
+  const selectedCurrency = defaultCurrency as CurrencyCode;
 
   // Count active filters for badge
   const activeFilterCount = useMemo(() => {
@@ -106,9 +109,9 @@ export default function Explore() {
     if (appliedFilters.flexibleDates || appliedFilters.dates?.from) count++;
     if (!isDefaultBudgetRange(appliedFilters.budgetRange)) count++;
     count += appliedFilters.categories.length;
-    if ((appliedFilters as any).currency && (appliedFilters as any).currency !== "MYR") count++;
+    if (appliedFilters.currency && appliedFilters.currency !== defaultCurrency) count++;
     return count;
-  }, [appliedFilters]);
+  }, [appliedFilters, defaultCurrency]);
 
   const hasActiveFilters = activeFilterCount > 0;
 
@@ -298,6 +301,7 @@ export default function Explore() {
         slotsLeft,
         totalSlots: maxParticipants,
         tags: Array.isArray(trip.tags) ? trip.tags : [],
+        travelStyles: Array.isArray((trip as any).travel_styles) ? (trip as any).travel_styles : [],
         requirements: Array.isArray(trip.requirements) ? trip.requirements : [],
         isAlmostFull: slotsLeft > 0 && slotsLeft <= 2,
         tripType: trip.type ?? undefined,
@@ -386,7 +390,7 @@ export default function Explore() {
   }, []);
 
   const handleReset = useCallback(() => {
-    setAppliedFilters(defaultFilters);
+    setAppliedFilters(buildDefaultFilters());
   }, []);
 
   const handleSearchTrips = useCallback(() => {
@@ -720,6 +724,7 @@ export default function Explore() {
               budgetRange={appliedFilters.budgetRange}
               categories={appliedFilters.categories}
               currency={appliedFilters.currency}
+              defaultCurrency={defaultCurrency}
               onClear={handleReset}
               onEdit={() => setIsDrawerOpen(true)}
             />
@@ -754,7 +759,7 @@ export default function Explore() {
               Found {displayedTrips.length} {tab} trip{displayedTrips.length !== 1 ? "s" : ""}
             </span>
             <span className="text-muted-foreground hidden sm:block">
-              Showing prices in {getCurrencyInfo(selectedCurrency)?.name ?? selectedCurrency} ({getCurrencySymbol(selectedCurrency)})
+              {`Showing prices in ${getCurrencyInfo(selectedCurrency)?.name ?? selectedCurrency} (${getCurrencySymbol(selectedCurrency)})`}
             </span>
           </div>
         )}
@@ -781,6 +786,7 @@ export default function Explore() {
                 slotsLeft={trip.slotsLeft}
                 totalSlots={trip.totalSlots}
                 tags={trip.tags}
+                travel_styles={trip.travelStyles}
                 isAlmostFull={trip.isAlmostFull}
                 isOngoing={trip.isOngoing}
                 tripType={trip.tripType}
@@ -800,6 +806,7 @@ export default function Explore() {
         open={isDrawerOpen}
         onOpenChange={setIsDrawerOpen}
         filters={appliedFilters}
+        defaultCurrency={defaultCurrency}
         onApply={handleApplyFilters}
         onReset={handleReset}
         matchingCount={filteredTrips.length}

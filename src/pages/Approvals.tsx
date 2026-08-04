@@ -19,7 +19,7 @@ import {
   ChevronRight,
   Users
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { fetchAllJoinRequestsForUser, approveJoinRequest, rejectJoinRequest, fetchTripInvitesForUser, acceptTripInvite, rejectTripInvite } from "@/lib/trips";
 import { approveReceipt, fetchPendingReceiptApprovalsForUser, markParticipantsAsPaid, rejectReceipt } from "@/lib/expenses";
 import { useToast } from "@/hooks/use-toast";
@@ -116,6 +116,7 @@ const segmentOptions = [
 ];
 
 export default function Approvals() {
+  const location = useLocation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -123,6 +124,12 @@ export default function Approvals() {
   const [approvals, setApprovals] = useState<ApprovalItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [processingId, setProcessingId] = useState<string | null>(null);
+  const approvalsReturnPath = `${location.pathname}${location.search}`;
+
+  const navigateToTripDetails = useCallback((tripId: string) => {
+    const query = new URLSearchParams({ return: approvalsReturnPath }).toString();
+    navigate(`/trip/${tripId}?${query}`);
+  }, [approvalsReturnPath, navigate]);
 
   const getAvatarUrl = (name?: string, imageUrl?: string) => {
     const trimmed = String(imageUrl || "").trim();
@@ -483,7 +490,7 @@ export default function Approvals() {
       {/* Trip Info */}
       <div 
         className="flex items-center gap-3 p-2 -mx-2 rounded-lg hover:bg-secondary/50 cursor-pointer transition-colors"
-        onClick={() => navigate(`/trip/${item.tripId}`)}
+        onClick={() => navigateToTripDetails(item.tripId)}
       >
         <img 
           src={item.tripImage} 
@@ -565,7 +572,7 @@ export default function Approvals() {
 
       <div
         className="flex items-center gap-3 p-2 -mx-2 rounded-lg hover:bg-secondary/50 cursor-pointer transition-colors"
-        onClick={() => navigate(`/trip/${item.tripId}`)}
+        onClick={() => navigateToTripDetails(item.tripId)}
       >
         <img
           src={item.tripImage}

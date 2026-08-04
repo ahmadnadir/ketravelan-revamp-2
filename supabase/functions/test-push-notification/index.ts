@@ -36,7 +36,8 @@ function buildCorsHeaders(req: Request): Record<string, string> {
 }
 
 interface TestPushRequest {
-  userId: string;
+  userId?: string;
+  email?: string;
   dryRun?: boolean;
 }
 
@@ -48,6 +49,57 @@ function hasApnsConfig() {
   return Boolean(APPLE_TEAM_ID && APPLE_KEY_ID && APPLE_PRIVATE_KEY && APPLE_BUNDLE_ID);
 }
 
+async function resolveUserIdByEmail(email: string) {
+  const normalizedEmail = email.trim().toLowerCase();
+  const lookupErrors: string[] = [];
+
+  try {
+    const { data: profileByEmail, error: profileByEmailErr } = await admin
+      .from("profiles_with_email")
+      .select("id, email")
+      .eq("email", normalizedEmail)
+      .maybeSingle();
+
+    if (profileByEmailErr) {
+      lookupErrors.push(`profiles_with_email lookup failed: ${profileByEmailErr.message}`);
+    } else if (profileByEmail?.id) {
+      return {
+        id: String(profileByEmail.id),
+        email: String(profileByEmail.email || normalizedEmail),
+      };
+    }
+  } catch (viewErr) {
+    lookupErrors.push(`profiles_with_email exception: ${viewErr instanceof Error ? viewErr.message : String(viewErr)}`);
+  }
+
+  let page = 1;
+  const perPage = 1000;
+
+  while (true) {
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage });
+    if (error) {
+      const details = [error.name, error.message, JSON.stringify(error)].filter(Boolean).join(" | ");
+      lookupErrors.push(`auth.admin.listUsers failed: ${details}`);
+      throw new Error(lookupErrors.join("; "));
+    }
+
+    const users = data?.users ?? [];
+    const matchedUser = users.find((user) => String(user.email || "").trim().toLowerCase() === normalizedEmail);
+    if (matchedUser?.id) {
+      return {
+        id: matchedUser.id,
+        email: matchedUser.email || normalizedEmail,
+      };
+    }
+
+    if (users.length < perPage) {
+      throw new Error(lookupErrors.length > 0 ? lookupErrors.join("; ") : "User not found for provided email");
+    }
+
+    page += 1;
+  }
+}
+
 serve(async (req: Request) => {
   const corsHeaders = buildCorsHeaders(req);
   if (req.method === "OPTIONS") {
@@ -56,15 +108,42 @@ serve(async (req: Request) => {
 
   try {
     const body = await req.json() as TestPushRequest;
-    if (!body?.userId) {
-      return new Response(JSON.stringify({ error: "Missing userId" }), {
+    if (!body?.userId && !body?.email) {
+      return new Response(JSON.stringify({ error: "Missing userId or email" }), {
         status: 400,
         headers: { "Content-Type": "application/json", ...corsHeaders },
       });
     }
 
+    let resolvedUserId = body.userId?.trim() || "";
+    let resolvedEmail = body.email?.trim().toLowerCase() || "";
+
+    if (!resolvedUserId && resolvedEmail) {
+      let resolvedUser: { id: string; email: string } | null = null;
+      try {
+        resolvedUser = await resolveUserIdByEmail(resolvedEmail);
+      } catch (lookupErr) {
+        const message = lookupErr instanceof Error ? lookupErr.message : String(lookupErr);
+        return new Response(JSON.stringify({ error: `Failed to resolve email: ${message}` }), {
+          status: 500,
+          headers: { "Content-Type": "application/json", ...corsHeaders },
+        });
+      }
+
+      if (!resolvedUser?.id) {
+        return new Response(JSON.stringify({ error: "User not found for provided email" }), {
+          status: 404,
+          headers: { "Content-Type": "application/json", ...corsHeaders },
+        });
+      }
+
+      resolvedUserId = String(resolvedUser.id);
+      resolvedEmail = String(resolvedUser.email || resolvedEmail);
+    }
+
     const diagnostics: Record<string, unknown> = {
-      userId: body.userId,
+      userId: resolvedUserId,
+      email: resolvedEmail || null,
       timestamp: new Date().toISOString(),
       checks: {
         firebase_configured: !!FIREBASE_SERVICE_ACCOUNT_JSON,
@@ -90,7 +169,7 @@ serve(async (req: Request) => {
     const { data: profile, error: profileErr } = await admin
       .from("profiles")
       .select("id, push_notifications, email_notifications")
-      .eq("id", body.userId)
+      .eq("id", resolvedUserId)
       .maybeSingle();
 
     if (profileErr) {
@@ -106,7 +185,7 @@ serve(async (req: Request) => {
     const { data: tokens, error: tokensErr } = await admin
       .from("user_push_tokens")
       .select("id, token, platform, created_at")
-      .eq("user_id", body.userId);
+      .eq("user_id", resolvedUserId);
 
     if (tokensErr) {
       diagnostics.tokens_check = `❌ Error: ${tokensErr.message}`;
@@ -134,12 +213,32 @@ serve(async (req: Request) => {
       }
     }
 
+    const { data: recentBroadcasts, error: broadcastsErr } = await admin
+      .from("notifications")
+      .select("id, title, read, created_at, action_url")
+      .eq("user_id", resolvedUserId)
+      .eq("type", "broadcast_announcement")
+      .order("created_at", { ascending: false })
+      .limit(5);
+
+    if (broadcastsErr) {
+      diagnostics.broadcast_check = `❌ Error: ${broadcastsErr.message}`;
+    } else {
+      diagnostics.broadcast_check = `✅ Found ${recentBroadcasts?.length || 0} recent broadcast notification row(s)`;
+      diagnostics.recent_broadcasts = (recentBroadcasts || []).map((row) => ({
+        title: row.title,
+        read: row.read,
+        created_at: row.created_at,
+        action_url: row.action_url,
+      }));
+    }
+
     // Test send via send-system-push
     if (!body.dryRun && tokens && tokens.length > 0) {
       try {
         const { data, error } = await admin.functions.invoke("send-system-push", {
           body: {
-            userIds: [body.userId],
+            userIds: [resolvedUserId],
             type: "test_notification",
             title: "🧪 Test Notification",
             body: "If you see this, push notifications are working!",

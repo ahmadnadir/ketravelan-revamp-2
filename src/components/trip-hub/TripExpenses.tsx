@@ -42,8 +42,9 @@ import { getTripCurrencySettings, updateTripCurrencySettings, isTripNotification
 import { supabase } from "@/lib/supabase";
 import { sendSettlementReminder } from "@/lib/settlementReminders";
 import { useExpenses } from "@/contexts/ExpenseContext";
+import { useAuth } from "@/contexts/AuthContext";
 import { ExpenseSettingsSheet } from "./ExpenseSettingSheet";
-import { CurrencyCode } from "@/lib/currencyUtils";
+import { CurrencyCode, convertToHomeCurrencyLive, getCurrencySymbol } from "@/lib/currencyUtils";
 import { sendSystemMessage } from "@/lib/system-messages";
 
 // Category configuration with colors and emojis
@@ -92,6 +93,13 @@ const formatCurrency = (amount: number): string => {
 
 const formatTwoDecimalAmount = (amount: number): string => {
   return amount.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+};
+
+const normalizeCurrencyCode = (value?: string): CurrencyCode | undefined => {
+  if (!value) return undefined;
+  const normalized = value.trim().toUpperCase();
+  if (normalized === "RM") return "MYR";
+  return normalized as CurrencyCode;
 };
 
 
@@ -227,9 +235,6 @@ const calculateNetSettlements = (
   return settlements;
 };
 
-// Fallback for homeCurrency if not defined
-const homeCurrency = (typeof window !== "undefined" && window.localStorage.getItem("homeCurrency")) || "MYR";
-
 // Calculate a user's share for a single expense
 const calculateUserShare = (expense: ExpenseData, userId: string): number => {
   if (!expense.splitWith.includes(userId)) {
@@ -302,6 +307,7 @@ const writeCachedTripCurrencies = (tripId: string, currencies: CurrencyCode[]) =
 
 export function TripExpenses({ tripId, members: providedMembers, tripName = "Trip", allowedCurrencies, conversationId, canAddExpenses = true }: TripExpensesProps) {
   const isMobile = useIsMobile();
+  const { homeCurrency: userHomeCurrency } = useAuth();
   const [subTab, setSubTab] = useState("breakdown");
   const [sortOrder, setSortOrder] = useState<"latest" | "oldest">("latest");
   const [filterPayer, setFilterPayer] = useState<string>("all");
@@ -324,6 +330,8 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
     if (cached) return cached;
     return Array.isArray(allowedCurrencies) ? allowedCurrencies : [];
   });
+  const [tripHomeCurrency, setTripHomeCurrency] = useState<CurrencyCode>(() => userHomeCurrency || "MYR");
+  const homeCurrency: CurrencyCode = tripHomeCurrency || userHomeCurrency || "MYR";
 
   // Currency view toggle - home or original
   const [viewCurrency, setViewCurrency] = useState<"home" | "original">("home");
@@ -497,6 +505,9 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
   const loadCurrencySettings = useCallback(async () => {
     try {
       const settings = await getTripCurrencySettings(tripId);
+      const resolvedHomeCurrency = (settings?.home_currency as CurrencyCode | undefined) || userHomeCurrency || "MYR";
+      setTripHomeCurrency(resolvedHomeCurrency);
+
       if (settings && Array.isArray(settings.travel_currencies)) {
         const loadedCurrencies = settings.travel_currencies as CurrencyCode[];
         setTripTravelCurrencies(loadedCurrencies);
@@ -507,12 +518,13 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
       }
     } catch (e) {
       console.warn('Failed to load trip currency settings, using defaults', e);
+      setTripHomeCurrency((prev) => prev || userHomeCurrency || "MYR");
       const cached = readCachedTripCurrencies(tripId);
       if (cached) {
         setTripTravelCurrencies(cached);
       }
     }
-  }, [tripId]);
+  }, [tripId, userHomeCurrency]);
 
   useEffect(() => {
     writeCachedTripCurrencies(tripId, tripTravelCurrencies);
@@ -528,6 +540,99 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
     const { data: { user } } = await supabase.auth.getUser();
     setCurrentUserId(user?.id || null);
   };
+
+  const recalculateTripExpensesForHomeCurrency = useCallback(async (nextHomeCurrency: CurrencyCode) => {
+    if (!expenses.length) return;
+
+    const recalculated = await Promise.all(expenses.map(async (expense) => {
+      const originalAmount = Number(expense.amount) || 0;
+      if (originalAmount <= 0) {
+        return {
+          id: expense.id,
+          convertedAmountHome: 0,
+          fxRateToHome: 1,
+          homeCurrency: nextHomeCurrency,
+        };
+      }
+
+      const sourceCurrency = normalizeCurrencyCode(
+        expense.originalCurrency || expense.homeCurrency || homeCurrency
+      ) || "MYR";
+
+      const conversion = await convertToHomeCurrencyLive(
+        originalAmount,
+        sourceCurrency,
+        nextHomeCurrency
+      );
+
+      return {
+        id: expense.id,
+        convertedAmountHome: conversion.amount,
+        fxRateToHome: conversion.rate,
+        homeCurrency: nextHomeCurrency,
+      };
+    }));
+
+    const persistResults = await Promise.all(
+      recalculated.map((item) =>
+        supabase
+          .from("trip_expenses")
+          .update({
+            converted_amount_home: item.convertedAmountHome,
+            fx_rate_to_home: item.fxRateToHome,
+            home_currency: item.homeCurrency,
+          })
+          .eq("id", item.id)
+      )
+    );
+
+    const failed = persistResults.filter((result) => !!result.error);
+    if (failed.length > 0) {
+      throw new Error(`Failed to update ${failed.length} expense conversion rows`);
+    }
+
+    const nextById = new Map(recalculated.map((item) => [item.id, item]));
+    setExpenses((prev) => prev.map((expense) => {
+      const next = nextById.get(expense.id);
+      if (!next) return expense;
+      return {
+        ...expense,
+        convertedAmountHome: next.convertedAmountHome,
+        fxRateToHome: next.fxRateToHome,
+        homeCurrency: next.homeCurrency,
+      };
+    }));
+  }, [expenses, homeCurrency]);
+
+  const hasAutoRecalculatedRef = useRef(false);
+
+  useEffect(() => {
+    if (!tripHomeCurrency || expenses.length === 0 || hasAutoRecalculatedRef.current) return;
+
+    const expectedHome = normalizeCurrencyCode(tripHomeCurrency);
+    if (!expectedHome) return;
+
+    const hasMismatchedHomeCurrency = expenses.some((expense) => {
+      const currentExpenseHome = normalizeCurrencyCode(expense.homeCurrency);
+      return Boolean(currentExpenseHome && currentExpenseHome !== expectedHome);
+    });
+
+    if (!hasMismatchedHomeCurrency) return;
+
+    hasAutoRecalculatedRef.current = true;
+    (async () => {
+      try {
+        await recalculateTripExpensesForHomeCurrency(tripHomeCurrency);
+        toast({
+          title: "Trip currency synced",
+          description: "Expense totals were refreshed to match this trip currency.",
+        });
+      } catch (error) {
+        console.error("Failed auto-recalculating stale trip expense currency values", error);
+        hasAutoRecalculatedRef.current = false;
+      }
+    })();
+  }, [expenses, tripHomeCurrency, recalculateTripExpensesForHomeCurrency]);
   
   // Settlement filters
   const [directionFilter, setDirectionFilter] = useState<"all" | "owesMe" | "iOwe">("all");
@@ -1193,17 +1298,11 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
       const sortedCurrencies = Object.entries(currencyCount).sort((a, b) => b[1] - a[1]);
       return sortedCurrencies[0]?.[0] || 'USD';
     }
-    return 'RM';
+    return getCurrencySymbol((normalizeCurrencyCode(homeCurrency) || "MYR") as CurrencyCode);
   };
 
   const displayCurrency = getDisplayCurrency();
-  const summaryDisplayCurrency = "RM";
-
-  const normalizeCurrencyCode = (value?: string) => {
-    if (!value) return undefined;
-    const normalized = value.trim().toUpperCase();
-    return normalized === "RM" ? "MYR" : normalized;
-  };
+  const summaryDisplayCurrency = getCurrencySymbol((normalizeCurrencyCode(homeCurrency) || "MYR") as CurrencyCode);
 
   const canSwitchCurrency = useMemo(() => {
     return expenses.some((expense) => {
@@ -3305,6 +3404,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
         editingExpense={editingExpense}
         currentUser={currentUserName}
         members={members}
+        homeCurrency={homeCurrency}
         allowedCurrencies={tripTravelCurrencies}
       />
 
@@ -3598,12 +3698,39 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
       <ExpenseSettingsSheet
         open={settingsSheetOpen}
         onOpenChange={setSettingsSheetOpen}
+        homeCurrency={homeCurrency}
+        onHomeCurrencyChange={async (nextHomeCurrency) => {
+          const previousHomeCurrency = homeCurrency;
+          setTripHomeCurrency(nextHomeCurrency);
+          try {
+            await updateTripCurrencySettings(tripId, {
+              home_currency: nextHomeCurrency,
+              travel_currencies: tripTravelCurrencies,
+            });
+            await recalculateTripExpensesForHomeCurrency(nextHomeCurrency);
+            toast({
+              title: "Trip currency updated",
+              description: "All expense totals have been recalculated.",
+            });
+          } catch (e) {
+            console.error('Failed to save trip home currency setting', e);
+            setTripHomeCurrency(previousHomeCurrency);
+            toast({
+              title: "Currency update failed",
+              description: "Could not recalculate expense totals. Please try again.",
+              variant: "destructive",
+            });
+          }
+        }}
         tripTravelCurrencies={tripTravelCurrencies}
         onTravelCurrenciesChange={async (currs) => {
           setTripTravelCurrencies(currs);
           writeCachedTripCurrencies(tripId, currs);
           try {
-            await updateTripCurrencySettings(tripId, { travel_currencies: currs });
+            await updateTripCurrencySettings(tripId, {
+              home_currency: homeCurrency,
+              travel_currencies: currs,
+            });
           } catch (e) {
             console.error('Failed to save trip currency settings', e);
           }

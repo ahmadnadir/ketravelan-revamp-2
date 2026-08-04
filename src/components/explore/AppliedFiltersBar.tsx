@@ -13,6 +13,7 @@ interface AppliedFiltersBarProps {
   budgetRange: [number, number];
   categories: TripCategoryId[];
   currency?: string;
+  defaultCurrency: CurrencyCode;
   onClear: () => void;
   onEdit: () => void;
 }
@@ -24,10 +25,11 @@ export function AppliedFiltersBar({
   budgetRange,
   categories,
   currency,
+  defaultCurrency,
   onClear,
   onEdit,
 }: AppliedFiltersBarProps) {
-  const hasFilters = destination || dates?.from || flexibleDates || !isDefaultBudgetRange(budgetRange) || categories.length > 0 || (currency && currency !== "MYR");
+  const hasFilters = destination || dates?.from || flexibleDates || !isDefaultBudgetRange(budgetRange) || categories.length > 0 || (currency && currency !== defaultCurrency);
 
   if (!hasFilters) return null;
 
@@ -51,7 +53,7 @@ export function AppliedFiltersBar({
     chips.push({ label: formatBudgetRange(budgetRange, (currency || "MYR") as CurrencyCode) });
   }
 
-  if (currency && currency !== "MYR") {
+  if (currency && currency !== defaultCurrency) {
     const currencyInfo = getCurrencyInfo(currency as Parameters<typeof getCurrencyInfo>[0]);
     chips.push({ label: currencyInfo ? `${currencyInfo.flag} ${currencyInfo.code}` : currency, icon: "currency" });
   }

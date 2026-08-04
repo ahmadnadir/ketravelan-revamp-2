@@ -173,6 +173,7 @@ interface AddExpenseModalProps {
   editingExpense?: ExpenseData | null;
   currentUser?: string;
   members: Array<{ id: string; name: string; imageUrl?: string; avatar?: string }>;
+  homeCurrency?: CurrencyCode;
   allowedCurrencies?: CurrencyCode[];
 }
 
@@ -184,11 +185,11 @@ export function AddExpenseModal({
   editingExpense,
   currentUser = "User",
   members,
+  homeCurrency: tripHomeCurrency,
   allowedCurrencies,
 }: AddExpenseModalProps) {
-  const { user } = useAuth();
-  // Fix: safely access homeCurrency, fallback to 'MYR' if not present
-  const homeCurrency: CurrencyCode = (user && 'homeCurrency' in user && (user as any).homeCurrency) ? (user as any).homeCurrency : "MYR";
+  const { homeCurrency: authHomeCurrency } = useAuth();
+  const homeCurrency: CurrencyCode = tripHomeCurrency || authHomeCurrency || "MYR";
   
   // Build available currencies: home currency + allowed travel currencies
   const availableCurrencies = useMemo(() => {

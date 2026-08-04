@@ -13,9 +13,11 @@ export interface Trip {
   end_date?: string;
   price?: number;
   currency?: string;
+  home_currency?: string | null;
   max_participants?: number;
   current_participants?: number;
   tags?: string[];
+  travel_styles?: string[];
   requirements?: string[];
   type?: 'community' | 'guided';
   slug?: string;

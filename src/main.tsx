@@ -1,7 +1,6 @@
 import { createRoot } from "react-dom/client";
 import { HelmetProvider } from "react-helmet-async";
 import { Capacitor } from "@capacitor/core";
-import { registerSW } from "virtual:pwa-register";
 import App from "./App.tsx";
 import "./index.css";
 
@@ -60,19 +59,6 @@ if (isBrowser && isDev && "serviceWorker" in navigator) {
 }
 
 if (isBrowser && import.meta.env.PROD) {
-  // Register SW in non-local environments and auto-activate fresh builds.
-  let refreshTriggered = false;
-  const updateSW = registerSW({
-    immediate: true,
-    onNeedRefresh() {
-      if (refreshTriggered) {
-        return;
-      }
-      refreshTriggered = true;
-      void updateSW(true);
-    },
-  });
-
   // Recover once from stale chunk references after deployments.
   window.addEventListener("error", (event) => {
     if (isDynamicImportChunkError(event.error ?? event.message)) {

@@ -152,16 +152,32 @@ export function TripNotes({ tripId }: TripNotesProps) {
     setEditorOpen(true);
   };
 
-  const handleSaveNote = async (updatedNote: TripNoteDB) => {
+  const handleSaveNote = async (updatedNote: TripNoteDB, options?: { silent?: boolean }) => {
     try {
       await updateTripNote(updatedNote.id, {
         title: updatedNote.title,
         blocks: updatedNote.blocks,
       });
-      await loadNotes();
-      toast({
-        title: "Note saved",
-      });
+
+      // Keep list in sync without forcing a full reload/flicker during autosave.
+      setNotes((prev) =>
+        prev.map((note) =>
+          note.id === updatedNote.id
+            ? {
+                ...note,
+                title: updatedNote.title,
+                blocks: updatedNote.blocks,
+                updated_at: new Date().toISOString(),
+              }
+            : note
+        )
+      );
+
+      if (!options?.silent) {
+        toast({
+          title: "Note saved",
+        });
+      }
     } catch (error) {
       console.error("Failed to save note:", error);
       toast({ title: "Failed to save note" });

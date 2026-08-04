@@ -73,4 +73,6 @@ export const currencyData: {
   { code: "USD", symbol: "$", name: "US Dollar", flag: "🇺🇸" },
   { code: "EUR", symbol: "€", name: "Euro", flag: "🇪🇺" },
   { code: "IDR", symbol: "Rp", name: "Indonesian Rupiah", flag: "🇮🇩" },
+  { code: "BND", symbol: "B$", name: "Brunei Dollar", flag: "🇧🇳" },
+  { code: "SAR", symbol: "﷼", name: "Saudi Riyal", flag: "🇸🇦" },
 ];

@@ -17,6 +17,7 @@ interface BroadcastPushRequest {
   actionUrl?: string;
   limit?: number;
   dryRun?: boolean;
+  skipExistingNotification?: boolean;
 }
 
 function chunkArray<T>(items: T[], size: number): T[][] {
@@ -25,6 +26,74 @@ function chunkArray<T>(items: T[], size: number): T[][] {
     chunks.push(items.slice(i, i + size));
   }
   return chunks;
+}
+
+function truncate(text: string, max = 160) {
+  if (text.length <= max) return text;
+  return `${text.slice(0, max - 1)}…`;
+}
+
+async function collectTargetUserIds(opts: {
+  admin: ReturnType<typeof createClient>;
+  limit: number;
+  title: string;
+  body: string;
+  skipExistingNotification: boolean;
+}) {
+  const targetIds: string[] = [];
+  let offset = 0;
+  const pageSize = 200;
+  const storedMessage = truncate(opts.body);
+
+  while (targetIds.length < opts.limit) {
+    const { data: users, error: usersErr } = await opts.admin
+      .from("profiles")
+      .select("id")
+      .neq("push_notifications", false)
+      .order("id", { ascending: true })
+      .range(offset, offset + pageSize - 1);
+
+    if (usersErr) {
+      throw usersErr;
+    }
+
+    const pageUserIds = (users || []).map((u) => u.id).filter(Boolean);
+    if (pageUserIds.length === 0) {
+      break;
+    }
+
+    let candidateIds = pageUserIds;
+
+    if (opts.skipExistingNotification) {
+      const { data: existingRows, error: existingErr } = await opts.admin
+        .from("notifications")
+        .select("user_id")
+        .in("user_id", pageUserIds)
+        .eq("type", "broadcast_announcement")
+        .eq("title", opts.title)
+        .eq("message", storedMessage);
+
+      if (existingErr) {
+        throw existingErr;
+      }
+
+      const existingUserIds = new Set((existingRows || []).map((row) => row.user_id).filter(Boolean));
+      candidateIds = pageUserIds.filter((userId) => !existingUserIds.has(userId));
+    }
+
+    for (const userId of candidateIds) {
+      if (targetIds.length >= opts.limit) break;
+      targetIds.push(userId);
+    }
+
+    if (pageUserIds.length < pageSize) {
+      break;
+    }
+
+    offset += pageSize;
+  }
+
+  return targetIds;
 }
 
 function buildCorsHeaders(req: Request): Record<string, string> {
@@ -54,6 +123,22 @@ function buildCorsHeaders(req: Request): Record<string, string> {
   };
 }
 
+function formatError(err: unknown) {
+  if (err instanceof Error) {
+    return err.message;
+  }
+
+  if (typeof err === "object" && err !== null) {
+    try {
+      return JSON.stringify(err);
+    } catch {
+      return String(err);
+    }
+  }
+
+  return String(err);
+}
+
 serve(async (req: Request) => {
   const corsHeaders = buildCorsHeaders(req);
 
@@ -77,18 +162,15 @@ serve(async (req: Request) => {
       });
     }
 
-    const query = admin
-      .from("profiles")
-      .select("id")
-      .neq("push_notifications", false)
-      .limit(payload.limit || 5000);
+    const requestedLimit = Math.max(1, Math.min(payload.limit || 5000, 5000));
+    const userIds = await collectTargetUserIds({
+      admin,
+      limit: requestedLimit,
+      title: payload.title,
+      body: payload.body,
+      skipExistingNotification: payload.skipExistingNotification === true,
+    });
 
-    const { data: users, error: usersErr } = await query;
-    if (usersErr) {
-      throw usersErr;
-    }
-
-    const userIds = (users || []).map((u) => u.id).filter(Boolean);
     if (userIds.length === 0) {
       return new Response(JSON.stringify({ ok: true, skipped: true, reason: "No push-enabled users found" }), {
         status: 200,
@@ -105,6 +187,7 @@ serve(async (req: Request) => {
             title: payload.title,
             body: payload.body,
             actionUrl: payload.actionUrl || "/",
+            skipExistingNotification: payload.skipExistingNotification === true,
           },
         }),
         {
@@ -172,7 +255,7 @@ serve(async (req: Request) => {
       },
     );
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : "Unexpected error";
+    const message = formatError(err) || "Unexpected error";
     return new Response(JSON.stringify({ error: message }), {
       status: 500,
       headers: { "Content-Type": "application/json", ...corsHeaders },

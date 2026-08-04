@@ -264,6 +264,7 @@ export function ChatPage({
   const messageElementRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const actionMenuRef = useRef<HTMLDivElement | null>(null);
   const menuOpenedByTouchRef = useRef(false);
+  const replyJumpHandledRef = useRef(false);
   const mentionUserIdByUsername = useMemo(() => {
     const map = new Map<string, string>();
     tripMembers.forEach((member) => {
@@ -463,6 +464,20 @@ export function ChatPage({
     window.setTimeout(() => {
       setJumpHighlightMessageId((current) => (current === messageId ? null : current));
     }, 1600);
+  };
+
+  const handleReplyJump = (messageId: string, event?: { preventDefault?: () => void; stopPropagation?: () => void }) => {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+
+    if (replyJumpHandledRef.current) return;
+    replyJumpHandledRef.current = true;
+
+    void jumpToMessage(messageId);
+
+    window.setTimeout(() => {
+      replyJumpHandledRef.current = false;
+    }, 350);
   };
 
   const ensureMessageVisibleInWindow = (messageId: string) => {
@@ -1455,10 +1470,10 @@ export function ChatPage({
 
       <div className="absolute inset-x-0 bottom-0 max-h-[80vh] overflow-hidden rounded-t-2xl border border-border bg-background shadow-2xl">
         <div className="mx-auto mb-3 mt-2 h-1.5 w-10 rounded-full bg-muted" />
-        <div className="max-h-[calc(80vh-22px)] overflow-y-auto px-2 pb-[max(env(safe-area-inset-bottom),0.5rem)]">
+        <div className="max-h-[calc(80vh-22px)] overflow-y-auto px-2 pb-[max(env(safe-area-inset-bottom),0.5rem)] select-none">
           <button
             type="button"
-            className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-sm hover:bg-accent"
+            className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-sm"
             onClick={() => {
               setReplyTarget(mobileActionMessage);
               setMobileActionMessageId(null);
@@ -1470,7 +1485,7 @@ export function ChatPage({
 
           <button
             type="button"
-            className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-sm hover:bg-accent"
+            className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-sm"
             onClick={() => {
               void copyMessageContent(mobileActionMessage);
               setMobileActionMessageId(null);
@@ -1482,7 +1497,7 @@ export function ChatPage({
 
           <button
             type="button"
-            className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-sm hover:bg-accent"
+            className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-sm"
             onClick={() => {
               void togglePinnedMessage(mobileActionMessage.id);
               setMobileActionMessageId(null);
@@ -1501,7 +1516,7 @@ export function ChatPage({
               {!isUnsentMessage(mobileActionMessage) && (
                 <button
                   type="button"
-                  className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-sm hover:bg-accent"
+                  className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-sm"
                   onClick={() => {
                     beginEditMessage(mobileActionMessage);
                     setMobileActionMessageId(null);
@@ -1514,7 +1529,7 @@ export function ChatPage({
 
               <button
                 type="button"
-                className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-sm hover:bg-accent"
+                className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-sm"
                 onClick={() => {
                   setConfirmAction({ type: 'unsend', messageId: mobileActionMessage.id });
                   setMobileActionMessageId(null);
@@ -1526,7 +1541,7 @@ export function ChatPage({
 
               <button
                 type="button"
-                className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-sm text-destructive hover:bg-accent"
+                className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-sm text-destructive"
                 onClick={() => {
                   setConfirmAction({ type: 'delete', messageId: mobileActionMessage.id });
                   setMobileActionMessageId(null);
@@ -1803,7 +1818,17 @@ export function ChatPage({
                       {replyMeta && (
                         <button
                           type="button"
-                          onClick={() => replyMeta.messageId && void jumpToMessage(replyMeta.messageId)}
+                          onTouchStart={(event) => {
+                            event.stopPropagation();
+                          }}
+                          onTouchEnd={(event) => {
+                            if (!replyMeta.messageId) return;
+                            handleReplyJump(replyMeta.messageId, event);
+                          }}
+                          onClick={(event) => {
+                            if (!replyMeta.messageId) return;
+                            handleReplyJump(replyMeta.messageId, event);
+                          }}
                           className={cn(
                             "mb-2 block w-full rounded-lg border px-2.5 py-1.5 text-left",
                             isOwn

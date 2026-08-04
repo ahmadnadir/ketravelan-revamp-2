@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useRef, useEffect } from "react";
-import { useParams, Link, useNavigate } from "react-router-dom";
+import { useParams, Link, useLocation, useNavigate } from "react-router-dom";
 import {
   ChevronLeft,
   MapPin,
@@ -99,6 +99,7 @@ const AboutText = ({ bio }: { bio: string }) => {
 
 const UserProfilePage = () => {
   const { userId } = useParams();
+  const routerLocation = useLocation();
   const navigate = useNavigate();
   const { toast } = useToast();
   const { user } = useAuth();
@@ -114,6 +115,7 @@ const UserProfilePage = () => {
   const [isViewerBlockCheckLoading, setIsViewerBlockCheckLoading] = useState(true);
   const [isBlockLoading, setIsBlockLoading] = useState(false);
   const [confirmBlockOpen, setConfirmBlockOpen] = useState(false);
+  const profileReturnPath = `${routerLocation.pathname}${routerLocation.search}`;
 
   // Fetch profile on mount
   useEffect(() => {
@@ -512,7 +514,10 @@ const UserProfilePage = () => {
                 </Card>
               ) : previousTrips.length > 0 ? (
                 previousTrips.map((trip: any) => (
-                  <Link key={trip.id} to={`/trip/${trip.id}`}>
+                  <Link
+                    key={trip.id}
+                    to={`/trip/${trip.id}?${new URLSearchParams({ return: profileReturnPath }).toString()}`}
+                  >
                     <Card className="overflow-hidden border-border/50 hover:bg-muted/30 transition-colors">
                       <div className="flex gap-3 p-3">
                         <div className="h-16 w-20 rounded-lg overflow-hidden shrink-0">
