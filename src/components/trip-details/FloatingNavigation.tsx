@@ -1,11 +1,10 @@
 import { ChevronLeft } from "lucide-react";
-import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
 
 interface FloatingNavigationProps {
   title: string;
-  backLink: string;
   backLabel: string;
+  onBack: () => void;
   rightActions: React.ReactNode;
   visible: boolean;
   opacity: number;
@@ -17,8 +16,8 @@ interface FloatingNavigationProps {
 
 export function FloatingNavigation({
   title,
-  backLink,
   backLabel,
+  onBack,
   rightActions,
   visible,
   opacity,
@@ -56,13 +55,14 @@ export function FloatingNavigation({
       >
         <div className="flex min-w-0 items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2.5">
-            <Link
-              to={backLink}
+            <button
+              type="button"
+              onClick={onBack}
               aria-label={backLabel}
               className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/85"
             >
               <ChevronLeft className="h-5 w-5 text-foreground" />
-            </Link>
+            </button>
             <h2 className="truncate text-base font-semibold text-foreground">{title}</h2>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">{rightActions}</div>

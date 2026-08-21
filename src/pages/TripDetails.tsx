@@ -957,6 +957,14 @@ export default function TripDetails() {
     ? `${backBasePath}?${backParams.toString()}`
     : backBasePath;
   const backLink = safeReturnPath || fallbackBackLink;
+  const handleBackNavigation = () => {
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      navigate(-1);
+      return;
+    }
+
+    navigate(backLink, { replace: true });
+  };
   const backLabel = safeReturnPath
     ? safeReturnPath.startsWith("/profile")
       ? "Back to Profile"
@@ -1332,9 +1340,7 @@ export default function TripDetails() {
         <div className="flex flex-col items-center justify-center h-[60vh]">
           <h2 className="text-lg font-semibold mb-2">Trip not found</h2>
           <p className="text-muted-foreground mb-4">We couldn't find the trip details. It may have been removed or is unavailable.</p>
-          <Link to={backLink}>
-            <Button variant="outline">{backLabel}</Button>
-          </Link>
+          <Button variant="outline" onClick={handleBackNavigation}>{backLabel}</Button>
         </div>
       </AppLayout>
     );
@@ -1714,8 +1720,8 @@ export default function TripDetails() {
       <AppLayout wideLayout>
         <FloatingNavigation
           title={tripData.title}
-          backLink={backLink}
           backLabel={backLabel}
+          onBack={handleBackNavigation}
           rightActions={renderMobileHeaderActions("bar")}
           visible={mobileHeader.showFloatingNavigation}
           opacity={mobileHeader.opacity}
@@ -1741,13 +1747,14 @@ export default function TripDetails() {
               topOverlay={
                 mobileHeader.showHeroActions ? (
                   <>
-                    <Link
-                      to={backLink}
+                    <button
+                      type="button"
+                      onClick={handleBackNavigation}
                       className="absolute top-3 left-3 z-20 h-10 w-10 rounded-full border border-white/40 bg-black/30 backdrop-blur-md shadow-lg flex items-center justify-center"
                       aria-label={backLabel}
                     >
                       <ChevronLeft className="h-5 w-5 text-white" />
-                    </Link>
+                    </button>
 
                     <div className="absolute top-3 right-3 z-20 flex gap-1.5">
                       {renderMobileHeaderActions("hero")}
@@ -1758,18 +1765,20 @@ export default function TripDetails() {
             />
 
             {/* Desktop/tablet collage */}
-            <div className="hidden md:block lg:px-[14rem] xl:px-[16rem]">
+            <div className="hidden md:block lg:px-12 xl:px-20">
               <div className="relative">
                 {renderCollage()}
 
                 {/* Back Button */}
                 {!showDesktopHeader && (
-                  <Link
-                    to={backLink}
+                  <button
+                    type="button"
+                    onClick={handleBackNavigation}
                     className="absolute top-3 left-3 h-9 w-9 rounded-full bg-card/80 backdrop-blur-sm flex items-center justify-center sm:top-4 sm:left-4 sm:h-10 sm:w-10"
+                    aria-label={backLabel}
                   >
                     <ChevronLeft className="h-4 w-4 sm:h-5 sm:w-5 text-foreground" />
-                  </Link>
+                  </button>
                 )}
 
                 {/* Actions */}
@@ -1843,12 +1852,12 @@ export default function TripDetails() {
           </>
         )}
 
-        <div className="mb-2 pt-3 px-0 sm:mb-4 sm:pt-5 lg:px-[14rem] xl:px-[16rem]">
+        <div className="mb-2 pt-3 px-0 sm:mb-4 sm:pt-5 lg:px-12 xl:px-20">
           <h1 className="text-2xl font-bold text-foreground sm:text-3xl">{tripData.title}</h1>
         </div>
 
         {/* Content */}
-        <div className="px-0 pt-1 sm:pt-4 lg:px-[14rem] xl:px-[16rem] space-y-4 sm:space-y-6">
+        <div className="px-0 pt-1 sm:pt-4 lg:px-12 xl:px-20 space-y-4 sm:space-y-6">
           {/* Title & Location */}
           <div className="space-y-1.5 sm:space-y-3">
             <div className="flex items-start justify-end gap-2">
@@ -2296,7 +2305,8 @@ export default function TripDetails() {
       {showDesktopHeader && (
         <div
           className={cn(
-            "fixed left-0 right-0 z-[65] hidden md:block px-6 lg:px-[14rem] xl:px-[16rem] transition-all duration-250",
+            "fixed right-0 z-[65] hidden md:block px-6 lg:px-12 xl:px-20 transition-all duration-250",
+            user ? "left-0 lg:left-60" : "left-0",
             showDesktopStickyHeader
               ? "top-[var(--header-total-height)]"
               : "top-[calc(var(--header-total-height)+0.65rem)]"
@@ -2311,8 +2321,9 @@ export default function TripDetails() {
             )}
           >
             <div className="flex min-w-0 items-center gap-2.5">
-              <Link
-                to={backLink}
+              <button
+                type="button"
+                onClick={handleBackNavigation}
                 aria-label={backLabel}
                 className={cn(
                   "flex h-9 w-9 items-center justify-center rounded-full transition-colors",
@@ -2320,7 +2331,7 @@ export default function TripDetails() {
                 )}
               >
                 <ChevronLeft className="h-5 w-5 text-foreground" />
-              </Link>
+              </button>
               <h2 className="truncate text-base font-semibold text-foreground lg:text-lg">{tripData.title}</h2>
             </div>
 
@@ -2423,8 +2434,8 @@ export default function TripDetails() {
             className={cn(
               "mx-auto px-4 pt-3",
               user
-                ? "container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl pb-3"
-                : "w-full px-4 pb-[max(0.9rem,env(safe-area-inset-bottom))] sm:px-8 lg:px-[14rem] xl:px-[16rem]"
+                ? "container max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-6xl pb-3"
+                : "w-full px-4 pb-[max(0.9rem,env(safe-area-inset-bottom))] sm:px-8 lg:px-12 xl:px-20"
             )}
           >
             <div

@@ -80,6 +80,17 @@ const DEFAULT_TRIP_SETTINGS: TripSettingsState = {
   },
 };
 
+function formatDisplayRole(role?: string | null): string {
+  if (!role) return "Member";
+
+  const normalized = role.trim().toLowerCase();
+  if (normalized === "organizer") return "Host";
+  if (normalized === "co-organizer") return "Co-host";
+  if (normalized === "cohost") return "Co-host";
+  if (normalized === "host") return "Host";
+  return role;
+}
+
 function normalizeTripSettings(raw: any): TripSettingsState {
   if (!raw || typeof raw !== "object") return DEFAULT_TRIP_SETTINGS;
 
@@ -762,7 +773,7 @@ export function GroupInfoModal({
                               {member.name}
                             </h4>
                             <span className="text-xs text-muted-foreground">
-                              {member.role}
+                              {formatDisplayRole(member.role)}
                             </span>
                           </div>
                         </button>
@@ -795,7 +806,7 @@ export function GroupInfoModal({
                               {!(member.isAdmin || member.role?.toLowerCase() === 'organizer') && (
                                 <DropdownMenuItem onClick={() => handlePromoteMember(member)}>
                                   <Shield className="h-4 w-4 mr-2" />
-                                  Promote to Organizer
+                                  Promote to Host
                                 </DropdownMenuItem>
                               )}
                               {(member.isAdmin || member.role?.toLowerCase() === 'organizer') &&

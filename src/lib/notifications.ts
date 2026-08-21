@@ -37,7 +37,8 @@ export interface Notification {
     | 'discussion_like'
     | 'discussion_reply'
     | 'discussion_reply_to_you'
-    | 'discussion_answer_accepted';
+    | 'discussion_answer_accepted'
+    | 'note_edited';
   title: string;
   message: string | null;
   read: boolean;

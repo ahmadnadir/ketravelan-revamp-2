@@ -21,11 +21,11 @@ export function TravelStyleGrid({ selectedStyles, onToggle }: TravelStyleGridPro
             type="button"
             onClick={() => onToggle(style.id)}
             className={cn(
-              "relative flex flex-col items-center justify-center p-3 rounded-xl border-2 transition-all duration-200",
-              "hover:scale-[1.03] active:scale-[0.97]",
+              "relative flex flex-col items-center justify-center p-3 rounded-xl border-2 touch-manipulation",
+              "transition-colors duration-200 md:transition-all md:hover:scale-[1.03] md:active:scale-[0.97]",
               isSelected
                 ? "border-primary bg-primary/5 shadow-sm"
-                : "border-border bg-card hover:border-muted-foreground/30"
+                : "border-border bg-card md:hover:border-muted-foreground/30"
             )}
           >
             {isSelected && (

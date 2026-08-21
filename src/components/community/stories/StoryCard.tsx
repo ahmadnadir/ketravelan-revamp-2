@@ -7,9 +7,11 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { useRef, useState } from "react";
 import { getTravelStyleEmoji, getTravelStyleLabel } from "@/data/travelStyles";
+import { savePendingListItemRestore } from "@/hooks/useListItemRestore";
 
 interface StoryCardProps {
   story: Story;
+  restoreScope: string;
 }
 
 const TikTok = ({ className }: { className?: string }) => (
@@ -27,7 +29,7 @@ const socialIcons: Record<string, React.ComponentType<{ className?: string }>> =
   other: Link2,
 };
 
-export function StoryCard({ story }: StoryCardProps) {
+export function StoryCard({ story, restoreScope }: StoryCardProps) {
   const { toggleStoryLike, toggleStorySave } = useCommunity();
   const [isLiking, setIsLiking] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -113,6 +115,10 @@ export function StoryCard({ story }: StoryCardProps) {
     }
   };
 
+  const handleOpenStory = () => {
+    savePendingListItemRestore(restoreScope, story.id);
+  };
+
   const handlePointerDown = (event: React.PointerEvent<HTMLElement>) => {
     if (isInteractiveTarget(event.target)) return;
     dragRef.current = {
@@ -162,6 +168,7 @@ export function StoryCard({ story }: StoryCardProps) {
 
   return (
     <article
+      data-story-id={story.id}
       className="bg-card rounded-xl sm:rounded-2xl overflow-hidden shadow-sm border border-border/50 transition-shadow hover:shadow-md"
       onDoubleClick={() => {
         void handleGestureLike();
@@ -180,7 +187,7 @@ export function StoryCard({ story }: StoryCardProps) {
       }}
     >
       {/* Cover Image */}
-      <Link to={`/community/stories/${story.slug}`}>
+      <Link to={`/community/stories/${story.slug}`} onClick={handleOpenStory}>
         <div className="relative aspect-[16/10] overflow-hidden">
           <img
             src={story.coverImage}
@@ -258,7 +265,7 @@ export function StoryCard({ story }: StoryCardProps) {
       {/* Content */}
       <div className="p-3 sm:p-4">
         {/* Title */}
-        <Link to={`/community/stories/${story.slug}`}>
+        <Link to={`/community/stories/${story.slug}`} onClick={handleOpenStory}>
           <h3 className="font-semibold text-sm sm:text-base text-foreground line-clamp-2 mb-2 sm:mb-2 hover:text-primary transition-colors">
             {story.title}
           </h3>

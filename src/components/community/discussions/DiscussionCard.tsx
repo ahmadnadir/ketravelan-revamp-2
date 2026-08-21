@@ -8,12 +8,14 @@ import { Button } from "@/components/ui/button";
 import { formatDistanceToNow } from "date-fns";
 import { useCommunity } from "@/contexts/CommunityContext";
 import { cn } from "@/lib/utils";
+import { savePendingListItemRestore } from "@/hooks/useListItemRestore";
 
 interface DiscussionCardProps {
   discussion: Discussion;
+  restoreScope: string;
 }
 
-export function DiscussionCard({ discussion }: DiscussionCardProps) {
+export function DiscussionCard({ discussion, restoreScope }: DiscussionCardProps) {
   const { toggleDiscussionLike, toggleDiscussionSave } = useCommunity();
   const navigate = useNavigate();
   const timeAgo = formatDistanceToNow(discussion.createdAt, { addSuffix: true });
@@ -61,6 +63,10 @@ export function DiscussionCard({ discussion }: DiscussionCardProps) {
     await toggleDiscussionLike(discussion.id);
   };
 
+  const handleOpenDiscussion = () => {
+    savePendingListItemRestore(restoreScope, discussion.id);
+  };
+
   const handleCardClick = (event: React.MouseEvent<HTMLAnchorElement>) => {
     if (isInteractiveTarget(event.target)) return;
 
@@ -82,6 +88,7 @@ export function DiscussionCard({ discussion }: DiscussionCardProps) {
     clearPendingNavigation();
     pendingNavigationRef.current = window.setTimeout(() => {
       pendingNavigationRef.current = null;
+      handleOpenDiscussion();
       navigate(`/community/discussions/${discussion.id}`);
     }, 330);
   };
@@ -89,7 +96,13 @@ export function DiscussionCard({ discussion }: DiscussionCardProps) {
   return (
     <Link
       to={`/community/discussions/${discussion.id}`}
+      data-discussion-id={discussion.id}
       className="relative block bg-card rounded-xl p-3 sm:p-4 border border-border/50 transition-all hover:shadow-sm hover:border-border"
+      onClickCapture={(event) => {
+        if (!isInteractiveTarget(event.target)) {
+          handleOpenDiscussion();
+        }
+      }}
       onClick={handleCardClick}
       onDoubleClick={(event) => {
         if (isInteractiveTarget(event.target)) return;

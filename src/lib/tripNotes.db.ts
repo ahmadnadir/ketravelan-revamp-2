@@ -14,6 +14,8 @@ export interface TripNoteDB {
   title: string;
   blocks: NoteBlock[];
   updated_at: string;
+  created_at?: string;
+  last_edited_by?: string | null;
 }
 
 export async function fetchTripNotes(tripId: string): Promise<TripNoteDB[]> {
@@ -35,6 +37,7 @@ export async function createTripNote(tripId: string, title: string, blocks: Note
     .insert({
       trip_id: tripId,
       author_id: user.id,
+      last_edited_by: user.id,
       title: title || 'Untitled',
       blocks: blocks,
     })
@@ -49,10 +52,13 @@ export async function updateTripNote(
   noteId: string,
   updates: { title?: string; blocks?: NoteBlock[] }
 ): Promise<TripNoteDB> {
+  const { data: { user } } = await supabase.auth.getUser();
+
   const { data, error } = await supabase
     .from('trip_notes')
     .update({
       ...updates,
+      ...(user ? { last_edited_by: user.id } : {}),
       updated_at: new Date().toISOString(),
     })
     .eq('id', noteId)
@@ -61,6 +67,20 @@ export async function updateTripNote(
   
   if (error) throw error;
   return data;
+}
+
+/**
+ * Notify the other trip members that a note was edited.
+ * The edge function dedupes repeat edits, so it is safe to call per editing session.
+ */
+export async function notifyNoteEdited(noteId: string): Promise<void> {
+  try {
+    await supabase.functions.invoke('send-note-edited', {
+      body: { noteId },
+    });
+  } catch (error) {
+    console.warn('Failed to send note edited notification:', error);
+  }
 }
 
 export async function deleteTripNote(noteId: string): Promise<void> {

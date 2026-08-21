@@ -41,6 +41,7 @@ import { useUserTrips } from "@/hooks/useTrips";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase";
 import { getCurrencyInfo, type CurrencyCode } from "@/lib/currencyUtils";
+import { normalizePlatformKey, normalizeSocialLink } from "@/lib/socialLinks";
 import { cn } from "@/lib/utils";
 import { ImageCropModal } from "@/components/profile/ImageCropModal";
 import { uploadImageFromDataUrl } from "@/lib/imageStorage";
@@ -140,6 +141,8 @@ export default function Profile() {
   const { user, profile: currentUserProfile, loading, signOut, refreshProfile } = useAuth();
   const { toast } = useToast();
   const [showAllPreviousTrips, setShowAllPreviousTrips] = useState(false);
+  const [showAllUpcomingTrips, setShowAllUpcomingTrips] = useState(false);
+  const [activeTripsTab, setActiveTripsTab] = useState<"previous" | "upcoming">("previous");
   const [viewerMemberTripIds, setViewerMemberTripIds] = useState<string[]>([]);
   const [uploadingCover, setUploadingCover] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
@@ -273,8 +276,28 @@ export default function Profile() {
         return tripDate < new Date();
       })
     : [];
+  const upcomingTrips = Array.isArray(visibleTrips)
+    ? visibleTrips.filter((trip: any) => {
+        const normalizedStatus = String(trip.status || "").toLowerCase();
+        const isPublished = trip?.is_published === true || normalizedStatus === "published";
+        if (!isPublished) return false;
+
+        const closedStatuses = ["completed", "cancelled", "canceled", "ended", "archived", "done"];
+        if (closedStatuses.includes(normalizedStatus)) return false;
+
+        const dateToCheck = trip.end_date || trip.start_date || trip.created_at;
+        if (!dateToCheck) return false;
+
+        const tripDate = new Date(dateToCheck);
+        if (Number.isNaN(tripDate.getTime())) return false;
+
+        return tripDate >= new Date();
+      })
+    : [];
   const previousTripsToRender = showAllPreviousTrips ? previousTrips : previousTrips.slice(0, 5);
+  const upcomingTripsToRender = showAllUpcomingTrips ? upcomingTrips : upcomingTrips.slice(0, 5);
   const hasMorePreviousTrips = previousTrips.length > 5;
+  const hasMoreUpcomingTrips = upcomingTrips.length > 5;
   const profileReturnPath = `${routerLocation.pathname}${routerLocation.search}`;
 
   const handleCoverPhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -797,38 +820,10 @@ export default function Profile() {
                   if (!value) return null;
 
                   // Normalize platform key aliases
-                  const normalizedPlatform = platform.toLowerCase() === "twitter" ? "x" : platform.toLowerCase();
+                  const normalizedPlatform = normalizePlatformKey(platform);
                   const Icon = platformIcons[normalizedPlatform] || Link2;
-
-                  // Normalize URLs for each platform so they always render as valid links
-                  const normalizeUrl = (p: string, v: string) => {
-                    if (/^https?:\/\//i.test(v)) return v;
-                    const clean = v.replace(/^@/, "");
-                    switch (p) {
-                      case "instagram":
-                        return `https://instagram.com/${clean}`;
-                      case "facebook":
-                        return `https://facebook.com/${clean}`;
-                      case "youtube":
-                        return `https://youtube.com/@${clean}`;
-                      case "snapchat":
-                        return `https://www.snapchat.com/add/${clean}`;
-                      case "threads":
-                        return `https://www.threads.net/@${clean}`;
-                      case "linkedin":
-                        return `https://linkedin.com/in/${clean}`;
-                      case "tiktok":
-                        return `https://tiktok.com/@${clean}`;
-                      case "x":
-                        return `https://x.com/${clean}`;
-                      case "other":
-                        return `https://${clean}`;
-                      default:
-                        return v;
-                    }
-                  };
-
-                  const displayUrl = normalizeUrl(normalizedPlatform, value);
+                  const displayUrl = normalizeSocialLink(normalizedPlatform, value);
+                  if (!displayUrl) return null;
 
                   return (
                     <a
@@ -908,74 +903,180 @@ export default function Profile() {
 
           {/* Previous Trips */}
           <div className="space-y-3">
-            <h3 className="font-semibold text-foreground text-sm">Previous Trips</h3>
-            <div className="space-y-3">
-              {!canShowTrips ? (
-                <Card className="p-6 text-center border-border/50">
-                  <p className="text-sm text-muted-foreground">Trips are private</p>
-                </Card>
-              ) : previousTrips.length > 0 ? previousTripsToRender.map((trip: any) => {
-                const tripPathToken = trip?.slug || trip?.id;
-                const tripCardContent = (
-                  <Card className="overflow-hidden border-border/50 hover:bg-muted/30 transition-colors">
-                    <div className="flex gap-3 p-3">
-                      <div className="h-16 w-20 rounded-lg overflow-hidden shrink-0">
-                        <img
-                          src={trip.cover_image || trip.coverImage || ''}
-                          alt={trip.title}
-                          className="h-full w-full object-cover"
-                        />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <h4 className="font-medium text-foreground text-sm truncate">
-                          {trip.title}
-                        </h4>
-                        <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
-                          <MapPin className="h-3 w-3" />
-                          {trip.destination}
-                        </p>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          {(trip.end_date || trip.start_date || trip.created_at)
-                            ? new Date(trip.end_date || trip.start_date || trip.created_at).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })
-                            : ''}
-                        </p>
-                      </div>
-                    </div>
-                  </Card>
-                );
-
-                if (!tripPathToken) {
-                  return (
-                    <div key={trip.id || trip.title || trip.destination}>
-                      {tripCardContent}
-                    </div>
-                  );
-                }
-
-                return (
-                  <Link
-                    key={trip.id || tripPathToken}
-                    to={`/trip/${tripPathToken}?${new URLSearchParams({ return: profileReturnPath }).toString()}`}
-                  >
-                    {tripCardContent}
-                  </Link>
-                );
-              }) : (
-                <Card className="p-6 text-center border-border/50">
-                  <p className="text-sm text-muted-foreground">No previous trips yet</p>
-                </Card>
-              )}
-              {canShowTrips && hasMorePreviousTrips && (
-                <Button
+            {isOwnProfile && (
+              <div className="flex p-1 bg-secondary rounded-xl">
+                <button
                   type="button"
-                  variant="outline"
-                  className="w-full rounded-xl"
-                  onClick={() => setShowAllPreviousTrips((prev) => !prev)}
+                  onClick={() => setActiveTripsTab("previous")}
+                  className={cn(
+                    "flex-1 flex items-center justify-center min-w-0 px-2 sm:px-4 py-2 text-sm font-medium rounded-lg transition-all",
+                    activeTripsTab === "previous"
+                      ? "bg-card text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
                 >
-                  {showAllPreviousTrips ? "Show less" : `Show all previous trips (${previousTrips.length})`}
-                </Button>
-              )}
-            </div>
+                  Previous Trips
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTripsTab("upcoming")}
+                  className={cn(
+                    "flex-1 flex items-center justify-center min-w-0 px-2 sm:px-4 py-2 text-sm font-medium rounded-lg transition-all",
+                    activeTripsTab === "upcoming"
+                      ? "bg-card text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  Upcoming Trips
+                </button>
+              </div>
+            )}
+
+            {(!isOwnProfile || activeTripsTab === "previous") && (
+              <div className="space-y-3">
+                <h3 className="font-semibold text-foreground text-sm">Previous Trips</h3>
+                <div className="space-y-3">
+                  {!canShowTrips ? (
+                    <Card className="p-6 text-center border-border/50">
+                      <p className="text-sm text-muted-foreground">Trips are private</p>
+                    </Card>
+                  ) : previousTrips.length > 0 ? previousTripsToRender.map((trip: any) => {
+                    const tripPathToken = trip?.slug || trip?.id;
+                    const tripCardContent = (
+                      <Card className="overflow-hidden border-border/50 hover:bg-muted/30 transition-colors">
+                        <div className="flex gap-3 p-3">
+                          <div className="h-16 w-20 rounded-lg overflow-hidden shrink-0">
+                            <img
+                              src={trip.cover_image || trip.coverImage || ''}
+                              alt={trip.title}
+                              className="h-full w-full object-cover"
+                            />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <h4 className="font-medium text-foreground text-sm truncate">
+                              {trip.title}
+                            </h4>
+                            <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
+                              <MapPin className="h-3 w-3" />
+                              {trip.destination}
+                            </p>
+                            <p className="text-xs text-muted-foreground mt-1">
+                              {(trip.end_date || trip.start_date || trip.created_at)
+                                ? new Date(trip.end_date || trip.start_date || trip.created_at).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })
+                                : ''}
+                            </p>
+                          </div>
+                        </div>
+                      </Card>
+                    );
+
+                    if (!tripPathToken) {
+                      return (
+                        <div key={trip.id || trip.title || trip.destination}>
+                          {tripCardContent}
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <Link
+                        key={trip.id || tripPathToken}
+                        to={`/trip/${tripPathToken}?${new URLSearchParams({ return: profileReturnPath }).toString()}`}
+                      >
+                        {tripCardContent}
+                      </Link>
+                    );
+                  }) : (
+                    <Card className="p-6 text-center border-border/50">
+                      <p className="text-sm text-muted-foreground">No previous trips yet</p>
+                    </Card>
+                  )}
+                  {canShowTrips && hasMorePreviousTrips && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full rounded-xl"
+                      onClick={() => setShowAllPreviousTrips((prev) => !prev)}
+                    >
+                      {showAllPreviousTrips ? "Show less" : `Show all previous trips (${previousTrips.length})`}
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {isOwnProfile && activeTripsTab === "upcoming" && (
+              <div className="space-y-3">
+                <h3 className="font-semibold text-foreground text-sm">Upcoming Trips</h3>
+                <div className="space-y-3">
+                  {!canShowTrips ? (
+                    <Card className="p-6 text-center border-border/50">
+                      <p className="text-sm text-muted-foreground">Trips are private</p>
+                    </Card>
+                  ) : upcomingTrips.length > 0 ? upcomingTripsToRender.map((trip: any) => {
+                    const tripPathToken = trip?.slug || trip?.id;
+                    const tripCardContent = (
+                      <Card className="overflow-hidden border-border/50 hover:bg-muted/30 transition-colors">
+                        <div className="flex gap-3 p-3">
+                          <div className="h-16 w-20 rounded-lg overflow-hidden shrink-0">
+                            <img
+                              src={trip.cover_image || trip.coverImage || ''}
+                              alt={trip.title}
+                              className="h-full w-full object-cover"
+                            />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <h4 className="font-medium text-foreground text-sm truncate">
+                              {trip.title}
+                            </h4>
+                            <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
+                              <MapPin className="h-3 w-3" />
+                              {trip.destination}
+                            </p>
+                            <p className="text-xs text-muted-foreground mt-1">
+                              {(trip.end_date || trip.start_date || trip.created_at)
+                                ? new Date(trip.end_date || trip.start_date || trip.created_at).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })
+                                : ''}
+                            </p>
+                          </div>
+                        </div>
+                      </Card>
+                    );
+
+                    if (!tripPathToken) {
+                      return (
+                        <div key={trip.id || trip.title || trip.destination}>
+                          {tripCardContent}
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <Link
+                        key={trip.id || tripPathToken}
+                        to={`/trip/${tripPathToken}?${new URLSearchParams({ return: profileReturnPath }).toString()}`}
+                      >
+                        {tripCardContent}
+                      </Link>
+                    );
+                  }) : (
+                    <Card className="p-6 text-center border-border/50">
+                      <p className="text-sm text-muted-foreground">No upcoming trips yet</p>
+                    </Card>
+                  )}
+                  {canShowTrips && hasMoreUpcomingTrips && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full rounded-xl"
+                      onClick={() => setShowAllUpcomingTrips((prev) => !prev)}
+                    >
+                      {showAllUpcomingTrips ? "Show less" : `Show all upcoming trips (${upcomingTrips.length})`}
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Action Buttons */}

@@ -85,6 +85,14 @@ export default function DiscussionDetail() {
   const [scrolledReplyId, setScrolledReplyId] = useState<string | null>(null);
   const replyRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const replyInputRef = useRef<HTMLInputElement | null>(null);
+  const handleBackNavigation = () => {
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      navigate(-1);
+      return;
+    }
+
+    navigate("/community?tab=discussions", { replace: true });
+  };
   
   const [isMinorAccount, setIsMinorAccount] = useState(false);
   const [socialFeaturesLevel, setSocialFeaturesLevel] = useState<"full" | "disabled">("full");
@@ -478,9 +486,7 @@ export default function DiscussionDetail() {
         <div className="flex flex-col items-center justify-center min-h-[50vh] p-4">
           <h1 className="text-xl font-semibold mb-2">Discussion not found</h1>
           <p className="text-muted-foreground mb-4">This discussion may have been removed.</p>
-          <Link to="/community?tab=discussions">
-            <Button>Back to Community</Button>
-          </Link>
+          <Button onClick={handleBackNavigation}>Back to Community</Button>
         </div>
       </AppLayout>
     );
@@ -671,12 +677,14 @@ export default function DiscussionDetail() {
       <div className="sticky top-0 z-40 bg-background/95 backdrop-blur-md border-b border-border/50 px-5 py-4 sm:px-4 sm:py-3">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <Link
-              to="/community?tab=discussions"
+            <button
+              type="button"
+              onClick={handleBackNavigation}
               className="p-2 -ml-2 rounded-lg hover:bg-secondary transition-colors"
+              aria-label="Back to Community"
             >
               <ArrowLeft className="h-5 w-5" />
-            </Link>
+            </button>
             <h1 className="font-semibold text-base">Discussion</h1>
           </div>
 

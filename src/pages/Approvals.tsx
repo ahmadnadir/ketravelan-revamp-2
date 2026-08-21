@@ -282,6 +282,9 @@ export default function Approvals() {
       title: "Request approved",
       description: "The user has been added to the trip.",
     });
+
+    // Another host/co-host may have actioned this in parallel.
+    await loadApprovals();
   };
 
   const handleReject = async (id: string) => {

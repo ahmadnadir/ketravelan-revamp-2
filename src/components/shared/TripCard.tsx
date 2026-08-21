@@ -20,6 +20,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { isTripSaved, saveTrip, unsaveTrip } from "@/lib/savedTrips";
 import { buildPublicUrl, buildTripShareUrl } from "@/lib/publicUrl";
+import { savePendingListItemRestore } from "@/hooks/useListItemRestore";
 
 const DEFAULT_TRIP_IMAGE = "/default-trip-photo.jpeg";
 
@@ -67,6 +68,7 @@ interface TripCardProps {
   onCancel?: (tripId: string) => void;
   returnTo?: "explore" | "my-trips";
   returnTab?: string;
+  restoreScope?: string;
 }
 
 export function TripCard({
@@ -97,6 +99,7 @@ export function TripCard({
   onCancel,
   returnTo,
   returnTab,
+  restoreScope,
 }: TripCardProps) {
   const { user } = useAuth();
   const location = useLocation();
@@ -211,6 +214,11 @@ export function TripCard({
     slug,
     title: safeTitle,
   });
+  const handleOpenTrip = () => {
+    if (restoreScope) {
+      savePendingListItemRestore(restoreScope, id);
+    }
+  };
   const shareText = `Check out this trip: ${safeTitle} to ${safeDestination}`;
 
   const handleFavourite = (e: React.MouseEvent) => {
@@ -464,6 +472,7 @@ export function TripCard({
       </Dialog>
 
       <Card
+        data-trip-id={id}
         className={cn("overflow-hidden border-border/50 shadow-sm flex flex-col h-full", className)}
         onDoubleClick={(event) => {
           if (isInteractiveTarget(event.target)) return;
@@ -482,7 +491,7 @@ export function TripCard({
           void handlePointerUp(event);
         }}
       >
-      <Link to={tripLink}>
+      <Link to={tripLink} onClick={handleOpenTrip}>
         {/* Image */}
         <div className="relative aspect-[16/10] sm:aspect-[16/9] overflow-hidden">
           <img
@@ -563,7 +572,7 @@ export function TripCard({
 
       {/* Content */}
       <div className="p-3 sm:p-4 flex flex-col flex-1 gap-2 sm:gap-3">
-        <Link to={tripLink}>
+        <Link to={tripLink} onClick={handleOpenTrip}>
           <h3 className="font-semibold text-foreground line-clamp-1 hover:text-primary transition-colors text-sm sm:text-base">
             {safeTitle}
           </h3>

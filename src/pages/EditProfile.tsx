@@ -54,6 +54,7 @@ import { ImageCropModal } from "@/components/profile/ImageCropModal";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
 import { currencies, CurrencyCode } from "@/lib/currencyUtils";
+import { normalizeSocialLinksRecord } from "@/lib/socialLinks";
 import { travelStyles, TravelStyleGrid } from "@/components/onboarding/TravelStyleGrid";
 import { cn } from "@/lib/utils";
 
@@ -403,6 +404,7 @@ export default function EditProfile() {
       }
 
       let data, error;
+      const normalizedSocialLinks = normalizeSocialLinksRecord(socialLinks);
       const profilePayload = {
         full_name: formData.name.trim(),
         username: formData.username.trim().toLowerCase().replace(/\s+/g, '_') || null,
@@ -411,7 +413,7 @@ export default function EditProfile() {
         bio: formData.bio.trim() || null,
         avatar_url: profileImage || null,
         travel_styles: selectedStyles,
-        social_links: Object.keys(socialLinks).length > 0 ? socialLinks : null,
+        social_links: normalizedSocialLinks,
         home_currency: selectedHomeCurrency,
         gender: formData.gender || null,
         updated_at: new Date().toISOString(),

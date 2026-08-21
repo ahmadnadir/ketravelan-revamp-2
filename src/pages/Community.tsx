@@ -11,13 +11,31 @@ import { detectCountryFromLocale } from "@/lib/geolocation";
 import { useAuth } from "@/contexts/AuthContext";
 import { isMinorProfile } from "@/lib/familiesSafety";
 import ParentalPinOnboarding from "@/components/ParentalPinOnboarding";
+import { buildDataIdSelector, useListItemRestore } from "@/hooks/useListItemRestore";
 
 const DISCUSSION_LOCATION_STORAGE_KEY = "ketravelan-discussion-country";
 
 function CommunityContent() {
   const [searchParams] = useSearchParams();
-  const { mode, setMode, setLocationFilter, refreshDiscussions } = useCommunity();
+  const {
+    mode,
+    setMode,
+    setLocationFilter,
+    refreshDiscussions,
+    isStoriesLoading,
+    isDiscussionsLoading,
+  } = useCommunity();
   const [askQuestionOpen, setAskQuestionOpen] = useState(false);
+  const restoreScope = `community:${mode}`;
+
+  useListItemRestore({
+    scope: restoreScope,
+    ready: mode === "stories" ? !isStoriesLoading : !isDiscussionsLoading,
+    selectorForItemId: (itemId) =>
+      mode === "stories"
+        ? buildDataIdSelector("data-story-id", itemId)
+        : buildDataIdSelector("data-discussion-id", itemId),
+  });
 
   // Set mode based on URL query param (only on mount), default to stories
   useEffect(() => {
@@ -95,7 +113,9 @@ function CommunityContent() {
             className="w-full"
           />
         </div>
-        {mode === "stories" ? <StoriesFeed /> : <DiscussionsFeed onAskQuestion={() => setAskQuestionOpen(true)} />}
+        {mode === "stories"
+          ? <StoriesFeed restoreScope={restoreScope} />
+          : <DiscussionsFeed restoreScope={restoreScope} onAskQuestion={() => setAskQuestionOpen(true)} />}
       </div>
       
       <AskQuestionDrawer

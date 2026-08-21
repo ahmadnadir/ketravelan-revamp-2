@@ -24,6 +24,7 @@ import { isDefaultBudgetRange, formatBudgetRange, BudgetRangeSelector } from "@/
 import { useSimulatedLoading } from "@/hooks/useSimulatedLoading";
 import { convertPrice, getCurrencySymbol, getCurrencyInfo, type CurrencyCode } from "@/lib/currencyUtils";
 import { searchLocations, type LocationResult } from "@/lib/locationApi";
+import { buildDataIdSelector, useListItemRestore } from "@/hooks/useListItemRestore";
 
 const buildDefaultFilters = (): FilterState => ({
   destination: "",
@@ -376,6 +377,13 @@ export default function Explore() {
 
   // Get trips to display based on current tab
   const displayedTrips = tab === "upcoming" ? upcomingTrips : pastTrips;
+  const exploreRestoreScope = `explore:${tab}`;
+
+  useListItemRestore({
+    scope: exploreRestoreScope,
+    ready: !showInitialSkeleton,
+    selectorForItemId: (itemId) => buildDataIdSelector("data-trip-id", itemId),
+  });
 
   const handleTabChange = useCallback((value: string) => {
     setTab(value);
@@ -795,6 +803,7 @@ export default function Explore() {
                 requirements={trip.requirements}
                 returnTo="explore"
                 returnTab={tab}
+                restoreScope={exploreRestoreScope}
               />
             ))
           )}

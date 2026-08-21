@@ -42,6 +42,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { blockUser, isBlockedByUser, isUserBlocked, unblockUser } from "@/lib/blockUser";
 import { ensureCurrentUserCanStartDirectChat } from "@/lib/familiesSafety";
+import { normalizePlatformKey, normalizeSocialLink } from "@/lib/socialLinks";
 import { ModerationMenu } from "@/components/moderation/ModerationMenu";
 
 // Helper to generate fallback avatar
@@ -414,12 +415,14 @@ const UserProfilePage = () => {
             {Object.keys(socialLinks).length > 0 && (
               <div className="flex items-center gap-3 pt-2">
                 {Object.entries(socialLinks).map(([platform, url]) => {
-                  const Icon = socialIcons[platform] || Globe;
-                  if (!Icon || !url) return null;
+                  const normalizedPlatform = normalizePlatformKey(platform);
+                  const Icon = socialIcons[normalizedPlatform] || Globe;
+                  const href = normalizeSocialLink(normalizedPlatform, String(url || ""));
+                  if (!Icon || !href) return null;
                   return (
                     <a
                       key={platform}
-                      href={String(url)}
+                      href={href}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-muted-foreground hover:text-foreground transition-colors"

@@ -211,6 +211,14 @@ export default function StoryDetail() {
   const commentRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const desktopCommentInputRef = useRef<HTMLInputElement | null>(null);
   const mobileCommentInputRef = useRef<HTMLInputElement | null>(null);
+  const handleBackNavigation = () => {
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      navigate(-1);
+      return;
+    }
+
+    navigate("/community?tab=stories", { replace: true });
+  };
 
   const focusCommentComposer = () => {
     if (typeof window === "undefined") return;
@@ -413,9 +421,7 @@ export default function StoryDetail() {
         <div className="flex flex-col items-center justify-center min-h-[50vh] p-4">
           <h1 className="text-xl font-semibold mb-2">Story not found</h1>
           <p className="text-muted-foreground mb-4">This story may have been removed or the link is incorrect.</p>
-          <Link to="/community">
-            <Button>Back to Community</Button>
-          </Link>
+          <Button onClick={handleBackNavigation}>Back to Community</Button>
         </div>
       </AppLayout>
     );
@@ -661,12 +667,14 @@ export default function StoryDetail() {
         </div>
 
         {/* Back button */}
-        <Link
-          to="/community?tab=stories"
+        <button
+          type="button"
+          onClick={handleBackNavigation}
           className="absolute top-6 left-4 p-2 rounded-full bg-black/30 backdrop-blur-sm text-white hover:bg-black/50 transition-colors"
+          aria-label="Back to Community"
         >
           <ArrowLeft className="h-5 w-5" />
-        </Link>
+        </button>
 
         {/* Action buttons */}
         <div className="absolute top-6 right-4 flex items-center gap-2">

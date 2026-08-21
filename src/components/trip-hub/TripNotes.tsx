@@ -23,6 +23,7 @@ import { cn } from "@/lib/utils";
 import { fetchTripNotes, createTripNote, updateTripNote, deleteTripNote, TripNoteDB, NoteBlock } from "@/lib/tripNotes.db";
 import { NoteEditor } from "./NoteEditor";
 import { useToast } from "@/hooks/use-toast";
+import { useSearchParams } from "react-router-dom";
 
 interface TripNotesProps {
   tripId: string;
@@ -49,6 +50,7 @@ export function TripNotes({ tripId }: TripNotesProps) {
   const [pendingLinkUrl, setPendingLinkUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   // Load notes from DB
   const loadNotes = useCallback(async () => {
@@ -68,6 +70,27 @@ export function TripNotes({ tripId }: TripNotesProps) {
   useEffect(() => {
     loadNotes();
   }, [loadNotes]);
+
+  // Deep link from a note notification: /trip/:id/hub?tab=notes&note=<noteId>
+  const requestedNoteId = searchParams.get("note");
+
+  useEffect(() => {
+    if (!requestedNoteId) return;
+
+    const target = notes.find((note) => note.id === requestedNoteId);
+    if (!target) return;
+
+    setSelectedNote(target);
+    setEditorOpen(true);
+  }, [requestedNoteId, notes]);
+
+  const clearRequestedNote = useCallback(() => {
+    if (!searchParams.get("note")) return;
+
+    const next = new URLSearchParams(searchParams);
+    next.delete("note");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   const filteredNotes = notes.filter(
     (note) => {
@@ -387,6 +410,7 @@ export function TripNotes({ tripId }: TripNotesProps) {
           onClose={() => {
             setEditorOpen(false);
             setSelectedNote(null);
+            clearRequestedNote();
           }}
           onSave={handleSaveNote}
           onDelete={handleDeleteNote}

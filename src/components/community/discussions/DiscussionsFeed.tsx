@@ -9,10 +9,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/contexts/AuthContext";
 
 interface DiscussionsFeedProps {
+  restoreScope: string;
   onAskQuestion?: () => void;
 }
 
-export function DiscussionsFeed({ onAskQuestion }: DiscussionsFeedProps) {
+export function DiscussionsFeed({ restoreScope, onAskQuestion }: DiscussionsFeedProps) {
   const { filteredDiscussions, filters, setDiscussionSearchQuery, isDiscussionsLoading } = useCommunity();
   const { isAuthenticated } = useAuth();
 
@@ -70,7 +71,7 @@ export function DiscussionsFeed({ onAskQuestion }: DiscussionsFeedProps) {
           ))
         ) : filteredDiscussions.length > 0 ? (
           filteredDiscussions.map((discussion) => (
-            <DiscussionCard key={discussion.id} discussion={discussion} />
+            <DiscussionCard key={discussion.id} discussion={discussion} restoreScope={restoreScope} />
           ))
         ) : (
           <div className="text-center py-12">

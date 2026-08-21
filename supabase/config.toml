@@ -194,3 +194,8 @@ enabled = true
 verify_jwt = false
 entrypoint = "./functions/send-broadcast-push/index.ts"
 
+[functions.send-note-edited]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/send-note-edited/index.ts"
+

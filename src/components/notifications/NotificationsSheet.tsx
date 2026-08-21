@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Bell, MessageCircle, UserPlus, DollarSign, Calendar, Users, X, Heart, CheckCircle2, type LucideIcon } from "lucide-react";
+import { Bell, MessageCircle, UserPlus, DollarSign, Calendar, Users, X, Heart, CheckCircle2, FileText, type LucideIcon } from "lucide-react";
 import {
   Sheet,
   SheetContent,
@@ -110,6 +110,7 @@ const iconMap: Record<Notification['type'], LucideIcon> = {
   discussion_reply: MessageCircle,
   discussion_reply_to_you: MessageCircle,
   discussion_answer_accepted: CheckCircle2,
+  note_edited: FileText,
 };
 
 interface NotificationsSheetProps {
@@ -230,11 +231,17 @@ export function NotificationsSheet({ open, onOpenChange }: NotificationsSheetPro
       if (metadata.conversation_id) {
         urlToNavigate = `/chat/${metadata.conversation_id}`;
         persistLog('Reconstructed URL from metadata (conversation)', { urlToNavigate });
+      } else if (metadata.note_id && metadata.trip_id) {
+        urlToNavigate = `/trip/${metadata.trip_id}/hub?tab=notes&note=${metadata.note_id}`;
+        persistLog('Reconstructed URL from metadata (note)', { urlToNavigate });
       } else if (metadata.trip_id) {
         // Determine the tab based on notification type
         let tab = 'chat';
         if (notification.type === 'new_expense' || notification.type === 'expense' || notification.type === 'expense_paid' || notification.type === 'expense_reminder') {
           tab = 'expenses';
+        }
+        if (notification.type === 'note_edited') {
+          tab = 'notes';
         }
         urlToNavigate = `/trip/${metadata.trip_id}/hub?tab=${tab}`;
         persistLog('Reconstructed URL from metadata (trip)', { urlToNavigate, tab });

@@ -26,6 +26,7 @@ import { TravelStyleGrid } from "@/components/onboarding/TravelStyleGrid";
 import { ImageCropModal } from "@/components/profile/ImageCropModal";
 import { useAuth } from "@/contexts/AuthContext";
 import { CurrencyCode, getCurrencyInfo } from "@/lib/currencyUtils";
+import { normalizeSocialLinksRecord } from "@/lib/socialLinks";
 import { cn } from "@/lib/utils";
 
 const TOTAL_STEPS = 5;
@@ -260,6 +261,7 @@ export default function Onboarding() {
       setCurrentStep((prev) => prev + 1);
       return;
     }
+    const normalizedSocialLinks = normalizeSocialLinksRecord(socialLinks);
     // Prepare update payload (do not set onboarding_completed except on last step)
     const updatePayload: any = {
       full_name: name,
@@ -272,7 +274,7 @@ export default function Onboarding() {
       location,
       home_currency: derivedCurrency,
       bio: aboutMe,
-      social_links: socialLinks,
+      social_links: normalizedSocialLinks,
       travel_styles: selectedStyles,
       updated_at: new Date().toISOString(),
     };
@@ -307,6 +309,7 @@ export default function Onboarding() {
     completeInProgressRef.current = true;
     setIsCompleting(true);
     const wasOnboardingCompleted = profile?.onboarding_completed === true;
+    const normalizedSocialLinks = normalizeSocialLinksRecord(socialLinks);
     setHomeCurrency(derivedCurrency);
     // Prepare update payload
     const updatePayload: any = {
@@ -318,7 +321,7 @@ export default function Onboarding() {
       city,
       home_currency: derivedCurrency,
       bio: aboutMe,
-      social_links: socialLinks,
+      social_links: normalizedSocialLinks,
       travel_styles: selectedStyles,
       onboarding_completed: true,
       updated_at: new Date().toISOString(),

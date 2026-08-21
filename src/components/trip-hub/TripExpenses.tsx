@@ -1502,6 +1502,41 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
     return "pending";
   }, [currentUserId]);
 
+  const resolveExpenseCategory = useCallback((expense: ExpenseData): string => {
+    const storedCategory = typeof expense.category === "string" ? expense.category.trim() : "";
+    if (storedCategory) {
+      const normalized = storedCategory.toLowerCase();
+      if (normalized === "transport" || normalized === "transportation") return "Transport";
+      if (normalized === "food & drinks" || normalized === "food" || normalized === "food and drinks") return "Food & Drinks";
+      if (normalized === "accommodation") return "Accommodation";
+      if (normalized === "activities") return "Activities";
+      if (normalized === "shopping") return "Shopping";
+      if (normalized === "entertainment") return "Entertainment";
+      if (normalized === "other") return "Other";
+      return storedCategory;
+    }
+
+    return getCategoryFromTitle(expense.title);
+  }, []);
+
+  const normalizeCategoryForFilter = useCallback((value?: string | null): string => {
+    if (!value) return "Other";
+
+    const trimmed = value.trim();
+    if (!trimmed) return "Other";
+
+    const normalized = trimmed.toLowerCase();
+
+    if (["transport", "transportation"].includes(normalized)) return "Transport";
+    if (["food & drinks", "food and drinks", "food", "food & drink"].includes(normalized)) return "Food & Drinks";
+    if (["accommodation"].includes(normalized)) return "Accommodation";
+    if (["activities", "activity"].includes(normalized)) return "Activities";
+    if (["shopping"].includes(normalized)) return "Shopping";
+    if (["other"].includes(normalized)) return "Other";
+
+    return trimmed;
+  }, []);
+
   const filteredExpenses = useMemo(() => {
     let result = [...expenses];
 
@@ -1521,7 +1556,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
     
     // Filter by category
     if (filterCategory !== "all") {
-      result = result.filter(e => getCategoryFromTitle(e.title) === filterCategory);
+      result = result.filter(e => normalizeCategoryForFilter(resolveExpenseCategory(e)) === filterCategory);
     }
     
     // Filter by status
@@ -1542,7 +1577,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
     });
     
     return result;
-  }, [expenses, sortOrder, filterPayer, filterCategory, filterStatus, getUserPaymentStatus, currentUserId]);
+  }, [expenses, sortOrder, filterPayer, filterCategory, filterStatus, getUserPaymentStatus, currentUserId, resolveExpenseCategory, normalizeCategoryForFilter]);
 
   // Active filter count for badge
   const activeFilterCount = useMemo(() => {
@@ -3110,6 +3145,8 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
                       <SelectItem value="Food & Drinks">Food & Drinks</SelectItem>
                       <SelectItem value="Accommodation">Accommodation</SelectItem>
                       <SelectItem value="Activities">Activities</SelectItem>
+                      <SelectItem value="Shopping">Shopping</SelectItem>
+                      <SelectItem value="Other">Other</SelectItem>
                     </SelectContent>
                   </Select>
 
@@ -3640,7 +3677,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
                       <RadioGroupItem value="all" id="all-categories" />
                       <Label htmlFor="all-categories">All Categories</Label>
                     </div>
-                    {["Transport", "Food & Drinks", "Accommodation", "Activities"].map((cat) => (
+                    {["Transport", "Food & Drinks", "Accommodation", "Activities", "Shopping", "Other"].map((cat) => (
                       <div key={cat} className="flex items-center space-x-2">
                         <RadioGroupItem value={cat} id={`cat-${cat}`} />
                         <Label htmlFor={`cat-${cat}`}>{cat}</Label>

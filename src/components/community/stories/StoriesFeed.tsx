@@ -8,7 +8,11 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/contexts/AuthContext";
 
-export function StoriesFeed() {
+interface StoriesFeedProps {
+  restoreScope: string;
+}
+
+export function StoriesFeed({ restoreScope }: StoriesFeedProps) {
   const navigate = useNavigate();
   const { filteredStories, filters, setStorySearchQuery, isStoriesLoading } = useCommunity();
   const { isAuthenticated } = useAuth();
@@ -65,7 +69,7 @@ export function StoriesFeed() {
           ))
         ) : filteredStories.length > 0 ? (
           filteredStories.map((story) => (
-            <StoryCard key={story.id} story={story} />
+            <StoryCard key={story.id} story={story} restoreScope={restoreScope} />
           ))
         ) : (
           <div className="text-center py-12">

@@ -874,6 +874,10 @@ export function ChatPage({
     }
   };
 
+  const isInteractiveTouchTarget = (target: EventTarget | null) =>
+    target instanceof Element &&
+    Boolean(target.closest('button, a, iframe, img, input, textarea, [role="button"]'));
+
   const openActionMenu = (messageId: string, x: number, y: number) => {
     setActionMenu({
       messageId,
@@ -998,8 +1002,11 @@ export function ChatPage({
     const touch = event.touches[0];
     if (!touch) return;
 
-    // Prevent text selection and native context menu
-    event.preventDefault();
+    // Taps on attachments/links must reach their own handlers.
+    if (isInteractiveTouchTarget(event.target)) {
+      swipeReplyRef.current = null;
+      return;
+    }
 
     swipeReplyRef.current = {
       messageId: message.id,
@@ -1029,9 +1036,6 @@ export function ChatPage({
     const swipeState = swipeReplyRef.current;
     const touch = event.touches[0];
     if (!swipeState || !touch || swipeState.messageId !== message.id || swipeState.cancelled) return;
-
-    // Prevent text selection during swipe
-    event.preventDefault();
 
     const deltaX = touch.clientX - swipeState.startX;
     const deltaY = Math.abs(touch.clientY - swipeState.startY);
@@ -1072,11 +1076,12 @@ export function ChatPage({
     setReplyTarget(message);
     setActionMenu(null);
     setMobileActionMessageId(null);
-    event.preventDefault();
   };
 
   const handleMessageTouchEnd = (event: React.TouchEvent) => {
-    event.preventDefault();
+    if (swipeReplyRef.current && event.cancelable) {
+      event.preventDefault();
+    }
     clearLongPress();
     setSwipePreview((current) => {
       if (!current) return null;
@@ -1089,7 +1094,9 @@ export function ChatPage({
   };
 
   const handleMessageTouchCancel = (event: React.TouchEvent) => {
-    event.preventDefault();
+    if (swipeReplyRef.current && event.cancelable) {
+      event.preventDefault();
+    }
     clearLongPress();
     setSwipePreview((current) => {
       if (!current) return null;
@@ -1768,7 +1775,7 @@ export function ChatPage({
 
                   <div
                     className={cn(
-                      "relative px-4 py-2 rounded-2xl border shadow-sm select-none will-change-transform",
+                      "relative px-4 py-2 rounded-2xl border shadow-sm select-none touch-pan-y will-change-transform",
                       swipePreview?.messageId === String(msg.id) && !swipePreview.dragging && "transition-transform duration-150 ease-out",
                       isOwn
                         ? "bg-black text-white border-black rounded-br-sm"

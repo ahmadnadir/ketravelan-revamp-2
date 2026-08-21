@@ -652,6 +652,8 @@ export async function approveJoinRequest(
   // Prefer server-side RPC path to avoid brittle client-side policy/trigger chains.
   let approvedRequest: { trip_id: string; user_id: string } | null = null;
   let approvalAppliedInDb = false;
+  // False when another host/co-host already approved this request.
+  let approvalAppliedNow = true;
 
   const primaryRpc = await supabase.rpc('approve_join_request', {
     request_id: requestId,
@@ -662,6 +664,7 @@ export async function approveJoinRequest(
     const rpcRequest = Array.isArray(primaryRpc.data) ? primaryRpc.data[0] : primaryRpc.data;
     const rpcTripId = rpcRequest?.trip_id ?? rpcRequest?.approved_trip_id;
     const rpcUserId = rpcRequest?.user_id ?? rpcRequest?.approved_user_id;
+    approvalAppliedNow = rpcRequest?.approved !== false;
     approvedRequest = {
       trip_id: rpcTripId ?? fallbackContext?.tripId,
       user_id: rpcUserId ?? fallbackContext?.userId,
@@ -678,6 +681,11 @@ export async function approveJoinRequest(
   }
 
   if (approvedRequest?.trip_id && approvedRequest?.user_id) {
+    if (!approvalAppliedNow) {
+      // Someone else already approved it: skip the notification/email side effects.
+      return approvedRequest;
+    }
+
     if (!approvalAppliedInDb) {
       const memberResult = await ensureTripMemberActive(approvedRequest.trip_id, approvedRequest.user_id);
 
@@ -968,6 +976,31 @@ export async function fetchAllJoinRequestsForUser() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
 
+  // Hosts and co-hosts (admin trip members) both manage join requests.
+  const [createdTrips, managedMemberships] = await Promise.all([
+    supabase.from('trips').select('id').eq('creator_id', user.id),
+    supabase
+      .from('trip_members')
+      .select('trip_id, role, is_admin')
+      .eq('user_id', user.id)
+      .is('left_at', null),
+  ]);
+
+  if (createdTrips.error && !isSchemaDriftError(createdTrips.error)) throw createdTrips.error;
+  if (managedMemberships.error && !isSchemaDriftError(managedMemberships.error)) throw managedMemberships.error;
+
+  const managedRoles = new Set(['organizer', 'co-host', 'cohost', 'admin', 'host']);
+  const managedTripIds = [
+    ...new Set([
+      ...(createdTrips.data || []).map((trip: any) => trip.id as string),
+      ...(managedMemberships.data || [])
+        .filter((member: any) => member.is_admin === true || managedRoles.has(String(member.role || '').toLowerCase()))
+        .map((member: any) => member.trip_id as string),
+    ]),
+  ];
+
+  if (managedTripIds.length === 0) return [];
+
   const { data, error } = await supabase
     .from('join_requests')
     .select(`
@@ -975,7 +1008,7 @@ export async function fetchAllJoinRequestsForUser() {
       user:profiles!join_requests_user_id_fkey(id, username, full_name, avatar_url, bio),
       trip:trips!inner(id, title, cover_image, destination, start_date, end_date, creator_id)
     `)
-    .eq('trip.creator_id', user.id)
+    .in('trip_id', managedTripIds)
     .order('created_at', { ascending: false });
 
   if (error) {

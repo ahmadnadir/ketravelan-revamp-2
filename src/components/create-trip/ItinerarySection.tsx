@@ -112,7 +112,7 @@ export function ItinerarySection({
           value={simpleNotes}
           onChange={(e) => onSimpleNotesChange(e.target.value)}
           placeholder="Day 1: Arrive in Bangkok, check-in, night market&#10;Day 2: Temple tour, street food crawl&#10;Day 3: Day trip to Ayutthaya..."
-          className="rounded-xl min-h-[120px] text-sm"
+          className="rounded-xl min-h-[112px] text-base leading-6 px-3 py-3"
         />
       </OptionCard>
 
@@ -164,7 +164,7 @@ export function ItinerarySection({
                 </ul>
               )}
 
-              <div className="flex gap-2">
+              <div className="flex items-center gap-2">
                 <Input
                   value={newActivity[dayIndex] || ''}
                   onChange={(e) => handleActivityInputChange(dayIndex, e.target.value)}
@@ -181,14 +181,14 @@ export function ItinerarySection({
                     }
                   }}
                   placeholder="Add activity..."
-                  className="rounded-lg text-sm flex-1 h-8"
+                  className="rounded-lg text-base leading-6 flex-1 h-8 px-3"
                 />
                 <Button
                   type="button"
                   size="sm"
                   variant="ghost"
                   onClick={() => addActivity(dayIndex)}
-                  className="h-8 px-2"
+                  className="h-8 w-8 p-0 flex items-center justify-center shrink-0"
                 >
                   <Plus className="h-4 w-4" />
                 </Button>
