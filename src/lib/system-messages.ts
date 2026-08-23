@@ -5,7 +5,8 @@ export type SystemMessageAction =
   | "expense_edited"
   | "expense_deleted"
   | "member_joined"
-  | "trip_created";
+  | "trip_created"
+  | "note_edited";
 
 interface SystemMessagePayload {
   conversationId: string;
@@ -39,6 +40,8 @@ export async function sendSystemMessage({
       content = `${senderName} joined the trip`;
     } else if (action === "trip_created") {
       content = `${senderName} created the trip`;
+    } else if (action === "note_edited" && details) {
+      content = `${senderName} edited ${details} note`;
     }
 
     if (!content) return;

@@ -65,6 +65,8 @@ interface NoteEditorProps {
   ) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   tripId: string;
+  // Fired once per editing session, only when a real change was saved.
+  onNoteEdited?: (note: TripNoteDB) => void;
 }
 
 type SaveState =
@@ -123,6 +125,7 @@ export function NoteEditor({
   onSave,
   onDelete,
   tripId,
+  onNoteEdited,
 }: NoteEditorProps) {
   // =========================================================
   // STATE
@@ -620,6 +623,10 @@ export function NoteEditor({
       hasUnnotifiedEdit.current =
         false;
       notifyNoteEdited(note.id);
+      onNoteEdited?.({
+        ...note,
+        title: title.trim() || "Untitled",
+      });
     }
 
     onClose();

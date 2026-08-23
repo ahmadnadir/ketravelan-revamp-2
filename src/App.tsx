@@ -56,7 +56,6 @@ const Profile = React.lazy(() => import("./pages/Profile"));
 const EditProfile = React.lazy(() => import("./pages/EditProfile"));
 const Install = React.lazy(() => import("./pages/Install"));
 const NotFound = React.lazy(() => import("./pages/NotFound"));
-const UserProfileView = React.lazy(() => import("./pages/UserProfileView"));
 const Favourites = React.lazy(() => import("./pages/Favourites"));
 const Approvals = React.lazy(() => import("./pages/Approvals"));
 const MyStories = React.lazy(() => import("./pages/MyStories"));
@@ -687,7 +686,7 @@ const App = () => (
               <Route path="/chat/:id" element={<ProtectedRoute><SocialFeatureAccessGate><DirectChat /></SocialFeatureAccessGate></ProtectedRoute>} />
               <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
               <Route path="/profile/edit" element={<ProtectedRoute><EditProfile /></ProtectedRoute>} />
-              <Route path="/user/:userId" element={<UserProfileView />} />
+              <Route path="/user/:userId" element={<Profile />} />
               <Route path="/favourites" element={<ProtectedRoute><Favourites /></ProtectedRoute>} />
               <Route path="/approvals" element={<ProtectedRoute><Approvals /></ProtectedRoute>} />
               <Route path="/welcome" element={<WelcomeOnboarding />} />

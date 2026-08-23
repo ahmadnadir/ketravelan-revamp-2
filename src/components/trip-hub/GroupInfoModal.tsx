@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { MessageCircle, Check, X, ChevronRight, Shield, LogOut, MoreVertical, Trash2 } from "lucide-react";
+import { MessageCircle, X, ChevronRight, Shield, LogOut, MoreVertical, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { deleteTripPermanently, leaveTripMember } from "@/lib/trips";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
@@ -166,8 +165,6 @@ export function GroupInfoModal({
   const navigate = useNavigate();
   const { user } = useAuth();
   const { toast } = useToast();
-  const [isEditingTitle, setIsEditingTitle] = useState(false);
-  const [title, setTitle] = useState(trip?.title || "");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showTripSettings, setShowTripSettings] = useState(false);
   const [showLastOrganizerLeaveDialog, setShowLastOrganizerLeaveDialog] = useState(false);
@@ -239,7 +236,6 @@ export function GroupInfoModal({
   };
 
   useEffect(() => {
-    setTitle(trip?.title || "");
     setSettingsDraft(normalizeTripSettings(trip?.tripSettings));
     setSettingsDirty(false);
   }, [trip?.id, trip?.title, trip?.tripSettings]);
@@ -260,20 +256,6 @@ export function GroupInfoModal({
     if (isSubmitting) return;
     onOpenChange(false);
     navigate(`/chat/new/${memberId}`);
-  };
-
-  const handleTitleSave = () => {
-    if (title.trim() && trip) {
-      onTripUpdate?.({ title: title.trim() });
-    } else if (trip) {
-      setTitle(trip.title);
-    }
-    setIsEditingTitle(false);
-  };
-
-  const handleTitleCancel = () => {
-    setTitle(trip?.title || "");
-    setIsEditingTitle(false);
   };
 
   const removeUserFromTripConversation = async (userId: string) => {
@@ -642,45 +624,36 @@ export function GroupInfoModal({
             <>
               {/* Trip Info Header */}
               <div className="flex flex-col items-center pt-4 pb-6 border-b border-border/50">
-                {/* Editable Trip Image */}
+                {/* Trip Image - opens trip details */}
                 <div className="relative mb-4">
-                  <div className="h-24 w-24 rounded-full overflow-hidden border-4 border-background shadow-lg">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onOpenChange(false);
+                      navigate(`/trip/${trip.id}?return=${encodeURIComponent(`/trip/${trip.id}/hub`)}`);
+                    }}
+                    className="h-24 w-24 rounded-full overflow-hidden border-4 border-background shadow-lg transition-transform hover:scale-[1.03] focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+                    aria-label="View trip details"
+                  >
                     <img
                       src={trip.imageUrl}
                       alt={trip.title}
                       className="h-full w-full object-cover"
                     />
-                  </div>
+                  </button>
                 </div>
 
-                {/* Editable Title */}
-                {isEditingTitle ? (
-                  <div className="flex items-center gap-2 w-full max-w-xs">
-                    <Input
-                      value={title}
-                      onChange={(e) => setTitle(e.target.value)}
-                      className="text-center font-semibold"
-                      autoFocus
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") handleTitleSave();
-                        if (e.key === "Escape") handleTitleCancel();
-                      }}
-                    />
-                    <Button variant="ghost" size="icon" onClick={handleTitleSave} className="h-8 w-8">
-                      <Check className="h-4 w-4 text-primary" />
-                    </Button>
-                    <Button variant="ghost" size="icon" onClick={handleTitleCancel} className="h-8 w-8">
-                      <X className="h-4 w-4 text-muted-foreground" />
-                    </Button>
-                  </div>
-                ) : (
-                  <button
-                    onClick={() => setIsEditingTitle(true)}
-                    className="text-xl font-semibold text-foreground hover:text-primary transition-colors"
-                  >
-                    {trip.title}
-                  </button>
-                )}
+                {/* Trip Title - opens trip details */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    onOpenChange(false);
+                    navigate(`/trip/${trip.id}?return=${encodeURIComponent(`/trip/${trip.id}/hub`)}`);
+                  }}
+                  className="text-xl font-semibold text-foreground hover:text-primary transition-colors"
+                >
+                  {trip.title}
+                </button>
 
                 <p className="text-sm text-muted-foreground mt-1">
                   {trip.destination} • {members.length} members

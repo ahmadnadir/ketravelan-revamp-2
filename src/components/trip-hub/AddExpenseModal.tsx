@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { X, Upload, Receipt, Users, UserCheck, Pencil, Info, Calendar as CalendarIcon } from "lucide-react";
+import { X, Upload, Receipt, Users, UserCheck, Pencil, Info, Calendar as CalendarIcon, Wallet, Check } from "lucide-react";
 import { expenseCategories } from "@/lib/expenseCategories";
 import { 
   CurrencyCode, 
@@ -29,9 +29,11 @@ import {
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Progress } from "@/components/ui/progress";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { ExpensePayment } from "@/data/mockData";
+import { cn } from "@/lib/utils";
 
 // Using expenseCategories from lib for consistency
 
@@ -87,9 +89,9 @@ const formatDateForDisplay = (dateInput: string): string => {
 
   const [year, month, day] = dateInput.split("-").map(Number);
   const parsed = new Date(year, month - 1, day);
-  const monthLabel = parsed.toLocaleDateString("en-US", { month: "long" });
-  const dayNumber = parsed.getDate();
-  return `${monthLabel} ${dayNumber}${getOrdinalSuffix(dayNumber)}, ${parsed.getFullYear()}`;
+  const dayNumber = String(parsed.getDate()).padStart(2, "0");
+  const monthNumber = String(parsed.getMonth() + 1).padStart(2, "0");
+  return `${dayNumber}/${monthNumber}/${parsed.getFullYear()}`;
 };
 
 const formatDateForPayload = (dateInput: string): string => {
@@ -382,6 +384,21 @@ export function AddExpenseModal({
     }));
   };
 
+  // Seed custom amounts from the current equal split when entering custom mode
+  const handleSplitTypeChange = (nextType: "equal" | "custom") => {
+    if (nextType === "custom" && splitType !== "custom" && splitWith.length > 0 && totalAmount > 0) {
+      const equalShare = totalAmount / splitWith.length;
+      setCustomAmounts((prev) => {
+        const next = { ...prev };
+        splitWith.forEach((memberId) => {
+          next[memberId] = equalShare.toFixed(2);
+        });
+        return next;
+      });
+    }
+    setSplitType(nextType);
+  };
+
   const handleSubmit = () => {
     if (!title.trim() || !amount || !category) return;
 
@@ -429,6 +446,9 @@ export function AddExpenseModal({
   
   const totalAmount = parseAmountInput(amount);
   const customAmountDifference = totalAmount - totalCustomAmount;
+  const customSplitProgress = totalAmount > 0
+    ? Math.min((totalCustomAmount / totalAmount) * 100, 100)
+    : 0;
 
   const isValid = 
     title.trim() && 
@@ -442,28 +462,35 @@ export function AddExpenseModal({
       ? formatAmountDisplay(totalAmount / splitWith.length)
       : "0.00";
 
+  // Shared overrides so no field shows a dark/animated focus ring, border, or shadow
+  const fieldFocusReset =
+    "outline-none ring-0 ring-offset-0 shadow-none transition-none focus:outline-none focus:ring-0 focus:ring-offset-0 focus:shadow-none focus:border-border focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:shadow-none focus-visible:border-border [-webkit-tap-highlight-color:transparent]";
+  const buttonFocusReset =
+    "outline-none ring-0 ring-offset-0 shadow-none focus:outline-none focus:ring-0 focus:ring-offset-0 focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 [-webkit-tap-highlight-color:transparent]";
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md h-[90vh] sm:h-auto sm:max-h-[90vh] w-[calc(100%-2rem)] sm:w-full rounded-2xl p-0 flex flex-col overflow-hidden [&>button]:hidden">
+      <DialogContent className="max-w-lg sm:max-w-[520px] h-[90vh] sm:h-auto sm:max-h-[90vh] w-[calc(100%-2rem)] sm:w-full rounded-3xl p-0 flex flex-col overflow-hidden [&>button]:hidden">
         {/* Fixed Header */}
-        <DialogHeader className="flex-none p-4 pb-3 border-b border-border/50">
+        <DialogHeader className="flex-none border-b border-border/50 px-6 py-4">
           <div className="flex items-center justify-between">
-            <DialogTitle className="flex items-center gap-2 text-lg font-semibold">
+            <DialogTitle className="flex items-center gap-2.5 text-[17px] font-medium">
               {isEditMode ? (
                 <>
-                  <Pencil className="h-5 w-5 text-primary" />
-                  Edit Expense
+                  <Pencil className="h-5 w-5 text-foreground" strokeWidth={1.75} />
+                  Edit shared expense
                 </>
               ) : (
                 <>
-                  <Receipt className="h-5 w-5 text-primary" />
-                  Add Shared Expense
+                  <Receipt className="h-5 w-5 text-foreground" strokeWidth={1.75} />
+                  Add shared expense
                 </>
               )}
             </DialogTitle>
             <button 
               onClick={() => onOpenChange(false)}
-              className="h-8 w-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
+              aria-label="Close"
+              className="h-8 w-8 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 [-webkit-tap-highlight-color:transparent]"
             >
               <X className="h-4 w-4" />
             </button>
@@ -471,27 +498,27 @@ export function AddExpenseModal({
         </DialogHeader>
 
         {/* Scrollable Body */}
-        <div className="flex-1 overflow-y-auto overscroll-contain scrollbar-hide p-4 space-y-4">
+        <div className="flex-1 overflow-y-auto overscroll-contain scrollbar-hide px-6 py-5 space-y-5">
           {/* Title */}
-          <div className="space-y-2">
-            <Label htmlFor="title">Expense Title *</Label>
+          <div className="space-y-1.5">
+            <Label htmlFor="title">Expense title *</Label>
             <Input
               id="title"
               placeholder="e.g., Group dinner, Ferry tickets"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               maxLength={100}
-              className="h-12 rounded-xl"
+              className={cn("h-12 rounded-xl text-[15px]", fieldFocusReset)}
             />
           </div>
 
           {/* Amount with Currency */}
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <div className="flex gap-2">
               <div className="flex-1 space-y-2">
-                <Label htmlFor="amount">Amount ({currency}) *</Label>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground pointer-events-none">
+                <Label htmlFor="amount">Amount *</Label>
+                <div className="relative flex h-14 items-center rounded-xl border border-border bg-background px-3.5">
+                  <span className="pointer-events-none text-[15px] text-muted-foreground">
                     {getCurrencySymbol(currency)}
                   </span>
                   <Input
@@ -503,14 +530,14 @@ export function AddExpenseModal({
                     onChange={(e) => setAmount(sanitizeAmountInput(e.target.value))}
                     onFocus={() => setAmount((prev) => prev.replace(/,/g, ""))}
                     onBlur={() => setAmount((prev) => formatAmountInput(prev) || prev)}
-                    className="h-12 rounded-xl pl-8"
+                    className={cn("h-full border-0 pl-2 text-lg tabular-nums", fieldFocusReset, "focus:border-transparent focus-visible:border-transparent")}
                   />
                 </div>
               </div>
               <div className="flex-1 space-y-2">
-                <Label htmlFor="currency-select">Currency</Label>
+                <Label htmlFor="currency-select">Paid in</Label>
                 <Select value={currency} onValueChange={handleCurrencyChange}>
-                  <SelectTrigger id="currency-select" className="h-12 rounded-xl">
+                    <SelectTrigger id="currency-select" className={cn("h-14 rounded-xl", fieldFocusReset)}>
                     <span className="flex items-center gap-1.5">
                       <span>{getCurrencySymbol(currency)}</span>
                       <span>{currency}</span>
@@ -561,16 +588,20 @@ export function AddExpenseModal({
           </div>
 
           {/* Category + Date */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
               <Label>Category *</Label>
               <Select value={category} onValueChange={setCategory}>
-                <SelectTrigger className="h-12 rounded-xl">
+                <SelectTrigger className={cn("h-12 rounded-xl", fieldFocusReset)}>
                   {category ? (
-                    <span className="flex items-center gap-2">
-                      <span className="text-base">{expenseCategories.find(c => c.id === category)?.emoji}</span>
-                      <span>{expenseCategories.find(c => c.id === category)?.label}</span>
-                    </span>
+                    <div className="flex min-w-0 flex-1 items-center gap-3 overflow-hidden pr-2">
+                      <span className="flex h-6 w-6 shrink-0 items-center justify-center text-base">
+                        {expenseCategories.find(c => c.id === category)?.emoji}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate">
+                        {expenseCategories.find(c => c.id === category)?.label}
+                      </span>
+                    </div>
                   ) : (
                     <span className="text-muted-foreground">Select category</span>
                   )}
@@ -595,7 +626,7 @@ export function AddExpenseModal({
                     id="expense-date"
                     type="button"
                     variant="outline"
-                    className="h-12 w-full rounded-xl justify-between font-normal"
+                    className={cn("h-12 w-full rounded-xl justify-between font-normal", buttonFocusReset)}
                   >
                     <span>{formatDateForDisplay(expenseDate)}</span>
                     <CalendarIcon className="h-4 w-4 text-muted-foreground" />
@@ -621,7 +652,7 @@ export function AddExpenseModal({
           <div className="space-y-2">
             <Label>Paid By</Label>
             <Select value={paidBy} onValueChange={setPaidBy}>
-              <SelectTrigger className="h-12 rounded-xl">
+              <SelectTrigger className={cn("h-12 rounded-xl", fieldFocusReset)}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent className="rounded-xl">
@@ -643,26 +674,34 @@ export function AddExpenseModal({
           </div>
 
           {/* Split Type */}
-          <div className="space-y-2">
-            <Label>Split Type</Label>
-            <div className="flex gap-2">
+          <div className="space-y-1.5">
+            <Label>Split type</Label>
+            <div className="grid grid-cols-2 gap-1 rounded-xl bg-secondary p-1">
               <Button
                 type="button"
-                variant={splitType === "equal" ? "default" : "outline"}
-                onClick={() => setSplitType("equal")}
-                className="flex-1 h-11 rounded-xl"
+                variant="ghost"
+                onClick={() => handleSplitTypeChange("equal")}
+                className={cn(
+                  "h-10 rounded-lg text-sm",
+                  buttonFocusReset,
+                  splitType === "equal" && "bg-background font-medium text-foreground shadow-sm hover:bg-background"
+                )}
               >
-                <Users className="h-4 w-4 mr-1.5" />
-                Split Equally
+                <Users className="mr-1.5 h-4 w-4" />
+                Split equally
               </Button>
               <Button
                 type="button"
-                variant={splitType === "custom" ? "default" : "outline"}
-                onClick={() => setSplitType("custom")}
-                className="flex-1 h-11 rounded-xl"
+                variant="ghost"
+                onClick={() => handleSplitTypeChange("custom")}
+                className={cn(
+                  "h-10 rounded-lg text-sm",
+                  buttonFocusReset,
+                  splitType === "custom" && "bg-background font-medium text-foreground shadow-sm hover:bg-background"
+                )}
               >
-                <UserCheck className="h-4 w-4 mr-1.5" />
-                Custom Split
+                <UserCheck className="mr-1.5 h-4 w-4" />
+                Custom split
               </Button>
             </div>
           </div>
@@ -677,7 +716,7 @@ export function AddExpenseModal({
                   variant="ghost"
                   size="sm"
                   onClick={handleSelectAll}
-                  className="h-7 text-xs rounded-lg"
+                  className={cn("h-7 text-xs rounded-lg", buttonFocusReset)}
                 >
                   All
                 </Button>
@@ -686,84 +725,124 @@ export function AddExpenseModal({
                   variant="ghost"
                   size="sm"
                   onClick={handleDeselectAll}
-                  className="h-7 text-xs rounded-lg"
+                  className={cn("h-7 text-xs rounded-lg", buttonFocusReset)}
                 >
                   None
                 </Button>
               </div>
             </div>
-            <div className="border border-border rounded-xl p-2 space-y-1 max-h-48 overflow-y-auto scrollbar-hide bg-secondary/30">
-              {members.map((member) => (
-                <div
-                  key={member.id}
-                  className={`flex items-center gap-3 p-3 sm:p-2.5 rounded-lg cursor-pointer active:scale-[0.98] transition-all duration-150 group
-                    ${splitWith.includes(member.id) 
-                      ? 'bg-primary/10 hover:bg-primary/15 border border-primary/30' 
-                      : 'bg-background hover:bg-accent border border-transparent hover:border-border'
-                    }`}
-                  onClick={() => toggleMemberSplit(member.id)}
-                >
-                  <div className={`relative flex items-center justify-center transition-all duration-200 ${splitWith.includes(member.id) ? 'scale-110' : 'group-hover:scale-105'}`}>
-                    <Checkbox
-                      checked={splitWith.includes(member.id)}
-                      className="pointer-events-none h-5 w-5 transition-all duration-200"
-                    />
-                  </div>
-                  <Avatar className="h-7 w-7 shrink-0 ring-2 ring-transparent group-hover:ring-primary/20 transition-all duration-200">
-                    <AvatarImage src={member.imageUrl || member.avatar} />
-                    <AvatarFallback className="text-[10px]">
-                      {member.name ? member.name.charAt(0) : "?"}
-                    </AvatarFallback>
-                  </Avatar>
-                  <span className="text-sm flex-1 font-medium group-hover:text-foreground transition-colors">{member.name || "Unknown"}</span>
+            <div className="border-t border-border/60">
+              {members.map((member) => {
+                const isSelected = splitWith.includes(member.id);
+                const memberShareAmount = splitType === "custom"
+                  ? parseAmountInput(customAmounts[member.id] || "")
+                  : splitWith.length > 0 ? totalAmount / splitWith.length : 0;
+                const memberSharePercentage = totalAmount > 0
+                  ? Math.round((memberShareAmount / totalAmount) * 100)
+                  : null;
+
+                return (
+                  <div
+                    key={member.id}
+                    className="flex items-center gap-2 border-b border-border/50 last:border-b-0"
+                  >
+                  <button
+                    type="button"
+                    role="checkbox"
+                    aria-checked={isSelected}
+                    aria-label={member.name || "Unknown"}
+                    onClick={() => toggleMemberSplit(member.id)}
+                    className="group -ml-2 flex min-h-[60px] min-w-0 flex-1 items-center gap-3 rounded-xl px-2 py-2.5 text-left hover:bg-secondary outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 [-webkit-tap-highlight-color:transparent]"
+                  >
+                    <span className={cn(
+                      "flex h-5 w-5 shrink-0 items-center justify-center rounded-md border-2 text-transparent transition-colors",
+                      isSelected
+                        ? "border-foreground bg-foreground text-background"
+                        : "border-border bg-background group-hover:border-foreground/60"
+                    )}>
+                      <Check className="h-3.5 w-3.5" strokeWidth={3} />
+                    </span>
+                    <Avatar className={cn(
+                      "h-9 w-9 shrink-0 transition-opacity",
+                      !isSelected && "opacity-50"
+                    )}>
+                      <AvatarImage src={member.imageUrl || member.avatar} />
+                      <AvatarFallback className="text-[10px]">
+                        {member.name ? member.name.charAt(0) : "?"}
+                      </AvatarFallback>
+                    </Avatar>
+                    <span className="min-w-0 flex-1">
+                      <span className={cn(
+                        "block truncate text-sm transition-colors",
+                        isSelected ? "font-medium text-foreground" : "text-muted-foreground"
+                      )}>{member.name || "Unknown"}</span>
+                      <span className="block text-xs tabular-nums text-muted-foreground">
+                        {isSelected && memberSharePercentage !== null
+                          ? `${memberSharePercentage}% of total`
+                          : "Not splitting"}
+                      </span>
+                    </span>
+                  </button>
                   
-                  {splitWith.includes(member.id) && (
+                  {isSelected && (
                     splitType === "custom" ? (
-                      <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex h-11 w-[132px] shrink-0 items-center gap-1.5 rounded-xl border border-border bg-background px-3" onClick={(e) => e.stopPropagation()}>
                         <span className="text-xs text-muted-foreground">{getCurrencySymbol(currency)}</span>
                         <Input
                           type="number"
                           placeholder="0.00"
                           value={customAmounts[member.id] || ""}
                           onChange={(e) => handleCustomAmountChange(member.id, e.target.value)}
-                          className="w-20 h-8 text-xs rounded-lg"
+                          className="h-full w-full min-w-0 border-0 p-0 text-right text-sm tabular-nums shadow-none outline-none ring-0 transition-none focus:outline-none focus:ring-0 focus:border-transparent focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:border-transparent"
                           min="0"
                           step="0.01"
                         />
                       </div>
                     ) : (
-                      totalAmount > 0 && (
-                        <span className="text-xs text-muted-foreground">
-                          {getCurrencySymbol(currency)} {perPersonAmount}
+                      <div className="flex h-11 w-[132px] shrink-0 items-center justify-end pr-3">
+                        <span className={cn("text-sm tabular-nums", totalAmount > 0 ? "text-muted-foreground" : "text-border")}>
+                          {totalAmount > 0 ? `${getCurrencySymbol(currency)} ${perPersonAmount}` : "-"}
                         </span>
-                      )
+                      </div>
                     )
                   )}
-                </div>
-              ))}
+                  </div>
+                );
+              })}
             </div>
             
             {/* Summary */}
             {splitWith.length > 0 && totalAmount > 0 && (
-              <div className="space-y-1">
+              <div className="space-y-1.5">
                 {splitType === "equal" ? (
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-[13px] text-muted-foreground">
                     Each person pays: <span className="font-medium text-foreground">{getCurrencySymbol(currency)} {perPersonAmount}</span>
                   </p>
                 ) : (
-                  <div className="space-y-1">
-                    <p className="text-xs text-muted-foreground">
-                      Total assigned: <span className="font-medium text-foreground">{getCurrencySymbol(currency)} {formatAmountDisplay(totalCustomAmount)}</span>
-                      {" / "}
-                      <span className="font-medium">{getCurrencySymbol(currency)} {formatAmountDisplay(totalAmount)}</span>
-                    </p>
-                    {Math.abs(customAmountDifference) >= 0.01 && (
-                      <p className={`text-xs ${customAmountDifference > 0 ? "text-destructive" : "text-amber-500"}`}>
-                        {customAmountDifference > 0 
-                          ? `${getCurrencySymbol(currency)} ${formatAmountDisplay(customAmountDifference)} remaining to assign` 
-                          : `${getCurrencySymbol(currency)} ${formatAmountDisplay(Math.abs(customAmountDifference))} over-assigned`}
+                  <div className="mt-3 rounded-xl bg-secondary/50 p-3.5">
+                    <div className="mb-2 flex items-baseline justify-between text-[13px]">
+                      <span className="text-muted-foreground">Assigned</span>
+                      <span className="tabular-nums text-foreground">
+                        {getCurrencySymbol(currency)} {formatAmountDisplay(totalCustomAmount)}{" "}
+                        <span className="text-muted-foreground">of {getCurrencySymbol(currency)} {formatAmountDisplay(totalAmount)}</span>
+                      </span>
+                    </div>
+                    <Progress value={customSplitProgress} className="h-1.5" />
+                    <div className="mt-2.5 flex items-center justify-between gap-3">
+                      <p className={cn(
+                        "text-[13px] tabular-nums",
+                        Math.abs(customAmountDifference) < 0.01 ? "text-green-600" : customAmountDifference < 0 ? "text-destructive" : "text-muted-foreground"
+                      )}>
+                        {Math.abs(customAmountDifference) < 0.01
+                          ? <span className="inline-flex items-center gap-1"><Check className="h-3.5 w-3.5" strokeWidth={2.5} />Balanced</span>
+                          : customAmountDifference > 0
+                            ? `${getCurrencySymbol(currency)} ${formatAmountDisplay(customAmountDifference)} remaining to assign`
+                            : `${getCurrencySymbol(currency)} ${formatAmountDisplay(Math.abs(customAmountDifference))} over-assigned`}
                       </p>
-                    )}
+                      <span className="shrink-0 text-xs font-medium tabular-nums text-muted-foreground">
+                        {Math.round(customSplitProgress)}%
+                      </span>
+                    </div>
                   </div>
                 )}
               </div>
@@ -771,8 +850,8 @@ export function AddExpenseModal({
           </div>
 
           {/* Notes */}
-          <div className="space-y-2">
-            <Label htmlFor="notes">Notes (Optional)</Label>
+          <div className="space-y-1.5">
+            <Label htmlFor="notes">Notes</Label>
             <Textarea
               id="notes"
               placeholder="Add any additional details..."
@@ -780,13 +859,13 @@ export function AddExpenseModal({
               onChange={(e) => setNotes(e.target.value)}
               rows={2}
               maxLength={500}
-              className="rounded-xl min-h-[80px]"
+              className={cn("min-h-[80px] resize-none rounded-xl text-[15px]", fieldFocusReset)}
             />
           </div>
 
           {/* Receipt Upload */}
-          <div className="space-y-2">
-            <Label>Receipt (Optional)</Label>
+          <div className="space-y-1.5">
+            <Label>Receipt</Label>
             {receiptPreview ? (
               <div className="relative border border-border rounded-xl p-2 bg-secondary/30">
                 <img
@@ -798,17 +877,17 @@ export function AddExpenseModal({
                   type="button"
                   variant="destructive"
                   size="icon"
-                  className="absolute top-3 right-3 h-7 w-7 rounded-lg"
+                  className={cn("absolute top-3 right-3 h-7 w-7 rounded-lg", buttonFocusReset)}
                   onClick={handleRemoveReceipt}
                 >
                   <X className="h-4 w-4" />
                 </Button>
               </div>
             ) : (
-              <label className="flex flex-col items-center justify-center border-2 border-dashed border-border rounded-xl p-4 cursor-pointer hover:border-primary/50 transition-colors bg-secondary/30">
-                <Upload className="h-6 w-6 text-muted-foreground mb-2" />
-                <span className="text-sm text-muted-foreground">
-                  Tap to upload receipt
+              <label className="flex h-[72px] cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-border text-muted-foreground hover:bg-secondary/50">
+                <Upload className="h-[18px] w-[18px]" />
+                <span className="text-[13px]">
+                  Attach a photo
                 </span>
                 <input
                   type="file"
@@ -823,12 +902,26 @@ export function AddExpenseModal({
           {/* Actions - Fixed Footer */}
         </div>
         
-        <div className="flex-none p-4 pt-3 border-t border-border/50">
+        <div className="flex-none border-t border-border/50 bg-background px-6 py-4">
+          <div className="mb-3 flex items-center gap-2 text-[13px] text-muted-foreground">
+            <Wallet className="h-[15px] w-[15px]" strokeWidth={1.75} />
+            {splitWith.length > 0 && totalAmount > 0 ? (
+              <span>
+                <span className="font-medium tabular-nums text-foreground">
+                  {getCurrencySymbol(currency)} {formatAmountDisplay(totalAmount)}
+                </span>{" "}
+                across {splitWith.length} {splitWith.length === 1 ? "person" : "people"}
+                {splitType === "equal" && <> · {getCurrencySymbol(currency)} {perPersonAmount} each</>}
+              </span>
+            ) : (
+              <span>Nothing to settle yet</span>
+            )}
+          </div>
           <div className="flex gap-3">
             <Button
               type="button"
               variant="outline"
-              className="flex-1 h-12 rounded-xl"
+              className={cn("h-12 flex-1 rounded-xl text-[15px] font-medium", buttonFocusReset)}
               onClick={() => {
                 resetForm();
                 onOpenChange(false);
@@ -838,7 +931,7 @@ export function AddExpenseModal({
             </Button>
             <Button
               type="button"
-              className="flex-1 h-12 rounded-xl"
+              className={cn("h-12 flex-1 rounded-xl text-[15px] font-medium", buttonFocusReset)}
               onClick={handleSubmit}
               disabled={!isValid}
             >

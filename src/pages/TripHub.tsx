@@ -42,7 +42,11 @@ export default function TripHub() {
 
     if (trip.creator_id === user.id) return true;
 
-    const isAdminMember = members.some((member: any) => member.id === user.id && member.isAdmin);
+    const isAdminMember = members.some(
+      (member: any) =>
+        member.id === user.id &&
+        (member.isAdmin || ['organizer', 'co-host', 'cohost', 'admin', 'host'].includes(member.role?.toLowerCase())),
+    );
     if (isAdminMember) return true;
 
     const permissions = trip.trip_settings?.permissions;
@@ -54,7 +58,11 @@ export default function TripHub() {
 
     if (trip.creator_id === user.id) return true;
 
-    const isAdminMember = members.some((member: any) => member.id === user.id && member.isAdmin);
+    const isAdminMember = members.some(
+      (member: any) =>
+        member.id === user.id &&
+        (member.isAdmin || ['organizer', 'co-host', 'cohost', 'admin', 'host'].includes(member.role?.toLowerCase())),
+    );
     if (isAdminMember) return true;
 
     const permissions = trip.trip_settings?.permissions;
@@ -117,7 +125,11 @@ export default function TripHub() {
         setMembers(processedMembers);
 
         const isOwner = tripData.creator_id === user?.id;
-        const isAdminMember = tripMembers.some((m: any) => m.user_id === user?.id && m.is_admin);
+        const isAdminMember = tripMembers.some(
+          (m: any) =>
+            m.user_id === user?.id &&
+            (m.is_admin || ['organizer', 'co-host', 'cohost', 'admin', 'host'].includes(m.role?.toLowerCase())),
+        );
         setCanManageTrip(isOwner || isAdminMember);
       } else {
         setMembers([]);
@@ -336,7 +348,7 @@ export default function TripHub() {
                 )
               )}
               {activeTab === "expenses" && <TripExpenses tripId={trip.id} members={displayMembers} conversationId={conversation?.id} tripName={trip.title} canAddExpenses={canAddExpenses} />}
-              {activeTab === "notes" && <TripNotes tripId={trip.id} />}
+              {activeTab === "notes" && <TripNotes tripId={trip.id} conversationId={conversation?.id} />}
             </>
           )}
         </div>

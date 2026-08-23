@@ -22,6 +22,9 @@ import {
   User,
   MessageCircle,
   Trash2,
+  Ban,
+  ChevronLeft,
+  MoreVertical,
   type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -36,12 +39,25 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useAuth } from "@/contexts/AuthContext";
 import { useUserTrips } from "@/hooks/useTrips";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase";
 import { getCurrencyInfo, type CurrencyCode } from "@/lib/currencyUtils";
 import { normalizePlatformKey, normalizeSocialLink } from "@/lib/socialLinks";
+import { blockUser, isBlockedByUser, isUserBlocked, unblockUser } from "@/lib/blockUser";
+import { ensureCurrentUserCanStartDirectChat } from "@/lib/familiesSafety";
+import { ModerationMenu } from "@/components/moderation/ModerationMenu";
 import { cn } from "@/lib/utils";
 import { ImageCropModal } from "@/components/profile/ImageCropModal";
 import { uploadImageFromDataUrl } from "@/lib/imageStorage";
@@ -92,6 +108,19 @@ const getDicebearSeedFromUrl = (url?: string | null) => {
 
 const buildDicebearChoices = (baseSeed: string) =>
   Array.from({ length: 12 }, (_, i) => buildDicebearAvatar(`${baseSeed}-${i + 1}`));
+
+// Older/foreign DiceBear URLs may carry a random or gradient background; force solid white for consistency.
+const normalizeAvatarUrl = (url: string) => {
+  if (!url.includes("api.dicebear.com")) return url;
+  try {
+    const parsed = new URL(url);
+    parsed.searchParams.set("backgroundType", "solid");
+    parsed.searchParams.set("backgroundColor", "ffffff");
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+};
 
 const normalizeCountryName = (value?: string | null) => value?.trim().toLowerCase() || "";
 
@@ -167,6 +196,13 @@ export default function Profile() {
   const [dicebearModalOpen, setDicebearModalOpen] = useState(false);
   const [dicebearChoices, setDicebearChoices] = useState<string[]>([]);
   const [showCountriesModal, setShowCountriesModal] = useState(false);
+
+  // Block/report state (only relevant when viewing another user's profile)
+  const [isBlocked, setIsBlocked] = useState(false);
+  const [viewerBlockedByProfileOwner, setViewerBlockedByProfileOwner] = useState(false);
+  const [isViewerBlockCheckLoading, setIsViewerBlockCheckLoading] = useState(false);
+  const [isBlockLoading, setIsBlockLoading] = useState(false);
+  const [confirmBlockOpen, setConfirmBlockOpen] = useState(false);
   
   // Fetch other user's profile if viewing someone else's profile
   useEffect(() => {
@@ -205,6 +241,48 @@ export default function Profile() {
   useEffect(() => {
     setCoverPhoto(profile?.cover_image || null);
   }, [profile?.cover_image]);
+
+  // Check whether the viewer has blocked (or is blocked by) the profile owner
+  useEffect(() => {
+    let cancelled = false;
+    const targetUserId = profile?.id;
+
+    if (isOwnProfile || !user?.id || !targetUserId) {
+      setIsBlocked(false);
+      setViewerBlockedByProfileOwner(false);
+      setIsViewerBlockCheckLoading(false);
+      return;
+    }
+
+    setIsViewerBlockCheckLoading(true);
+
+    (async () => {
+      try {
+        const [blocked, blockedByOwner] = await Promise.all([
+          isUserBlocked(targetUserId),
+          isBlockedByUser(targetUserId, user.id),
+        ]);
+        if (!cancelled) {
+          setIsBlocked(blocked);
+          setViewerBlockedByProfileOwner(blockedByOwner);
+        }
+      } catch (err) {
+        console.error("Failed to check block status:", err);
+        if (!cancelled) {
+          setIsBlocked(false);
+          setViewerBlockedByProfileOwner(false);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsViewerBlockCheckLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOwnProfile, user?.id, profile?.id]);
 
   // Fetch user's trips for stats and previous trips
   const profileUserId = profile?.id || user?.id;
@@ -299,6 +377,24 @@ export default function Profile() {
   const hasMorePreviousTrips = previousTrips.length > 5;
   const hasMoreUpcomingTrips = upcomingTrips.length > 5;
   const profileReturnPath = `${routerLocation.pathname}${routerLocation.search}`;
+
+  // Hooks must run on every render, so this stays above the conditional early returns below.
+  const visitedCountries = useMemo(() => {
+    const seen = new Map<string, { name: string; flag: string }>();
+
+    for (const trip of Array.isArray(visibleTrips) ? visibleTrips : []) {
+      const countryName = getCountryFromDestination(String(trip?.destination || "").trim());
+      const key = normalizeCountryName(countryName);
+      if (!key || seen.has(key)) continue;
+
+      seen.set(key, {
+        name: countryName,
+        flag: getCountryFlag(countryName),
+      });
+    }
+
+    return Array.from(seen.values());
+  }, [visibleTrips]);
 
   const handleCoverPhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -506,12 +602,62 @@ export default function Profile() {
 
   const handleMessage = async () => {
     if (!profile?.id) return;
+    if (viewerBlockedByProfileOwner) {
+      toast({
+        title: "Unavailable",
+        description: "You cannot message this user.",
+        variant: "destructive",
+      });
+      return;
+    }
+    try {
+      await ensureCurrentUserCanStartDirectChat(profile.id);
+    } catch (err) {
+      toast({
+        title: "Messaging restricted",
+        description: err instanceof Error ? err.message : "This chat is not available.",
+        variant: "destructive",
+      });
+      return;
+    }
     navigate(`/chat/new/${profile.id}`);
+  };
+
+  const handleToggleBlock = async () => {
+    if (!profile?.id || !user?.id || user.id === profile.id) return;
+
+    setIsBlockLoading(true);
+    try {
+      if (isBlocked) {
+        await unblockUser(profile.id);
+        setIsBlocked(false);
+        toast({
+          title: "User unblocked",
+          description: `You can interact with ${(profile.full_name || profile.username || "this user").split(" ")[0]} again.`,
+        });
+      } else {
+        await blockUser(profile.id, "Blocked from profile view");
+        setIsBlocked(true);
+        toast({
+          title: "User blocked",
+          description: "Their content and interactions will be limited for you.",
+        });
+      }
+    } catch (err) {
+      console.error("Failed to toggle block state:", err);
+      toast({
+        title: "Action failed",
+        description: "Could not update block status. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsBlockLoading(false);
+    }
   };
 
   // No footer content - buttons will be at the bottom of scrollable area instead
 
-  if (loading || loadingProfile) {
+  if (loading || loadingProfile || (!isOwnProfile && isViewerBlockCheckLoading)) {
     return (
       <AppLayout showBottomNav={true} fullWidth mainClassName="px-0 sm:px-4">
         <div className="flex items-center justify-center min-h-[60vh]">
@@ -544,6 +690,24 @@ export default function Profile() {
   }
 
   // Fallback for incomplete profile
+  if (!isOwnProfile && viewerBlockedByProfileOwner) {
+    return (
+      <AppLayout showBottomNav={true} fullWidth mainClassName="px-0 sm:px-4">
+        <div className="flex items-center justify-center min-h-[60vh]">
+          <Card className="p-6 max-w-md w-full text-center">
+            <h2 className="text-base font-semibold text-foreground">Profile unavailable</h2>
+            <p className="text-sm text-muted-foreground mt-2">
+              This user is not available to you.
+            </p>
+            <Button className="mt-4" onClick={() => navigate(-1)}>
+              Go Back
+            </Button>
+          </Card>
+        </div>
+      </AppLayout>
+    );
+  }
+
   if (user && !profile) {
     const displayName = user.email?.split("@")[0] || "User";
     const avatarUrl = `https://api.dicebear.com/7.x/notionists/svg?seed=${encodeURIComponent(user.id)}&backgroundType=solid&backgroundColor=ffffff`;
@@ -681,7 +845,7 @@ export default function Profile() {
 
   // Keep user-selected avatar exactly as saved, including DiceBear URLs.
   const avatarUrl = profile.avatar_url && String(profile.avatar_url).trim()
-    ? String(profile.avatar_url)
+    ? normalizeAvatarUrl(String(profile.avatar_url))
     : "";
   const location = profile.location || "";
   const travelStyles = Array.isArray(profile.travel_styles) ? profile.travel_styles : [];
@@ -692,23 +856,6 @@ export default function Profile() {
   const coverImageDesktopUrl = coverPhoto || DEFAULT_DESKTOP_COVER_PHOTO;
   const homeCurrency = (profile.home_currency as CurrencyCode | undefined);
   const currencyInfo = homeCurrency ? getCurrencyInfo(homeCurrency) : undefined;
-
-  const visitedCountries = useMemo(() => {
-    const seen = new Map<string, { name: string; flag: string }>();
-
-    for (const trip of Array.isArray(visibleTrips) ? visibleTrips : []) {
-      const countryName = getCountryFromDestination(String(trip?.destination || "").trim());
-      const key = normalizeCountryName(countryName);
-      if (!key || seen.has(key)) continue;
-
-      seen.set(key, {
-        name: countryName,
-        flag: getCountryFlag(countryName),
-      });
-    }
-
-    return Array.from(seen.values());
-  }, [visibleTrips]);
 
   const countriesCount = visitedCountries.length;
 
@@ -733,6 +880,38 @@ export default function Profile() {
 
       {/* Cover Photo Banner */}
       <div className="relative">
+        {!isOwnProfile && (
+          <div className="absolute top-3 left-3 right-3 z-10 flex items-center justify-between">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9 rounded-full bg-background/80 backdrop-blur hover:bg-background"
+              onClick={() => navigate(-1)}
+              aria-label="Go back"
+            >
+              <ChevronLeft className="h-5 w-5 text-foreground" />
+            </Button>
+            {user?.id && profile?.id && user.id !== profile.id && (
+              <ModerationMenu
+                reportType="USER"
+                targetId={String(profile.id)}
+                reportedUserId={String(profile.id)}
+                targetLabel="User"
+                reportLabel="Report User"
+                trigger={
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-9 w-9 rounded-full bg-background/80 backdrop-blur hover:bg-background"
+                    aria-label="Profile actions"
+                  >
+                    <MoreVertical className="h-5 w-5 text-foreground" />
+                  </Button>
+                }
+              />
+            )}
+          </div>
+        )}
         <div className="h-48 sm:h-56 w-full bg-muted overflow-hidden">
           {coverPhoto ? (
             <img
@@ -777,10 +956,9 @@ export default function Profile() {
             <button
               type="button"
               onClick={() => setAvatarModalOpen(true)}
-              disabled={!isOwnProfile}
-              className="rounded-full focus:outline-none focus:ring-2 focus:ring-primary/60 disabled:opacity-80 disabled:cursor-default"
+              className="rounded-full focus:outline-none focus:ring-2 focus:ring-primary/60"
             >
-              <Avatar className="h-24 w-24 border-4 border-background shadow-lg">
+              <Avatar className="h-24 w-24 border-4 border-background shadow-lg bg-white">
                 <AvatarImage src={avatarUrl} alt={displayName} />
                 <AvatarFallback>{displayName.charAt(0)}</AvatarFallback>
               </Avatar>
@@ -844,12 +1022,26 @@ export default function Profile() {
 
           {/* Stats Cards */}
           <div className="grid grid-cols-2 gap-3">
-            <Link to="/my-trips" className="block">
-              <Card className="p-3 text-center border-border/50 transition-colors hover:bg-muted/30">
+            {isOwnProfile ? (
+              <Link to="/my-trips" className="block">
+                <Card className="p-3 text-center border-border/50 transition-colors hover:bg-muted/30">
+                  <p className="text-xl font-bold text-foreground">{tripsCount}</p>
+                  <p className="text-xs text-muted-foreground">Trips</p>
+                </Card>
+              </Link>
+            ) : canShowTrips ? (
+              <a href="#profile-trips-section" className="block">
+                <Card className="p-3 text-center border-border/50 transition-colors hover:bg-muted/30">
+                  <p className="text-xl font-bold text-foreground">{tripsCount}</p>
+                  <p className="text-xs text-muted-foreground">Trips</p>
+                </Card>
+              </a>
+            ) : (
+              <Card className="p-3 text-center border-border/50">
                 <p className="text-xl font-bold text-foreground">{tripsCount}</p>
                 <p className="text-xs text-muted-foreground">Trips</p>
               </Card>
-            </Link>
+            )}
             <button type="button" onClick={() => setShowCountriesModal(true)} className="block text-left">
               <Card className="p-3 text-center border-border/50 transition-colors hover:bg-muted/30">
                 <p className="text-xl font-bold text-foreground">{countriesCount}</p>
@@ -902,7 +1094,7 @@ export default function Profile() {
           </Card>
 
           {/* Previous Trips */}
-          <div className="space-y-3">
+          <div id="profile-trips-section" className="space-y-3 scroll-mt-4">
             {isOwnProfile && (
               <div className="flex p-1 bg-secondary rounded-xl">
                 <button
@@ -1095,18 +1287,64 @@ export default function Profile() {
                 </Button>
               </>
             ) : (
-              <Button
-                size="lg"
-                className="w-full rounded-xl gap-2"
-                onClick={handleMessage}
-              >
-                <MessageCircle className="h-5 w-5" />
-                Message {profile?.full_name?.split(" ")[0] || profile?.username || "User"}
-              </Button>
+              <>
+                <Button
+                  size="lg"
+                  className="w-full rounded-xl gap-2"
+                  onClick={handleMessage}
+                >
+                  <MessageCircle className="h-5 w-5" />
+                  Message {profile?.full_name?.split(" ")[0] || profile?.username || "User"}
+                </Button>
+                {user?.id && profile?.id && user.id !== profile.id && (
+                  <Button
+                    size="lg"
+                    variant={isBlocked ? "outline" : "destructive"}
+                    className="w-full rounded-xl gap-2"
+                    onClick={() => {
+                      if (isBlocked) {
+                        void handleToggleBlock();
+                        return;
+                      }
+                      setConfirmBlockOpen(true);
+                    }}
+                    disabled={isBlockLoading}
+                  >
+                    <Ban className="h-4 w-4" />
+                    {isBlockLoading
+                      ? (isBlocked ? "Unblocking..." : "Blocking...")
+                      : (isBlocked ? "Unblock User" : "Block User")}
+                  </Button>
+                )}
+              </>
             )}
           </div>
         </div>
       </div>
+
+      <AlertDialog open={confirmBlockOpen} onOpenChange={setConfirmBlockOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Block this user?</AlertDialogTitle>
+            <AlertDialogDescription>
+              You will no longer receive messages from this user or see their direct chat in your messages list.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isBlockLoading}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={isBlockLoading}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                setConfirmBlockOpen(false);
+                void handleToggleBlock();
+              }}
+            >
+              {isBlockLoading ? "Blocking..." : "Block"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Cover Image Viewer Dialog - For non-owners */}
       <Dialog open={showCoverImage} onOpenChange={setShowCoverImage}>

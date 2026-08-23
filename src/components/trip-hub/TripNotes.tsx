@@ -24,12 +24,16 @@ import { fetchTripNotes, createTripNote, updateTripNote, deleteTripNote, TripNot
 import { NoteEditor } from "./NoteEditor";
 import { useToast } from "@/hooks/use-toast";
 import { useSearchParams } from "react-router-dom";
+import { useAuth } from "@/contexts/AuthContext";
+import { sendSystemMessage } from "@/lib/system-messages";
 
 interface TripNotesProps {
   tripId: string;
+  conversationId?: string;
 }
 
-export function TripNotes({ tripId }: TripNotesProps) {
+export function TripNotes({ tripId, conversationId }: TripNotesProps) {
+  const { profile, user } = useAuth();
   const [searchQuery, setSearchQuery] = useState("");
   const [notes, setNotes] = useState<TripNoteDB[]>([]);
   const [isCreatingNote, setIsCreatingNote] = useState(false);
@@ -173,6 +177,21 @@ export function TripNotes({ tripId }: TripNotesProps) {
     if (noteActionJustHappened.current) return;
     setSelectedNote(note);
     setEditorOpen(true);
+  };
+
+  const handleNoteEdited = (editedNote: TripNoteDB) => {
+    if (!conversationId) return;
+
+    const senderName = profile?.full_name || profile?.username || user?.email || "Someone";
+
+    sendSystemMessage({
+      conversationId,
+      action: "note_edited",
+      senderName,
+      details: editedNote.title || "Untitled",
+    }).catch((error) => {
+      console.warn("Failed to send note edited system message:", error);
+    });
   };
 
   const handleSaveNote = async (updatedNote: TripNoteDB, options?: { silent?: boolean }) => {
@@ -415,6 +434,7 @@ export function TripNotes({ tripId }: TripNotesProps) {
           onSave={handleSaveNote}
           onDelete={handleDeleteNote}
           tripId={tripId}
+          onNoteEdited={handleNoteEdited}
         />
       )}
 
