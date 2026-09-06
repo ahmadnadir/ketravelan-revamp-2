@@ -27,6 +27,46 @@ function isSchemaDriftError(error: any): boolean {
   );
 }
 
+export interface TripMemberRoleInput {
+  id: string;
+  role?: string | null;
+  is_admin?: boolean | null;
+}
+
+/**
+ * Single source of truth for Host/Co-Host/Member labels so Trip Details and the
+ * Group Chat modal never disagree: the trip creator is always "Host"; other
+ * admin/organizer members are "Co-Host" (or "Host" if they are the only admin,
+ * e.g. when creator_id is unavailable).
+ */
+export function resolveMemberRoleLabel(
+  memberId: string,
+  members: TripMemberRoleInput[],
+  creatorId?: string | null
+): 'Host' | 'Co-Host' | 'Member' {
+  const isAdminMember = (member: TripMemberRoleInput) => {
+    const normalizedRole = String(member?.role || '').toLowerCase();
+    return Boolean(member?.is_admin || normalizedRole === 'organizer' || normalizedRole === 'admin');
+  };
+
+  const member = members.find((m) => String(m.id) === String(memberId));
+  if (!member || !isAdminMember(member)) return 'Member';
+
+  const isCreator = Boolean(creatorId) && String(memberId) === String(creatorId);
+  if (isCreator) return 'Host';
+
+  const admins = members.filter(isAdminMember);
+  const hasMultipleAdmins = admins.length > 1;
+  if (!hasMultipleAdmins) return 'Host';
+
+  if (!creatorId) {
+    const firstAdminId = admins[0]?.id;
+    return String(memberId) === String(firstAdminId || '') ? 'Host' : 'Co-Host';
+  }
+
+  return 'Co-Host';
+}
+
 function isMissingRpcError(error: any): boolean {
   const message = `${error?.message ?? ''} ${error?.details ?? ''} ${error?.hint ?? ''}`.toLowerCase();
   return (
@@ -930,28 +970,34 @@ export async function rejectJoinRequest(requestId: string) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
 
-  const { data, error } = await supabase
-    .from('join_requests')
-    .update({
-      status: 'rejected',
-      reviewed_by: user.id,
-      reviewed_at: new Date().toISOString()
-    })
-    .eq('id', requestId)
-    .select()
-    .single();
+  const { data, error } = await supabase.rpc('reject_join_request', {
+    request_id: requestId,
+  });
 
   if (error) throw error;
+
+  const result = Array.isArray(data) ? data[0] : data;
+  const rejected = result?.rejected === true;
+  const tripId = result?.trip_id;
+  const requesterId = result?.user_id;
+
+  if (!tripId || !requesterId) {
+    throw new Error('Unable to decline request: no RPC result');
+  }
+
+  if (!rejected) {
+    return { trip_id: tripId, user_id: requesterId, rejected: false };
+  }
 
   // Fire email to requester: rejected
   try {
     await supabase.functions.invoke('send-join-status-notification', {
-      body: { tripId: data.trip_id, userId: data.user_id, status: 'rejected' }
+      body: { tripId, userId: requesterId, status: 'rejected' }
     });
   } catch (e) {
     console.warn('Failed to send rejection email', e);
   }
-  return data;
+  return { trip_id: tripId, user_id: requesterId, rejected: true };
 }
 
 export async function fetchJoinRequests(tripId: string) {
@@ -973,97 +1019,92 @@ export async function fetchJoinRequests(tripId: string) {
 }
 
 export async function fetchAllJoinRequestsForUser() {
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
   if (!user) throw new Error('Not authenticated');
 
-  // Hosts and co-hosts (admin trip members) both manage join requests.
-  const [createdTrips, managedMemberships] = await Promise.all([
-    supabase.from('trips').select('id').eq('creator_id', user.id),
-    supabase
-      .from('trip_members')
-      .select('trip_id, role, is_admin')
-      .eq('user_id', user.id)
-      .is('left_at', null),
-  ]);
-
-  if (createdTrips.error && !isSchemaDriftError(createdTrips.error)) throw createdTrips.error;
-  if (managedMemberships.error && !isSchemaDriftError(managedMemberships.error)) throw managedMemberships.error;
-
-  const managedRoles = new Set(['organizer', 'co-host', 'cohost', 'admin', 'host']);
-  const managedTripIds = [
-    ...new Set([
-      ...(createdTrips.data || []).map((trip: any) => trip.id as string),
-      ...(managedMemberships.data || [])
-        .filter((member: any) => member.is_admin === true || managedRoles.has(String(member.role || '').toLowerCase()))
-        .map((member: any) => member.trip_id as string),
-    ]),
-  ];
-
-  if (managedTripIds.length === 0) return [];
-
-  const { data, error } = await supabase
-    .from('join_requests')
+  const { data: managedRequests, error } = await supabase
+    .rpc('get_managed_join_requests')
     .select(`
       *,
-      user:profiles!join_requests_user_id_fkey(id, username, full_name, avatar_url, bio),
-      trip:trips!inner(id, title, cover_image, destination, start_date, end_date, creator_id)
-    `)
-    .in('trip_id', managedTripIds)
-    .order('created_at', { ascending: false });
+      user:profiles!join_requests_user_id_fkey(
+        id,
+        username,
+        full_name,
+        avatar_url,
+        bio
+      ),
+      trip:trips!inner(
+        id,
+        title,
+        cover_image,
+        destination,
+        start_date,
+        end_date,
+        creator_id
+      )
+    `);
 
   if (error) {
     if (isSchemaDriftError(error)) return [];
     throw error;
   }
 
-  // Fetch trip counts for each unique user
-  if (data && data.length > 0) {
-    const userIds = [...new Set(data.map((req: any) => req.user_id))];
-    
-    const tripCounts = await Promise.all(
-      userIds.map(async (userId) => {
-        // Count trips where user is creator
-        const { count: createdCount, error: createdCountError } = await supabase
+  if (!managedRequests?.length) {
+    return [];
+  }
+
+  const userIds = [
+    ...new Set(
+      managedRequests
+        .map((req: any) => req.user_id)
+        .filter(Boolean)
+    ),
+  ];
+
+  const tripCounts = await Promise.all(
+    userIds.map(async (userId) => {
+      const { count: createdCount, error: createdCountError } =
+        await supabase
           .from('trips')
           .select('*', { count: 'exact', head: true })
           .eq('creator_id', userId)
           .eq('status', 'published');
 
-        if (createdCountError && !isSchemaDriftError(createdCountError)) {
-          throw createdCountError;
-        }
+      if (createdCountError && !isSchemaDriftError(createdCountError)) {
+        throw createdCountError;
+      }
 
-        // Count trips where user is a member
-        const { count: memberCount, error: memberCountError } = await supabase
+      const { count: memberCount, error: memberCountError } =
+        await supabase
           .from('trip_members')
           .select('*', { count: 'exact', head: true })
           .eq('user_id', userId)
           .is('left_at', null);
 
-        if (memberCountError && !isSchemaDriftError(memberCountError)) {
-          throw memberCountError;
-        }
-
-        return {
-          userId,
-          count: (createdCount || 0) + (memberCount || 0)
-        };
-      })
-    );
-
-    // Add trip counts to the data
-    const enrichedData = data.map((req: any) => ({
-      ...req,
-      user: {
-        ...req.user,
-        tripsCount: tripCounts.find(tc => tc.userId === req.user_id)?.count || 0
+      if (memberCountError && !isSchemaDriftError(memberCountError)) {
+        throw memberCountError;
       }
-    }));
 
-    return enrichedData;
-  }
+      return {
+        userId,
+        count: (createdCount || 0) + (memberCount || 0),
+      };
+    })
+  );
 
-  return data;
+  return managedRequests.map((req: any) => ({
+    ...req,
+    user: {
+      ...req.user,
+      tripsCount:
+        tripCounts.find(
+          (tc) => tc.userId === req.user_id
+        )?.count || 0,
+    },
+  }));
 }
 
 export interface LeaveTripMemberResult {

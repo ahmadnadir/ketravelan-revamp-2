@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Receipt, Users, User, Upload, CheckCircle, Download, Eye, ZoomIn, ZoomOut, Clock, ImageIcon, Bell, Camera, X, Check, Pencil, Maximize2, ArrowLeft } from "lucide-react";
+import { Receipt, User, Upload, CheckCircle, Download, Eye, ZoomIn, ZoomOut, Clock, Bell, Camera, X, Check, Pencil, Maximize2, ArrowLeft } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -11,11 +11,10 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { ExpenseData } from "@/components/trip-hub/AddExpenseModal";
-import { getCategoryById } from "@/lib/expenseCategories";
+import { ExpenseCategory, getExpenseCategoryCode } from "@/lib/expenseCategories";
 import { ExpensePayment } from "@/data/mockData";
 import { toast } from "@/hooks/use-toast";
 import { PaymentReviewModal } from "./PaymentReviewModal";
@@ -42,6 +41,10 @@ interface ExpenseDetailsModalProps {
   onConfirmPaymentReceived?: (expenseId: string, memberId: string) => void;
   onSubmitPayment?: (expenseId: string, memberId: string, receiptFile?: File, payerNote?: string) => void;
   members: Array<{ id: string; name: string; imageUrl?: string; avatar?: string }>;
+  // When provided, the modal is entered via drill-down navigation (e.g. from a settlement
+  // breakdown) and shows a back arrow instead of the close (X) button.
+  onBack?: () => void;
+  expenseCategories: ExpenseCategory[];
 }
 
 // Mock payment data for each member
@@ -68,8 +71,9 @@ export function ExpenseDetailsModal({
   onSubmitPayment,
   members,
   pairNetAmount,
+  onBack,
+  expenseCategories,
 }: ExpenseDetailsModalProps) {
-  const [activeTab, setActiveTab] = useState<TabType>(initialTab);
   const [zoom, setZoom] = useState(1);
   const [showFullReceipt, setShowFullReceipt] = useState(true);
   const [showFullScreenReceipt, setShowFullScreenReceipt] = useState(false);
@@ -100,6 +104,7 @@ export function ExpenseDetailsModal({
   // Refs for file inputs
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
+  const expenseReceiptInputRef = useRef<HTMLInputElement>(null);
 
   // Avatar cache to prevent Dicebear URL regeneration and blinking
   const avatarCache = useRef<Map<string, string>>(new Map());
@@ -133,8 +138,11 @@ export function ExpenseDetailsModal({
 
   // Reset UI state when modal opens
   const handleOpenChange = (newOpen: boolean) => {
+    if (!newOpen && onBack) {
+      onBack();
+      return;
+    }
     if (newOpen && expense) {
-      setActiveTab(initialTab);
       setUploadedFile(null);
       setUploadPreview(null);
       setUploadNote("");
@@ -150,7 +158,8 @@ export function ExpenseDetailsModal({
 
   if (!expense) return null;
 
-  const category = getCategoryById(expense.category || "Other");
+  const categoryCode = expense.category_code || getExpenseCategoryCode(expense.category) || "other";
+  const category = expenseCategories.find((item) => item.code === categoryCode);
 
   // Generate gender-based default avatar using Notion style (cached to prevent blinking)
   const getDefaultAvatar = (userId: string, gender?: string) => {
@@ -249,6 +258,18 @@ export function ExpenseDetailsModal({
   const handleRemoveFile = () => {
     setUploadedFile(null);
     setUploadPreview(null);
+  };
+
+  // Handle the expense owner attaching their proof-of-purchase receipt
+  const handleAddExpenseReceipt = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    onUploadProof?.(file);
+    toast({
+      title: "Uploading receipt...",
+      description: "Please wait while we upload your receipt.",
+    });
+    e.target.value = "";
   };
 
   // Handle sending payment reminder to specific member
@@ -445,65 +466,61 @@ export function ExpenseDetailsModal({
       <DialogContent className="max-w-md h-[90vh] sm:h-auto sm:max-h-[90vh] w-[calc(100%-2rem)] sm:w-full rounded-2xl p-0 flex flex-col overflow-hidden [&>button]:hidden">
         {/* Fixed Header */}
         <div className="flex-none relative">
-          {/* Custom Close Button */}
-          <button 
-            onClick={() => handleOpenChange(false)}
-            className="absolute top-4 right-4 z-10 h-8 w-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
-          >
-            <X className="h-4 w-4" />
-          </button>
+          {/* Close Button (only when not in drill-down mode) */}
+          {!onBack && (
+            <button 
+              onClick={() => handleOpenChange(false)}
+              className="absolute top-4 right-4 z-10 h-8 w-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
           <DialogHeader className="p-4 pb-0">
             <DialogTitle className="sr-only">{expense.title} Details</DialogTitle>
-            <div className="flex flex-col items-center text-center gap-3">
-              <div className={`h-14 w-14 rounded-xl flex items-center justify-center shrink-0 ${category.color.split(' ')[0]}`}>
-                <span className="text-2xl">{category.emoji}</span>
-              </div>
-              <div className="w-full space-y-2">
-                <p className="text-lg sm:text-base font-semibold text-foreground">{expense.title}</p>
-                {/* Progress bar with amount - under title */}
-                <div className="space-y-2">
-                  <span className={`text-xs font-medium ${paymentProgress === 100 ? "text-stat-green" : "text-amber-600"}`}>
-                    {paymentProgress}% settled · {formatCurrencySpaced(Number(settledAmount.toFixed(2)), displayCurrencyCode)}/{formatCurrencySpaced(Number(totalDisplayAmount.toFixed(2)), displayCurrencyCode)}
-                  </span>
-                  <Progress 
-                    value={paymentProgress} 
-                    className="h-2 max-w-[200px] mx-auto"
-                    autoVariant
-                    animate 
-                  />
+            <div className="flex items-center gap-3">
+              {/* Back arrow, aligned center against the whole icon/title/progress block */}
+              {onBack && (
+                <button
+                  onClick={onBack}
+                  className="h-11 w-11 rounded-full flex items-center justify-center text-foreground hover:bg-secondary transition-colors focus-visible:outline-none focus-visible:ring-0 shrink-0"
+                  aria-label="Back"
+                >
+                  <ArrowLeft className="h-5 w-5" />
+                </button>
+              )}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-3">
+                  <div className="h-11 w-11 sm:h-12 sm:w-12 aspect-square rounded-2xl bg-secondary flex items-center justify-center shrink-0 self-center">
+                    <span className="text-xl sm:text-2xl select-none leading-none flex items-center justify-center">{category?.emoji}</span>
+                  </div>
+                  <div className="flex-1 min-w-0 text-left">
+                    <p className="text-sm sm:text-base font-semibold text-foreground truncate leading-tight">{expense.title}</p>
+                    <p className={`text-[11px] sm:text-xs mt-0.5 truncate ${paymentProgress === 100 ? "text-stat-green" : "text-muted-foreground"}`}>
+                      {paymentProgress}% settled · {formatCurrencySpaced(Number(settledAmount.toFixed(2)), displayCurrencyCode)} of {formatCurrencySpaced(Number(totalDisplayAmount.toFixed(2)), displayCurrencyCode)}
+                    </p>
+                    <div className="mt-1">
+                      <Progress 
+                        value={paymentProgress} 
+                        className="h-1"
+                        autoVariant
+                        animate 
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
           </DialogHeader>
-
-          {/* Fixed Tabs */}
-          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as TabType)} className="w-full">
-            <TabsList className="w-full grid grid-cols-2 mx-4 mt-4 rounded-xl bg-muted/40 border border-border/50 p-1" style={{ width: "calc(100% - 2rem)" }}>
-              <TabsTrigger
-                value="overview"
-                className="text-xs sm:text-sm text-muted-foreground hover:text-foreground/80 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:font-medium data-[state=active]:shadow-sm data-[state=active]:border data-[state=active]:border-border/60"
-              >
-                Overview
-              </TabsTrigger>
-              <TabsTrigger
-                value="payments"
-                className="text-xs sm:text-sm text-muted-foreground hover:text-foreground/80 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:font-medium data-[state=active]:shadow-sm data-[state=active]:border data-[state=active]:border-border/60"
-              >
-                Payments
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
         </div>
 
         {/* Scrollable Content - ONLY this scrolls */}
         <div className="flex-1 overflow-y-auto overscroll-contain scrollbar-hide">
-          <Tabs value={activeTab} className="w-full">
-            {/* Overview Tab */}
-            <TabsContent value="overview" className="p-4 space-y-4 mt-0">
-            {/* Combined: Amount + Paid by in one card */}
+          <div className="p-4 space-y-4">
+            {/* Paid by */}
+            <p className="text-[13px] text-muted-foreground px-0.5">Paid by</p>
             <Card className="p-4 border-border/50">
               <div className="flex items-center gap-3">
-                <Avatar className="h-12 w-12 shrink-0">
+                <Avatar className="h-10 w-10 shrink-0">
                   <AvatarImage 
                     src={payerMember?.imageUrl || payerMember?.avatar || getDefaultAvatar(payerMember?.id || 'unknown')} 
                     alt={expense.paidBy || "Payer"} 
@@ -512,23 +529,99 @@ export function ExpenseDetailsModal({
                 </Avatar>
                 
                 <div className="flex-1 min-w-0">
-                  <p className="text-[13px] sm:text-xs text-muted-foreground">Paid by</p>
-                  <p className="font-medium text-foreground text-[15px] sm:text-sm truncate">{expense.paidBy}</p>
-                  <p className="text-[13px] sm:text-xs text-muted-foreground">{formatDisplayDate(expense.date)}</p>
+                  <p className="font-medium text-foreground text-[14px] truncate">{expense.paidBy}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{formatDisplayDate(expense.date)}</p>
                 </div>
                 
                 <div className="text-right shrink-0 flex items-center">
-                  <p className="text-xl font-bold text-foreground">{formatCurrencySpaced(totalDisplayAmount, displayCurrencyCode)}</p>
+                  <p className="text-[17px] font-medium text-foreground">{formatCurrencySpaced(totalDisplayAmount, displayCurrencyCode)}</p>
                 </div>
               </div>
             </Card>
 
-            {/* Receipts Section (elevated priority) */}
+            {/* Split Breakdown */}
+            <div className="mt-4">
+              <div className="flex items-center justify-between mb-2 px-0.5">
+                <p className="text-[13px] text-muted-foreground">Split breakdown</p>
+                <Badge variant="secondary" className="text-[11px] rounded-full px-2.5">
+                  {expense.splitType === "equal" ? "Equal" : "Custom"}
+                </Badge>
+              </div>
+
+              <Card className="border-border/50 divide-y divide-border/50 overflow-hidden p-0">
+                {splitMembers.map((memberId, memberIndex) => {
+                  const member = getMemberById(memberId);
+                  if (!member) return null;
+
+                  let amount = equalSplitAmount;
+                  if (expense.splitType === "custom" && expense.customSplitAmounts) {
+                    const customAmount = expense.customSplitAmounts.find(c => c.memberId === memberId);
+                    const baseAmount = customAmount?.amount || (expense.amount / memberCount);
+                    if (viewCurrency === "home" && expense.convertedAmountHome && expense.amount > 0) {
+                      const ratio = parseFloat(expense.convertedAmountHome.toString()) / expense.amount;
+                      amount = baseAmount * ratio;
+                    } else {
+                      amount = viewCurrency === "home" ? (totalDisplayAmount / memberCount) : baseAmount;
+                    }
+                  }
+
+                  const isThisMemberPayer = member.name === expense.paidBy;
+                  const memberPayment = memberPayments.find(p => p.memberId === memberId);
+                  const isPaid = isThisMemberPayer || memberPayment?.status === "settled";
+                  const isAwaitingConfirmation = memberPayment?.status === "settled" && !memberPayment?.confirmedByPayer;
+
+                  // Determine status to display
+                  let displayStatus: "pending" | "settled" | "awaiting" = "pending";
+                  if (isThisMemberPayer) {
+                    displayStatus = "settled"; // Payer is always settled
+                  } else if (isAwaitingConfirmation) {
+                    displayStatus = "awaiting"; // Receipt uploaded, awaiting confirmation
+                  } else if (isPaid) {
+                    displayStatus = "settled"; // Confirmed as paid
+                  }
+
+                  const avatarPalette = ["bg-violet-500/15 text-violet-500", "bg-cyan-500/15 text-cyan-500", "bg-orange-500/15 text-orange-500", "bg-pink-500/15 text-pink-500"];
+                  const avatarStyle = avatarPalette[memberIndex % avatarPalette.length];
+
+                  return (
+                    <div key={memberId} className="flex items-center gap-3 px-4 py-3">
+                      <Avatar className="h-8 w-8 shrink-0">
+                        <AvatarImage 
+                          src={member.imageUrl || member.avatar || getDefaultAvatar(member.id)} 
+                          alt={member.name || "Member"} 
+                        />
+                        <AvatarFallback className={`text-[12px] font-medium ${avatarStyle}`}>
+                          {(member.name || "M").split(" ").map(n => n[0]).join("")}
+                        </AvatarFallback>
+                      </Avatar>
+                      <p className="flex-1 min-w-0 text-[14px] text-foreground break-words">{member.name || "Unknown"}</p>
+                      <p className="text-[14px] font-medium text-foreground whitespace-nowrap">
+                        {formatCurrencySpaced(Number(amount.toFixed(2)), displayCurrencyCode)}
+                      </p>
+                      <StatusBadge 
+                        status={displayStatus} 
+                        className="shrink-0"
+                      />
+                    </div>
+                  );
+                })}
+              </Card>
+            </div>
+
+                        {/* Receipts Section (elevated priority) */}
             <div className="mt-4">
               <div className="flex items-center gap-2 mb-2">
                 <Receipt className="h-3.5 w-3.5 text-muted-foreground" />
                 <h3 className="text-[13px] sm:text-xs font-medium text-muted-foreground">Receipts</h3>
               </div>
+
+              <input
+                ref={expenseReceiptInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleAddExpenseReceipt}
+                className="hidden"
+              />
 
               {uploadedReceipts.length > 0 ? (
                 <div className="space-y-3">
@@ -579,6 +672,17 @@ export function ExpenseDetailsModal({
                                 <Maximize2 className="h-3 w-3" />
                                 Expands
                               </Button>
+                              {isPayer && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => expenseReceiptInputRef.current?.click()}
+                                  className="h-7 text-xs gap-1"
+                                >
+                                  <Upload className="h-3 w-3" />
+                                  Replace
+                                </Button>
+                              )}
                             </div>
                           </div>
                           <div className="max-h-[280px] overflow-auto scrollbar-hide">
@@ -629,6 +733,16 @@ export function ExpenseDetailsModal({
                               >
                                 <Download className="h-3.5 w-3.5" />
                               </Button>
+                              {isPayer && (
+                                <Button
+                                  variant="secondary"
+                                  size="icon"
+                                  onClick={() => expenseReceiptInputRef.current?.click()}
+                                  className="h-7 w-7"
+                                >
+                                  <Upload className="h-3.5 w-3.5" />
+                                </Button>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -637,80 +751,22 @@ export function ExpenseDetailsModal({
                   ))}
                 </div>
               ) : (
-                <Card className="p-4 text-center border-border/50">
-                  <ImageIcon className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
-                  <p className="text-[15px] sm:text-sm text-muted-foreground">No receipts uploaded yet</p>
+                <Card className="p-6 text-center border-dashed border-border">
+                  <Receipt className="h-6 w-6 mx-auto text-muted-foreground mb-2" />
+                  <p className="text-[13px] text-muted-foreground mb-3">No receipts uploaded yet.</p>
+                  {isPayer && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 text-[13px]"
+                      onClick={() => expenseReceiptInputRef.current?.click()}
+                    >
+                      <Upload className="h-3.5 w-3.5 mr-1.5" />
+                      Add receipt
+                    </Button>
+                  )}
                 </Card>
               )}
-            </div>
-
-            {/* Split Breakdown */}
-            <div className="mt-4">
-              <div className="flex items-center gap-2 mb-2">
-                <Users className="h-3.5 w-3.5 text-muted-foreground" />
-                <h3 className="text-[13px] sm:text-xs font-medium text-muted-foreground">Split breakdown</h3>
-                <Badge variant="secondary" className="text-[12px] sm:text-[10px] px-1.5">
-                  {expense.splitType === "equal" ? "Equal" : "Custom"}
-                </Badge>
-              </div>
-
-              <div className="space-y-2">
-                {splitMembers.map((memberId) => {
-                  const member = getMemberById(memberId);
-                  if (!member) return null;
-
-                  let amount = equalSplitAmount;
-                  if (expense.splitType === "custom" && expense.customSplitAmounts) {
-                    const customAmount = expense.customSplitAmounts.find(c => c.memberId === memberId);
-                    const baseAmount = customAmount?.amount || (expense.amount / memberCount);
-                    if (viewCurrency === "home" && expense.convertedAmountHome && expense.amount > 0) {
-                      const ratio = parseFloat(expense.convertedAmountHome.toString()) / expense.amount;
-                      amount = baseAmount * ratio;
-                    } else {
-                      amount = viewCurrency === "home" ? (totalDisplayAmount / memberCount) : baseAmount;
-                    }
-                  }
-
-                  const isThisMemberPayer = member.name === expense.paidBy;
-                  const memberPayment = memberPayments.find(p => p.memberId === memberId);
-                  const isPaid = isThisMemberPayer || memberPayment?.status === "settled";
-                  const isAwaitingConfirmation = memberPayment?.status === "settled" && !memberPayment?.confirmedByPayer;
-
-                  // Determine status to display
-                  let displayStatus: "pending" | "settled" | "awaiting" = "pending";
-                  if (isThisMemberPayer) {
-                    displayStatus = "settled"; // Payer is always settled
-                  } else if (isAwaitingConfirmation) {
-                    displayStatus = "awaiting"; // Receipt uploaded, awaiting confirmation
-                  } else if (isPaid) {
-                    displayStatus = "settled"; // Confirmed as paid
-                  }
-
-                  return (
-                    <Card key={memberId} className="p-3 border-border/50">
-                      <div className="flex items-center gap-3">
-                        <Avatar className="h-9 w-9 shrink-0">
-                          <AvatarImage 
-                            src={member.imageUrl || member.avatar || getDefaultAvatar(member.id)} 
-                            alt={member.name || "Member"} 
-                          />
-                          <AvatarFallback className="text-[13px] sm:text-xs">
-                            {(member.name || "M").split(" ").map(n => n[0]).join("")}
-                          </AvatarFallback>
-                        </Avatar>
-                        <p className="flex-1 min-w-0 text-[15px] sm:text-sm font-medium text-foreground break-words">{member.name || "Unknown"}</p>
-                        <p className="text-[15px] sm:text-sm font-semibold text-foreground whitespace-nowrap">
-                          {formatCurrencySpaced(Number(amount.toFixed(2)), displayCurrencyCode)}
-                        </p>
-                        <StatusBadge 
-                          status={displayStatus} 
-                          className="shrink-0"
-                        />
-                      </div>
-                    </Card>
-                  );
-                })}
-              </div>
             </div>
 
             {/* Notes Section */}
@@ -727,427 +783,8 @@ export function ExpenseDetailsModal({
                 </Card>
               </div>
             )}
-
-          </TabsContent>
-
-          {/* Payments Tab */}
-          <TabsContent value="payments" className="p-4 space-y-4 mt-0">
-            {isFullySettled ? (
-              /* Fully Settled State - Show payment history with receipts */
-              <div className="space-y-4">
-                <Card className="p-4 text-center border-border/50 bg-stat-green/5">
-                  <CheckCircle className="h-10 w-10 mx-auto text-stat-green mb-2" />
-                  <p className="font-medium text-foreground text-[15px] sm:text-sm">All payments settled</p>
-                  <p className="text-[15px] sm:text-sm text-muted-foreground mt-1">
-                    Everyone has paid their share for this expense.
-                  </p>
-                </Card>
-
-                {/* Payment History List */}
-                <div className="space-y-2">
-                  <h3 className="text-[15px] sm:text-sm font-medium text-muted-foreground">Payment History</h3>
-                  {splitMembers
-                    .filter(memberId => {
-                      const member = getMemberById(memberId);
-                      return member && member.name !== expense.paidBy;
-                    })
-                    .map((memberId) => {
-                      const member = getMemberById(memberId);
-                      if (!member) return null;
-
-                      let amount = equalSplitAmount;
-                      if (expense.splitType === "custom" && expense.customSplitAmounts) {
-                        const customAmount = expense.customSplitAmounts.find(c => c.memberId === memberId);
-                        const baseAmount = customAmount?.amount || (expense.amount / memberCount);
-                        if (viewCurrency === "home" && expense.convertedAmountHome && expense.amount > 0) {
-                          const ratio = parseFloat(expense.convertedAmountHome.toString()) / expense.amount;
-                          amount = baseAmount * ratio;
-                        } else {
-                          amount = viewCurrency === "home" ? (totalDisplayAmount / memberCount) : baseAmount;
-                        }
-                      }
-
-                      const memberPayment = memberPayments.find(p => p.memberId === memberId);
-
-                      return (
-                        <Card key={memberId} className="p-4 rounded-3xl border border-border/60 bg-white shadow-sm">
-                          <div className="flex items-center gap-3">
-                            <Avatar className="h-10 w-10 shrink-0">
-                              <AvatarImage 
-                                src={member.imageUrl || member.avatar || getDefaultAvatar(member.id)} 
-                                alt={member.name || "Member"} 
-                              />
-                              <AvatarFallback className="text-[13px] sm:text-xs">
-                                {(member.name || "M").split(" ").map(n => n[0]).join("")}
-                              </AvatarFallback>
-                            </Avatar>
-
-                            <div className="min-w-0 flex-1">
-                              <p className="font-medium text-foreground text-sm sm:text-sm truncate">{member.name || "Unknown"}</p>
-                              <p className="text-[15px] font-semibold text-foreground">
-                                {formatCurrencySpaced(Number(amount.toFixed(2)), displayCurrencyCode)}
-                              </p>
-                              <div className="mt-1">
-                                <StatusBadge status="settled" />
-                              </div>
-                            </div>
-
-                            <div className="flex w-[132px] shrink-0 flex-col gap-1.5">
-                              <Button
-                                size="sm"
-                                disabled
-                                className="h-8 rounded-full text-[11px]"
-                              >
-                                <CheckCircle className="h-3.5 w-3.5 mr-1" />
-                                Received
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => {
-                                  setReviewingPayment({
-                                    member,
-                                    payment: memberPayment || { memberId, status: "settled" as const },
-                                    amount
-                                  });
-                                }}
-                                className="h-8 rounded-full border-border bg-white px-4 text-[11px] text-foreground hover:bg-secondary"
-                              >
-                                <Eye className="h-3.5 w-3.5 mr-1" />
-                                Receipt
-                              </Button>
-                            </div>
-                          </div>
-                        </Card>
-                      );
-                    })}
-                </div>
-              </div>
-            ) : isPayer ? (
-              /* Case B: Others owe me - Show pending payments */
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Clock className="h-4 w-4 text-muted-foreground" />
-                      <h3 className="text-[13px] sm:text-sm font-semibold text-foreground">Pending Payments from Others</h3>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleRemindAll}
-                    disabled={isSendingReminder}
-                    className="h-7 text-xs text-muted-foreground"
-                  >
-                    {isSendingReminder ? "Sending..." : "Remind All"}
-                  </Button>
-                </div>
-
-                <div className="space-y-2">
-                  {splitMembers
-                    .filter(memberId => {
-                      const member = getMemberById(memberId);
-                      return member && member.name !== expense.paidBy;
-                    })
-                    .map((memberId) => {
-                      const member = getMemberById(memberId);
-                      if (!member) return null;
-
-                      let amount = equalSplitAmount;
-                      if (expense.splitType === "custom" && expense.customSplitAmounts) {
-                        const customAmount = expense.customSplitAmounts.find(c => c.memberId === memberId);
-                        const baseAmount = customAmount?.amount || (expense.amount / memberCount);
-                        if (viewCurrency === "home" && expense.convertedAmountHome && expense.amount > 0) {
-                          const ratio = parseFloat(expense.convertedAmountHome.toString()) / expense.amount;
-                          amount = baseAmount * ratio;
-                        } else {
-                          amount = viewCurrency === "home" ? (totalDisplayAmount / memberCount) : baseAmount;
-                        }
-                      }
-
-                      const memberPayment = memberPayments.find(p => p.memberId === memberId);
-                      const isSettled = memberPayment?.status === "settled";
-                      const isAwaitingConfirmation = isSettled && !memberPayment?.confirmedByPayer;
-
-                      // Get status badge with updated styling
-                      const getStatusBadge = () => {
-                        if (isAwaitingConfirmation) {
-                          return <StatusBadge status="awaiting" />;
-                        }
-                        return <StatusBadge status={isSettled ? "settled" : "pending"} />;
-                      };
-
-                      return (
-                        <Card key={memberId} className="p-4 rounded-3xl border border-border/60 bg-white shadow-sm">
-                          <div className="flex items-center gap-3">
-                            <Avatar className="h-10 w-10 shrink-0">
-                              <AvatarImage 
-                                src={member.imageUrl || member.avatar || getDefaultAvatar(member.id)} 
-                                alt={member.name || "Member"} 
-                              />
-                              <AvatarFallback className="text-[13px] sm:text-xs">
-                                {(member.name || "M").split(" ").map(n => n[0]).join("")}
-                              </AvatarFallback>
-                            </Avatar>
-
-                            <div className="min-w-0 flex-1">
-                              <p className="font-medium text-foreground text-sm sm:text-sm truncate">{member.name || "Unknown"}</p>
-                              <p className="text-[15px] font-semibold text-foreground">
-                                {formatCurrencySpaced(Number(amount.toFixed(2)), displayCurrencyCode)}
-                              </p>
-                              <div className="mt-1">
-                                {getStatusBadge()}
-                              </div>
-                            </div>
-
-                            <div className="flex w-[132px] shrink-0 flex-col gap-1.5">
-                              <Button
-                                size="sm"
-                                onClick={() => handleMarkMemberSettled(memberId)}
-                                disabled={isSettled}
-                                className="h-8 rounded-full bg-slate-950 text-[11px] text-white hover:bg-black disabled:opacity-50"
-                              >
-                                <CheckCircle className="h-3.5 w-3.5 mr-1" />
-                                Received
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => setReviewingPayment({
-                                  member,
-                                  payment: memberPayment || { memberId, status: "pending" as const },
-                                  amount
-                                })}
-                                className="h-8 rounded-full border-border bg-white text-[11px] text-foreground hover:bg-secondary"
-                              >
-                                <Eye className="h-3.5 w-3.5 mr-1" />
-                                Receipt
-                              </Button>
-                            </div>
-                          </div>
-                        </Card>
-                      );
-                    })}
-                </div>
-              </div>
-            ) : (
-              /* Case A: I owe others - Show my payment status based on state */
-              <div className="space-y-4">
-                {/* Amount Display - Clean centered design */}
-                <div className="bg-muted/50 rounded-2xl p-6 text-center">
-                  <p className="text-[15px] sm:text-sm text-muted-foreground mb-1">Amount</p>
-                  <p className="text-3xl font-bold text-foreground">
-                    {formatCurrencySpaced(Number(currentUserOwesAmount.toFixed(2)), displayCurrencyCode)}
-                  </p>
-                  {typeof pairNetAmount === 'number' && pairNetAmount >= 0 && (
-                    <p className="text-[12px] sm:text-xs text-muted-foreground mt-2">
-                      Net outstanding to {expense.paidBy}: {formatCurrencySpaced(Number(pairNetAmount.toFixed(2)), expense.homeCurrency || 'MYR')}
-                    </p>
-                  )}
-                </div>
-
-                {/* PENDING State - Show upload form (also handles undefined status for users who owe) */}
-                {(!currentUserPayment || currentUserPayment.status === "pending") && !isPayer && (
-                  <div className="space-y-4">
-                    {/* Optional Note */}
-                    <div className="space-y-2">
-                      <label className="text-[15px] sm:text-sm font-medium text-foreground">
-                        Add a note (optional)
-                      </label>
-                      <Textarea
-                        value={uploadNote}
-                        onChange={(e) => setUploadNote(e.target.value)}
-                        placeholder="e.g., Paid via DuitNow"
-                        className="resize-none h-20 rounded-xl text-sm"
-                      />
-                    </div>
-
-                    {/* Receipt Upload */}
-                    <div className="space-y-2">
-                      <label className="text-[15px] sm:text-sm font-medium text-foreground">
-                        Upload Payment Receipt
-                      </label>
-
-                      {uploadPreview ? (
-                        <div className="relative">
-                          <img
-                            src={uploadPreview}
-                            alt="Receipt preview"
-                            className="w-full h-64 object-contain rounded-xl border border-border"
-                          />
-                          <button
-                            onClick={handleRemoveFile}
-                            className="absolute top-2 right-2 p-1.5 bg-background/90 rounded-full hover:bg-background transition-colors"
-                          >
-                            <X className="h-4 w-4 text-foreground" />
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="flex gap-2">
-                          <input
-                            ref={cameraInputRef}
-                            type="file"
-                            accept="image/*"
-                            capture="environment"
-                            onChange={handleFileChange}
-                            className="hidden"
-                          />
-                          <input
-                            ref={fileInputRef}
-                            type="file"
-                            accept="image/*"
-                            onChange={handleFileChange}
-                            className="hidden"
-                          />
-                          <Button
-                            variant="outline"
-                            className="flex-1 h-12 rounded-xl"
-                            onClick={() => cameraInputRef.current?.click()}
-                          >
-                            <Camera className="h-4 w-4 mr-2" />
-                            Camera
-                          </Button>
-                          <Button
-                            variant="outline"
-                            className="flex-1 h-12 rounded-xl"
-                            onClick={() => fileInputRef.current?.click()}
-                          >
-                            <Upload className="h-4 w-4 mr-2" />
-                            Upload
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Confirm Payment Button */}
-                    <Button 
-                      className="w-full h-12 rounded-xl"
-                      onClick={handleSubmitProof}
-                    >
-                      <Check className="h-4 w-4 mr-2" />
-                      Confirm Payment
-                    </Button>
-
-                    <p className="text-[13px] sm:text-xs text-muted-foreground text-center">
-                      {expense.paidBy} will be notified to confirm your payment.
-                    </p>
-                  </div>
-                )}
-                {/* SETTLED State - Final locked state */}
-                {/* AWAITING CONFIRMATION State - For payer to review and confirm */}
-                {currentUserPayment?.status === "settled" && !currentUserPayment?.confirmedByPayer && isPayer && (
-                  <div className="space-y-4">
-                    {/* Status Badge */}
-                    <div className="flex justify-center">
-                      <Badge className="px-4 py-2 text-sm bg-blue-500/10 text-blue-600 border-blue-500/30">
-                        <Clock className="h-4 w-4 mr-2" />
-                        Awaiting Your Confirmation
-                      </Badge>
-                    </div>
-
-                    {/* Payment Summary Card - Read Only */}
-                    <Card className="p-4 border-border/50 bg-muted/30">
-                      {currentUserPayment?.payerNote && (
-                        <div className="mb-3">
-                          <p className="text-[13px] sm:text-xs font-medium text-muted-foreground mb-1">Note</p>
-                          <p className="text-[15px] sm:text-sm text-foreground">{currentUserPayment.payerNote}</p>
-                        </div>
-                      )}
-                      {currentUserPayment?.receiptUrl && (
-                        <div>
-                          <p className="text-[13px] sm:text-xs font-medium text-muted-foreground mb-2">Receipt</p>
-                          <img
-                            src={currentUserPayment.receiptUrl}
-                            alt="Payment receipt"
-                            className="w-full h-64 object-contain rounded-xl border border-border"
-                          />
-                        </div>
-                      )}
-                    </Card>
-
-                    {/* Confirm Payment Button */}
-                    <Button 
-                      className="w-full h-12 rounded-xl"
-                      onClick={() => {
-                        const currentMember = members.find(m => m.name === currentUser);
-                        if (currentMember) {
-                          handleMarkMemberSettled(currentMember.id);
-                        }
-                      }}
-                    >
-                      <CheckCircle className="h-4 w-4 mr-2" />
-                      Confirm Payment Received
-                    </Button>
-
-                    <p className="text-[13px] sm:text-xs text-muted-foreground text-center">
-                      Review the receipt and confirm that you have received the payment.
-                    </p>
-                  </div>
-                )}
-                
-                {/* SETTLED State - Final locked state */}
-                {currentUserPayment?.status === "settled" && currentUserPayment?.confirmedByPayer && (
-                  <div className="space-y-4">
-                    {/* Status Badge */}
-                    <div className="flex justify-center">
-                      <Badge className="px-4 py-2 text-sm bg-stat-green/10 text-stat-green border-stat-green/30">
-                        <CheckCircle className="h-4 w-4 mr-2" />
-                        Settled
-                      </Badge>
-                    </div>
-
-                    {/* Payment Summary Card - Read Only */}
-                    <Card className="p-4 border-border/50 space-y-3">
-                      <div className="flex justify-between items-center">
-                        <span className="text-sm text-muted-foreground">Amount Paid</span>
-                        <span className="text-lg font-bold text-foreground">
-                          {formatCurrencySpaced(Number(currentUserOwesAmount.toFixed(2)), displayCurrencyCode)}
-                        </span>
-                      </div>
-                      
-                      {currentUserPayment.payerNote && (
-                        <div className="space-y-1">
-                          <span className="text-sm text-muted-foreground">Payment Note</span>
-                          <p className="text-sm font-medium text-foreground">{currentUserPayment.payerNote}</p>
-                        </div>
-                      )}
-
-                      {currentUserPayment.confirmedByPayer ? (
-                        <div className="text-xs text-stat-green">
-                          Confirmed by {expense.paidBy}
-                        </div>
-                      ) : (
-                        <div className="text-xs text-muted-foreground">
-                          {expense.paidBy} will review and acknowledge your payment
-                        </div>
-                      )}
-                    </Card>
-
-                    {/* Receipt Preview - Locked */}
-                    {currentUserPayment.receiptUrl && (
-                      <Card className="p-4 border-border/50">
-                        <h4 className="text-sm font-medium text-muted-foreground mb-3">Payment Receipt</h4>
-                        <img 
-                          src={currentUserPayment.receiptUrl} 
-                          alt="Payment receipt" 
-                          className="w-full h-64 object-contain rounded-xl border border-border cursor-pointer hover:opacity-90 transition-opacity"
-                          onClick={() => setShowFullReceipt(true)}
-                        />
-                      </Card>
-                    )}
-
-                    <p className="text-xs text-muted-foreground text-center">
-                      {currentUserPayment.confirmedByPayer 
-                        ? `Payment confirmed by ${expense.paidBy}.`
-                        : `Awaiting confirmation from ${expense.paidBy}.`
-                      }
-                    </p>
-                  </div>
-                )}
-              </div>
-            )}
-          </TabsContent>
-        </Tabs>
-      </div>
+          </div>
+        </div>
 
         {/* Payment Review Modal */}
         <PaymentReviewModal

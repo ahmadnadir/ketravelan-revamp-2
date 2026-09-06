@@ -17,10 +17,11 @@ import { TripNotes } from "@/components/trip-hub/TripNotes";
 import { GroupInfoModal } from "@/components/trip-hub/GroupInfoModal";
 import { ChatPage } from "@/components/chat/ChatPage";
 import { fetchTripConversation } from "@/lib/conversations";
-import { fetchTripDetails } from "@/lib/trips";
+import { fetchTripDetails, resolveMemberRoleLabel } from "@/lib/trips";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import { getLoadErrorFeedback } from "@/lib/requestErrors";
+import { DEFAULT_TRIP_IMAGE, getTripImageUrl } from "@/lib/tripImage";
 
 export default function TripHub() {
   const { id: tripId } = useParams();
@@ -80,22 +81,7 @@ export default function TripHub() {
       setIsLoading(true);
       setError(null);
 
-      const [tripData, convData, membersRes] = await Promise.all([
-        fetchTripDetails(tripId),
-        fetchTripConversation(tripId),
-        supabase
-          .from('trip_members')
-          .select(`
-            id,
-            role,
-            is_admin,
-            user_id,
-            user:profiles(id, username, full_name, avatar_url)
-          `)
-          .eq('trip_id', tripId)
-          .is('left_at', null),
-      ]);
-
+      const tripData = await fetchTripDetails(tripId);
       if (!tripData) {
         setError("Trip not found");
         setTrip(null);
@@ -106,12 +92,30 @@ export default function TripHub() {
         return;
       }
 
+      const activeTripId = tripData.id || tripId;
+
+      const [convData, membersRes] = await Promise.all([
+        fetchTripConversation(activeTripId),
+        supabase
+          .from('trip_members')
+          .select(`
+            id,
+            role,
+            is_admin,
+            user_id,
+            user:profiles(id, username, full_name, avatar_url)
+          `)
+          .eq('trip_id', activeTripId)
+          .is('left_at', null),
+      ]);
+
       setTrip(tripData);
       setConversation(convData);
 
       const { data: tripMembers, error: membersError } = membersRes;
 
       if (!membersError && tripMembers) {
+        const roleInputs = tripMembers.map((m: any) => ({ id: m.user.id, role: m.role, is_admin: m.is_admin }));
         const processedMembers = tripMembers.map((m: any) => ({
           id: m.user.id,
           username: m.user.username,
@@ -119,7 +123,7 @@ export default function TripHub() {
           avatar_url: m.user.avatar_url || `https://api.dicebear.com/7.x/notionists/svg?seed=${m.user.id}`,
           name: m.user.full_name || m.user.username,
           imageUrl: m.user.avatar_url || `https://api.dicebear.com/7.x/notionists/svg?seed=${m.user.id}`,
-          role: m.is_admin ? 'Organizer' : m.role || 'Member',
+          role: resolveMemberRoleLabel(m.user.id, roleInputs, tripData.creator_id),
           isAdmin: Boolean(m.is_admin),
         }));
         setMembers(processedMembers);
@@ -212,13 +216,13 @@ export default function TripHub() {
                 <div className="h-9 w-9 sm:h-10 sm:w-10 rounded-full overflow-hidden shrink-0 border-2 border-background shadow-sm">
                   {displayTrip ? (
                     <img
-                      src={displayTrip.cover_image || displayTrip.imageUrl || "/default-trip-photo.jpeg"}
+                      src={getTripImageUrl(displayTrip.cover_image || displayTrip.imageUrl || DEFAULT_TRIP_IMAGE)}
                       alt={displayTrip.title}
                       className="h-full w-full object-cover"
                       onError={(event) => {
                         const img = event.currentTarget;
-                        if (img.src.endsWith('/default-trip-photo.jpeg')) return;
-                        img.src = '/default-trip-photo.jpeg';
+                        if (img.src.endsWith(DEFAULT_TRIP_IMAGE)) return;
+                        img.src = DEFAULT_TRIP_IMAGE;
                       }}
                     />
                   ) : (

@@ -25,6 +25,7 @@ import { approveReceipt, fetchPendingReceiptApprovalsForUser, markParticipantsAs
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import { CurrencyCode, getCurrencySymbol } from "@/lib/currencyUtils";
+import { DEFAULT_TRIP_IMAGE, getTripImageUrl } from "@/lib/tripImage";
 
 // Types for approvals
 type ApprovalStatus = "pending" | "approved" | "rejected";
@@ -124,6 +125,7 @@ export default function Approvals() {
   const [approvals, setApprovals] = useState<ApprovalItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [processingId, setProcessingId] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const approvalsReturnPath = `${location.pathname}${location.search}`;
 
   const navigateToTripDetails = useCallback((tripId: string) => {
@@ -238,6 +240,13 @@ export default function Approvals() {
   }, [toast]);
 
   useEffect(() => {
+    const loadCurrentUser = async () => {
+      const { supabase } = await import("@/lib/supabase");
+      const { data: { user } } = await supabase.auth.getUser();
+      setCurrentUserId(user?.id || null);
+    };
+
+    loadCurrentUser();
     loadApprovals();
   }, [loadApprovals]);
 
@@ -261,7 +270,11 @@ export default function Approvals() {
   }, [approvals, activeSegment]);
 
   const pendingCount = useMemo(() => {
-    return approvals.filter((item) => item.status === "pending").length;
+    return approvals.filter(
+      (item) =>
+        item.type === "join_request" &&
+        item.status === "pending"
+    ).length;
   }, [approvals]);
 
   const handleApprove = async (id: string, context?: { tripId: string; userId: string }) => {
@@ -288,7 +301,15 @@ export default function Approvals() {
   };
 
   const handleReject = async (id: string) => {
-    await rejectJoinRequest(id);
+    const result = await rejectJoinRequest(id);
+    if (!result.rejected) {
+      await loadApprovals();
+      toast({
+        title: "Request already processed",
+        description: "Another host or co-host already reviewed this request.",
+      });
+      return;
+    }
     setApprovals((prev) =>
       prev.map((item) =>
         item.id === id ? { ...item, status: "rejected" as ApprovalStatus } : item
@@ -298,6 +319,7 @@ export default function Approvals() {
       title: "Request declined",
       description: "The join request has been declined.",
     });
+    await loadApprovals();
   };
 
   // Unified handlers to match new UI API while preserving existing integrations
@@ -477,89 +499,145 @@ export default function Approvals() {
     }
   };
 
-  const renderJoinRequest = (item: JoinRequest) => (
-    <Card key={item.id} className="p-4 space-y-4">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          {getTypeIcon(item.type)}
-          <span>{getTypeLabel(item.type)}</span>
-          <span>•</span>
-          <span>{item.requestedAt}</span>
-        </div>
-        {item.status !== "pending" && getStatusBadge(item.status)}
-      </div>
+  const renderJoinRequest = (item: JoinRequest) => {
+    const isRequester = currentUserId === item.requester.id;
+    const isReviewer = !isRequester;
 
-      {/* Trip Info */}
-      <div 
-        className="flex items-center gap-3 p-2 -mx-2 rounded-lg hover:bg-secondary/50 cursor-pointer transition-colors"
-        onClick={() => navigateToTripDetails(item.tripId)}
-      >
-        <img 
-          src={item.tripImage} 
-          alt={item.tripTitle}
-          className="w-12 h-12 rounded-lg object-cover"
-        />
-        <div className="flex-1 min-w-0">
-          <p className="font-medium text-sm text-foreground truncate">{item.tripTitle}</p>
-          <div className="flex items-center gap-1 text-xs text-muted-foreground">
-            <Calendar className="h-3 w-3" />
-            <span>{item.tripDate}</span>
+    return (
+      <Card key={item.id} className="p-4 space-y-4">
+        {/* Header */}
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground min-w-0">
+            {getTypeIcon(item.type)}
+            <span>{getTypeLabel(item.type)}</span>
+            <span>•</span>
+            <span>{item.requestedAt}</span>
           </div>
-        </div>
-        <ChevronRight className="h-4 w-4 text-muted-foreground" />
-      </div>
 
-      {/* Requester Info */}
-      <div className="flex items-start gap-3">
-        <Avatar className="h-10 w-10">
-          <AvatarImage src={getAvatarUrl(item.requester.name, item.requester.imageUrl)} />
-          <AvatarFallback>{item.requester.name.charAt(0)}</AvatarFallback>
-        </Avatar>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <p className="font-medium text-sm">{item.requester.name}</p>
-            <Badge variant="secondary" className="text-xs">
-              {item.requester.tripsCount} trips
+          <div className="flex items-center gap-2 shrink-0">
+            {/* Request Direction */}
+            <Badge
+              variant="outline"
+              className={
+                isRequester
+                  ? "text-xs font-medium"
+                  : "text-xs font-medium"
+              }
+            >
+              {isRequester ? "Request" : "Review"}
             </Badge>
+
+            {/* Status */}
+            {item.status !== "pending" && getStatusBadge(item.status)}
           </div>
-          <p className="text-xs text-muted-foreground line-clamp-1">{item.requester.bio}</p>
         </div>
-      </div>
 
-      {/* Message */}
-      {item.message && (
-        <div className="bg-secondary/50 rounded-lg p-3">
-          <p className="text-sm text-foreground">{item.message}</p>
-        </div>
-      )}
+        {/* Trip Info */}
+        <div
+          className="flex items-center gap-3 p-2 -mx-2 rounded-lg hover:bg-secondary/50 cursor-pointer transition-colors"
+          onClick={() => navigateToTripDetails(item.tripId)}
+        >
+          <img
+            src={getTripImageUrl(item.tripImage || DEFAULT_TRIP_IMAGE)}
+            alt={item.tripTitle}
+            className="w-12 h-12 rounded-lg object-cover"
+            onError={(event) => {
+              const img = event.currentTarget;
+              if (img.src.endsWith(DEFAULT_TRIP_IMAGE)) return;
+              img.src = DEFAULT_TRIP_IMAGE;
+            }}
+          />
 
-      {/* Actions */}
-      {item.status === "pending" && (
-        <div className="flex gap-2 pt-1">
-          <Button
-            variant="outline"
-            size="sm"
-            className="flex-1"
-            disabled={processingId === item.id}
-            onClick={() => handleRejectItem(item)}
-          >
-            <X className="h-4 w-4 mr-1" />
-            Decline
-          </Button>
-          <Button
-            size="sm"
-            className="flex-1"
-            disabled={processingId === item.id}
-            onClick={() => handleApproveItem(item)}
-          >
-            <Check className="h-4 w-4 mr-1" />
-            Approve
-          </Button>
+          <div className="flex-1 min-w-0">
+            <p className="font-medium text-sm text-foreground truncate">
+              {item.tripTitle}
+            </p>
+
+            <div className="flex items-center gap-1 text-xs text-muted-foreground">
+              <Calendar className="h-3 w-3" />
+              <span>{item.tripDate}</span>
+            </div>
+          </div>
+
+          <ChevronRight className="h-4 w-4 text-muted-foreground" />
         </div>
-      )}
-    </Card>
-  );
+
+        {/* Requester Info */}
+        <div className="flex items-start gap-3">
+          <Avatar className="h-10 w-10">
+            <AvatarImage
+              src={getAvatarUrl(
+                item.requester.name,
+                item.requester.imageUrl
+              )}
+            />
+
+            <AvatarFallback>
+              {item.requester.name.charAt(0)}
+            </AvatarFallback>
+          </Avatar>
+
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <p className="font-medium text-sm">
+                {item.requester.name}
+              </p>
+
+              <Badge variant="secondary" className="text-xs">
+                {item.requester.tripsCount} trips
+              </Badge>
+            </div>
+
+            <p className="text-xs text-muted-foreground line-clamp-1">
+              {item.requester.bio}
+            </p>
+          </div>
+        </div>
+
+        {/* Message */}
+        {item.message && (
+          <div className="bg-secondary/50 rounded-lg p-3">
+            <p className="text-sm text-foreground">
+              {item.message}
+            </p>
+          </div>
+        )}
+
+        {/* Actions */}
+        {item.status === "pending" && (
+          isRequester ? (
+            <div className="flex items-center justify-center gap-2 pt-1 text-sm text-muted-foreground">
+              <Clock className="h-4 w-4" />
+              <span>Awaiting host approval</span>
+            </div>
+          ) : (
+            <div className="flex gap-2 pt-1">
+              <Button
+                variant="outline"
+                size="sm"
+                className="flex-1"
+                disabled={processingId === item.id}
+                onClick={() => handleRejectItem(item)}
+              >
+                <X className="h-4 w-4 mr-1" />
+                Decline
+              </Button>
+
+              <Button
+                size="sm"
+                className="flex-1"
+                disabled={processingId === item.id}
+                onClick={() => handleApproveItem(item)}
+              >
+                <Check className="h-4 w-4 mr-1" />
+                Approve
+              </Button>
+            </div>
+          )
+        )}
+      </Card>
+    );
+  };
 
   const renderTripInvite = (item: TripInvite) => (
     <Card key={item.id} className="p-4 space-y-4">
@@ -578,9 +656,14 @@ export default function Approvals() {
         onClick={() => navigateToTripDetails(item.tripId)}
       >
         <img
-          src={item.tripImage}
+          src={getTripImageUrl(item.tripImage || DEFAULT_TRIP_IMAGE)}
           alt={item.tripTitle}
           className="w-12 h-12 rounded-lg object-cover"
+          onError={(event) => {
+            const img = event.currentTarget;
+            if (img.src.endsWith(DEFAULT_TRIP_IMAGE)) return;
+            img.src = DEFAULT_TRIP_IMAGE;
+          }}
         />
         <div className="flex-1 min-w-0">
           <p className="font-medium text-sm text-foreground truncate">{item.tripTitle}</p>

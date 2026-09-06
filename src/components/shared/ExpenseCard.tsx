@@ -1,4 +1,4 @@
-import { MoreVertical, Upload, FileText, ArrowLeftRight } from "lucide-react";
+import { MoreVertical, FileText, ArrowLeftRight } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -8,7 +8,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { getCategoryFromTitle } from "@/lib/expenseCategories";
 import { cn } from "@/lib/utils";
 import { formatDisplayDate } from "@/lib/dateUtils";
 import { StatusBadge } from "@/components/shared/StatusBadge";
@@ -16,11 +15,12 @@ import React from "react";
 
 // User role types for expense actions
 type ExpenseRole = "payer" | "owes" | "settled";
-type PaymentStatus = "pending" | "settled";
+type PaymentStatus = "pending" | "settled" | "awaiting";
 
 interface Payment {
   memberId: string;
-  status: PaymentStatus;
+  status: "pending" | "settled";
+  confirmedByPayer?: boolean;
 }
 
 interface ExpenseCardProps {
@@ -168,7 +168,7 @@ export function ExpenseCard({
   const role = getExpenseRole();
 
   // Calculate user's personal share
-  const calculatePersonalShare = (): { amount: number; status: "pending" | "settled" } => {
+  const calculatePersonalShare = (): { amount: number; status: PaymentStatus } => {
     const memberCount = splitWith?.length || 1;
     
     // Calculate amount
@@ -187,28 +187,20 @@ export function ExpenseCard({
     
     // Determine status from payments array
     const userPayment = payments?.find(p => p.memberId === currentUserId);
-    const status: "pending" | "settled" = userPayment?.status === "settled" ? "settled" : "pending";
+    let status: PaymentStatus = "pending";
+    if (userPayment?.status === "settled") {
+      status = userPayment.confirmedByPayer === false ? "awaiting" : "settled";
+    }
     
     return { amount: shareAmount, status };
   };
 
   const personalShare = calculatePersonalShare();
 
-  // CTA label and icon based on personal share status only (binary)
-  const getButtonConfig = (): { label: string; icon: React.ReactNode } => {
-    if (personalShare.status === "pending") {
-      return { 
-        label: "View & Settle", 
-        icon: <Upload className="h-3.5 w-3.5 mr-1.5" /> 
-      };
-    }
-    return { 
-      label: "View Details", 
-      icon: <FileText className="h-3.5 w-3.5 mr-1.5" /> 
-    };
+  const buttonConfig = { 
+    label: "View Details", 
+    icon: <FileText className="h-3.5 w-3.5 mr-1.5" /> 
   };
-
-  const buttonConfig = getButtonConfig();
 
   // Handle card click (not on button or dropdown)
   const handleCardClick = (e: React.MouseEvent) => {
@@ -328,12 +320,7 @@ export function ExpenseCard({
               e.stopPropagation();
               onPrimaryAction();
             }}
-            className={cn(
-              "w-full h-10 rounded-2xl text-[14px] font-medium transition-all duration-150",
-              personalShare.status === "pending" 
-                ? "bg-foreground text-background hover:bg-foreground/90"
-                : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
-            )}
+            className="w-full h-10 rounded-2xl text-[14px] font-medium transition-all duration-150 bg-foreground text-background hover:bg-foreground/90"
           >
             {buttonConfig.icon}
             {buttonConfig.label}

@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { TripCard } from "@/components/shared/TripCard";
 import { fetchTrips } from "@/lib/trips";
+import { getTripImageUrl } from "@/lib/tripImage";
 
 export function UpcomingAdventuresSection() {
   const [trips, setTrips] = useState<any[]>([]);
@@ -31,7 +32,7 @@ export function UpcomingAdventuresSection() {
           id: trip.id ?? '',
           title: trip.title ?? 'Untitled',
           destination: trip.destination ?? 'Unknown',
-          imageUrl: trip.cover_image || '/default-trip-photo.jpeg',
+          imageUrl: getTripImageUrl(trip.cover_image),
           startDate: trip.start_date || 'TBA',
           endDate: trip.end_date || 'TBA',
           price: trip.price ?? 0,

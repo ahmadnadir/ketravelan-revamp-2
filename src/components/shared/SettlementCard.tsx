@@ -46,11 +46,11 @@ export function SettlementCard({
   const isUserReceiver = currentUserId === toUser.id; // Someone owes me
   return (
     <Card 
-      className="p-4 border-border/50 cursor-pointer hover:border-primary/50 hover:shadow-md active:scale-[0.98] transition-all"
+      className={`p-3 border-border/50 transition-all ${onCardClick ? "cursor-pointer hover:border-primary/50 hover:shadow-md active:scale-[0.98]" : ""}`}
       onClick={onCardClick}
     >
       {/* Top Section: From → To (Compact Context) */}
-      <div className="flex items-center justify-between gap-2 mb-3">
+      <div className="flex items-center justify-between gap-2 mb-2">
         {/* From User */}
         <Link 
           to={`/user/${fromUser.id}`}
@@ -96,7 +96,7 @@ export function SettlementCard({
       </div>
 
       {/* Middle Section: Net Amount (Primary Focus) */}
-      <div className="text-center py-2">
+      <div className="text-center py-1">
         <p className="text-2xl font-bold text-foreground">
           {currency} {formatAmount ? formatAmount(amount) : amount.toLocaleString()}
         </p>
@@ -104,12 +104,12 @@ export function SettlementCard({
       </div>
 
       {/* Status Badge - Centered */}
-      <div className="flex justify-center mb-3">
+      <div className="flex justify-center mb-2">
         <StatusBadge status={status} size="md" className="text-[13px] sm:text-xs px-3.5 sm:px-3 py-1.5 sm:py-1" />
       </div>
 
       {/* Actions - Role-based at bottom */}
-      <div className="flex flex-col gap-2 pt-3 border-t border-border/50">
+      <div className="flex flex-col gap-1.5 pt-2 border-t border-border/50">
         {/* If I OWE someone and PENDING: Show View QR and Upload Receipt */}
         {isUserPayer && status === "pending" && (
           <>
@@ -159,16 +159,16 @@ export function SettlementCard({
           </Button>
         )}
         
-        {/* If someone owes ME and AWAITING: Show View Receipt + Confirm Payment */}
-        {isUserReceiver && status === "awaiting" && receiptAvailable && (
+        {/* If someone owes ME and AWAITING: Show View Details + Confirm Payment */}
+        {isUserReceiver && status === "awaiting" && (
           <Button 
             variant="outline"
             size="sm" 
             className="w-full h-10 text-sm"
-            onClick={(e) => { e.stopPropagation(); onViewReceipt?.(); }}
+            onClick={(e) => { e.stopPropagation(); onViewDetails?.(); }}
           >
             <FileText className="h-4 w-4 mr-2" />
-            View Receipt
+            View Details
           </Button>
         )}
         {isUserReceiver && status === "awaiting" && (

@@ -1,66 +1,52 @@
-import { Car, Bed, Utensils, Ticket, ShoppingBag, Package, LucideIcon } from "lucide-react";
+import { supabase } from "@/lib/supabase";
 
 export interface ExpenseCategory {
   id: string;
-  label: string;
-  icon: LucideIcon;
+  code: string;
+  name: string;
   emoji: string;
-  color: string;
+  description: string | null;
+  sort_order: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
 }
 
-export const expenseCategories: ExpenseCategory[] = [
-  { id: "Transport", label: "Transport", icon: Car, emoji: "🚗", color: "bg-stat-blue text-stat-blue" },
-  { id: "Accommodation", label: "Accommodation", icon: Bed, emoji: "🏨", color: "bg-purple-500/20 text-purple-500" },
-  { id: "Food & Drinks", label: "Food & Drinks", icon: Utensils, emoji: "🍴", color: "bg-stat-orange text-stat-orange" },
-  { id: "Activities", label: "Activities", icon: Ticket, emoji: "🎫", color: "bg-stat-green text-stat-green" },
-  { id: "Shopping", label: "Shopping", icon: ShoppingBag, emoji: "🛍️", color: "bg-pink-500/20 text-pink-500" },
-  { id: "Other", label: "Other", icon: Package, emoji: "📦", color: "bg-secondary text-muted-foreground" },
-];
+export async function fetchExpenseCategories(activeOnly = false): Promise<ExpenseCategory[]> {
+  let query = supabase
+    .from("expense_categories")
+    .select("id, code, name, emoji, description, sort_order, is_active, created_at, updated_at")
+    .order("sort_order", { ascending: true })
+    .order("name", { ascending: true });
 
-export function getCategoryById(categoryId: string): ExpenseCategory {
-  return expenseCategories.find(c => c.id === categoryId) || expenseCategories[expenseCategories.length - 1];
+  if (activeOnly) query = query.eq("is_active", true);
+
+  const { data, error } = await query;
+  if (error) throw error;
+  return data || [];
 }
 
-export function getCategoryEmoji(categoryId: string): string {
-  const category = expenseCategories.find(c => c.id === categoryId);
-  return category?.emoji || "📦";
-}
+// Converts legacy display-name values to the stable database code during migration.
+export function getExpenseCategoryCode(value?: string | null): string | null {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized) return null;
 
-// Category mapping for expense filtering based on title keywords
-const categoryMap: Record<string, string> = {
-  "Ferry": "Transport",
-  "Rental": "Transport",
-  "car": "Transport",
-  "taxi": "Transport",
-  "flight": "Transport",
-  "bus": "Transport",
-  "train": "Transport",
-  "dinner": "Food & Drinks",
-  "lunch": "Food & Drinks",
-  "breakfast": "Food & Drinks",
-  "restaurant": "Food & Drinks",
-  "food": "Food & Drinks",
-  "cafe": "Food & Drinks",
-  "coffee": "Food & Drinks",
-  "Accommodation": "Accommodation",
-  "hotel": "Accommodation",
-  "resort": "Accommodation",
-  "hostel": "Accommodation",
-  "airbnb": "Accommodation",
-  "Bridge": "Activities",
-  "ticket": "Activities",
-  "tour": "Activities",
-  "activity": "Activities",
-  "museum": "Activities",
-  "shopping": "Shopping",
-  "souvenir": "Shopping",
-  "gift": "Shopping",
-};
+  const legacyCodes: Record<string, string> = {
+    transport: "transport",
+    transportation: "transport",
+    accommodation: "accommodation",
+    food: "food_and_drinks",
+    "food & drinks": "food_and_drinks",
+    "food and drinks": "food_and_drinks",
+    activities: "activities",
+    activity: "activities",
+    shopping: "shopping",
+    flight: "flight",
+    "equipment rentals": "equipment_rentals",
+    equipment_rental: "equipment_rentals",
+    equipment_rentals: "equipment_rentals",
+    other: "other",
+  };
 
-export function getCategoryFromTitle(title: string): string {
-  const lowerTitle = title.toLowerCase();
-  for (const [keyword, category] of Object.entries(categoryMap)) {
-    if (lowerTitle.includes(keyword.toLowerCase())) return category;
-  }
-  return "Other";
+  return legacyCodes[normalized] || normalized;
 }

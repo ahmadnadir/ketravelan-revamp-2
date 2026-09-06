@@ -59,7 +59,7 @@ export function SocialLinkBlock({ block, onUpdate }: SocialLinkBlockProps) {
           href={block.url}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-sm text-primary hover:underline flex items-center gap-1"
+          className="text-sm text-blue-600 hover:text-blue-700 underline flex items-center gap-1"
         >
           {selectedPlatform && <selectedPlatform.icon className="h-4 w-4" />}
           View on {selectedPlatform?.label || "platform"}

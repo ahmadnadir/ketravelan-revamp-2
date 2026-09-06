@@ -70,6 +70,55 @@ function escapeHtml(v: string) {
     .replaceAll("'", "&#39;");
 }
 
+// Static fallback rates TO MYR, mirrored from src/lib/currencyUtils.ts, used only when an
+// expense has no stored fx_rate_to_home / converted_amount_home for the target home currency.
+const FALLBACK_RATES_TO_MYR: Record<string, number> = {
+  MYR: 1,
+  USD: 4.04,
+  EUR: 4.66,
+  IDR: 0.000237,
+  BND: 3.17,
+  SAR: 1.09,
+  SGD: 3.14,
+  THB: 0.123,
+  VND: 0.000183,
+  PHP: 0.0667,
+  CNY: 0.586,
+  HKD: 0.515,
+  GBP: 5.34,
+  AUD: 2.78,
+  CAD: 2.91,
+  JPY: 0.0253,
+  KRW: 0.00266,
+};
+
+function fallbackConvert(amount: number, fromCurrency: string, toCurrency: string): number {
+  if (!fromCurrency || !toCurrency || fromCurrency === toCurrency) return amount;
+  const fromRate = FALLBACK_RATES_TO_MYR[fromCurrency];
+  const toRate = FALLBACK_RATES_TO_MYR[toCurrency];
+  if (!fromRate || !toRate) return amount;
+  return (amount * fromRate) / toRate;
+}
+
+// Converts a participant's owed share (in the expense's own currency) into the trip's home
+// currency, reusing the expense's stored conversion rate when it is still valid for that
+// home currency, and falling back to a fresh conversion otherwise. Never sums raw cross-currency amounts.
+function convertShareToHomeCurrency(
+  expense: { currency: string; amount: number; home_currency?: string | null; fx_rate_to_home?: number | null },
+  amountOwed: number,
+  homeCurrency: string
+): number {
+  const expenseCurrency = expense.currency;
+  if (expenseCurrency === homeCurrency) return amountOwed;
+
+  const rate = Number(expense.fx_rate_to_home);
+  if (expense.home_currency === homeCurrency && Number.isFinite(rate) && rate > 0) {
+    return amountOwed * rate;
+  }
+
+  return fallbackConvert(amountOwed, expenseCurrency, homeCurrency);
+}
+
 async function sendResendRawEmail(opts: { to: string; subject: string; html: string; text?: string }) {
   const payload: Record<string, unknown> = {
     from: RESEND_FROM,
@@ -199,10 +248,10 @@ serve(async (req: Request) => {
       });
     }
 
-    // Fetch all expenses in the batch
+    // Fetch all expenses in the batch, including stored currency-conversion data
     const { data: expenses, error: expenseErr } = await admin
       .from("trip_expenses")
-      .select("id, description, amount, currency, trip_id, created_by")
+      .select("id, description, amount, currency, trip_id, created_by, home_currency, fx_rate_to_home, converted_amount_home")
       .in("id", allExpenseIds);
     if (expenseErr) throw expenseErr;
     if (!expenses?.length) throw new Error("Expenses not found");
@@ -212,9 +261,16 @@ serve(async (req: Request) => {
 
     const { data: trip } = await admin
       .from("trips")
-      .select("id, title, slug, cover_image")
+      .select("id, title, slug, cover_image, home_currency, currency_settings")
       .eq("id", tripId)
       .maybeSingle();
+
+    // The settlement total must always be expressed in the trip's home currency
+    const homeCurrency =
+      trip?.home_currency ||
+      (trip?.currency_settings as { home_currency?: string } | null)?.home_currency ||
+      expenses[0].home_currency ||
+      "MYR";
 
     // Fetch payer for the first expense (payer is the creditor in a settlement)
     const { data: payments } = await admin
@@ -236,10 +292,18 @@ serve(async (req: Request) => {
       (participantRows || []).map((r: any) => [r.expense_id, Number(r.amount_owed || 0)])
     );
 
-    // Total settled amount across all expenses
-    const totalAmount = Array.from(participantAmountMap.values()).reduce((s, v) => s + v, 0);
-    // Use the most common currency across expenses
-    const currency = expenses[0].currency;
+    // Convert each expense's share into the home currency individually — never sum raw
+    // cross-currency amounts. Round per-line so the displayed total matches the line items.
+    const homeShareByExpenseId = new Map<string, number>();
+    for (const e of expenses as any[]) {
+      const owed = participantAmountMap.get(e.id) ?? 0;
+      const homeShare = convertShareToHomeCurrency(e, owed, homeCurrency);
+      homeShareByExpenseId.set(e.id, Math.round(homeShare * 100) / 100);
+    }
+
+    // Total settled amount across all expenses, expressed in the trip's home currency
+    const totalAmount = Array.from(homeShareByExpenseId.values()).reduce((s, v) => s + v, 0);
+    const currency = homeCurrency;
 
     const userIds = Array.from(new Set([payerId, body.participantId]));
     const { data: profiles } = await admin
@@ -258,10 +322,16 @@ serve(async (req: Request) => {
     const totalAmountStr = totalAmount.toFixed(2);
     const expenseCount = expenses.length;
 
-    // Build a compact list of expense names for the email body
+    // Build a compact list of expense names for the email body: always show the original
+    // amount/currency, plus the converted home-currency amount when currencies differ.
     const expenseListHtml = expenses.map((e: any) => {
       const share = participantAmountMap.get(e.id) ?? 0;
-      return `<li style="margin:4px 0">${escapeHtml(e.description)} — <strong>${escapeHtml(e.currency)} ${share.toFixed(2)}</strong></li>`;
+      const homeShare = homeShareByExpenseId.get(e.id) ?? share;
+      const original = `${escapeHtml(e.currency)} ${share.toFixed(2)}`;
+      const converted = e.currency !== currency
+        ? ` → <strong>${escapeHtml(currency)} ${homeShare.toFixed(2)}</strong>`
+        : "";
+      return `<li style="margin:4px 0">${escapeHtml(e.description)} — <strong>${original}</strong>${converted}</li>`;
     }).join("");
 
     const sendToUser = async (userId: string, subject: string, messageHtml: string, preheader: string) => {
@@ -282,7 +352,9 @@ serve(async (req: Request) => {
 
       const expenseLines = expenses.map((e: any) => {
         const share = participantAmountMap.get(e.id) ?? 0;
-        return `  • ${e.description} — ${e.currency} ${share.toFixed(2)}`;
+        const homeShare = homeShareByExpenseId.get(e.id) ?? share;
+        const converted = e.currency !== currency ? ` → ${currency} ${homeShare.toFixed(2)}` : "";
+        return `  • ${e.description} — ${e.currency} ${share.toFixed(2)}${converted}`;
       }).join("\n");
       const text = `${subject}\nTrip: ${trip?.title}\n\nExpenses settled:\n${expenseLines}\n\nTotal: ${currency} ${totalAmountStr}\n\nView: ${tripUrl}`;
 

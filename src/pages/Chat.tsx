@@ -22,6 +22,7 @@ import { deleteDirectConversation, profileCache } from "@/lib/conversations";
 import { getLoadErrorFeedback } from "@/lib/requestErrors";
 import { markConversationReadOptimistically } from "@/lib/chatReadService";
 import { getBlockedUsers } from "@/lib/blockUser";
+import { getTripImageUrl } from "@/lib/tripImage";
 
 // Helper to generate fallback avatar
 const getDefaultAvatar = (userId: string) => {
@@ -42,7 +43,7 @@ function mapConversationToChatItem(participant: any, currentUserId?: string) {
   
   if (isTrip) {
     name = conv.trip?.title || conv.name || "Trip Group";
-    imageUrl = conv.trip?.cover_image || "/default-trip-photo.jpeg";
+    imageUrl = getTripImageUrl(conv.trip?.cover_image);
     id = conv.trip_id; // Use trip ID for trip chats - this is needed for TripHub routing
   } else {
     // Direct chat: show the other user's name, fallback to 'Unknown'

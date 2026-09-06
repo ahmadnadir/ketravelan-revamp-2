@@ -15,7 +15,10 @@ export type CurrencyCode =
   | "AUD"
   | "CAD"
   | "JPY"
-  | "KRW";
+  | "KRW"
+  | "KZT"
+  | "KGS"
+  | "EGP";
 
 export interface CurrencyInfo {
   code: CurrencyCode;
@@ -42,6 +45,9 @@ export const currencies: CurrencyInfo[] = [
   { code: "CAD", symbol: "C$", name: "Canadian Dollar", flag: "🇨🇦" },
   { code: "JPY", symbol: "¥", name: "Japanese Yen", flag: "🇯🇵" },
   { code: "KRW", symbol: "₩", name: "South Korean Won", flag: "🇰🇷" },
+  { code: "KZT", symbol: "₸", name: "Kazakhstani Tenge", flag: "🇰🇿" },
+  { code: "KGS", symbol: "сом", name: "Kyrgyzstani Som", flag: "🇰🇬" },
+  { code: "EGP", symbol: "E£", name: "Egyptian Pound", flag: "🇪🇬" },
 ];
 
 // Get currency info by code
@@ -72,6 +78,9 @@ export const conversionRatesToMYR: Record<CurrencyCode, number> = {
   CAD: 2.91,
   JPY: 0.0253,
   KRW: 0.00266,
+  KZT: 0.0089,
+  KGS: 0.048,
+  EGP: 0.084,
 };
 
 // Legacy: rates FROM MYR (for backward compatibility)
@@ -318,6 +327,24 @@ const destinationCurrencyMap: Record<string, CurrencyCode> = {
   'mecca': 'SAR',
   'makkah': 'SAR',
   'medina': 'SAR',
+
+  // Kazakhstan
+  'kazakhstan': 'KZT',
+  'astana': 'KZT',
+  'almaty': 'KZT',
+
+  // Kyrgyzstan
+  'kyrgyzstan': 'KGS',
+  'bishkek': 'KGS',
+
+  // Egypt
+  'egypt': 'EGP',
+  'cairo': 'EGP',
+  'alexandria': 'EGP',
+  'giza': 'EGP',
+  'luxor': 'EGP',
+  'aswan': 'EGP',
+  'sharm el sheikh': 'EGP',
 };
 
 export function suggestCurrencyFromDestination(destination: string): CurrencyCode | null {

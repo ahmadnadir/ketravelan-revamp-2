@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { X, Upload, Receipt, Users, UserCheck, Pencil, Info, Calendar as CalendarIcon, Wallet, Check } from "lucide-react";
-import { expenseCategories } from "@/lib/expenseCategories";
+import { X, Upload, Receipt, Users, UserCheck, Pencil, Info, Calendar as CalendarIcon, Wallet, Check, Plus } from "lucide-react";
+import { ExpenseCategory, getExpenseCategoryCode } from "@/lib/expenseCategories";
 import { 
   CurrencyCode, 
   travelCurrencies, 
@@ -130,6 +130,7 @@ export interface NewExpense {
   title: string;
   amount: number;
   category: string;
+  category_code?: string;
   paidBy: string;
   splitType: "equal" | "custom";
   splitWith: string[];
@@ -147,6 +148,7 @@ export interface NewExpense {
 
 export interface ExpenseData {
   id: string;
+  createdAt?: string;
   title: string;
   amount: number;
   paidBy: string;
@@ -155,6 +157,7 @@ export interface ExpenseData {
   receipt_url?: string;
   paymentProgress?: number;
   category?: string;
+  category_code?: string;
   splitType?: "equal" | "custom";
   splitWith?: string[];
   customSplitAmounts?: CustomSplitAmount[];
@@ -177,6 +180,8 @@ interface AddExpenseModalProps {
   members: Array<{ id: string; name: string; imageUrl?: string; avatar?: string }>;
   homeCurrency?: CurrencyCode;
   allowedCurrencies?: CurrencyCode[];
+  expenseCategories: ExpenseCategory[];
+  expenseCategoriesLoading?: boolean;
 }
 
 export function AddExpenseModal({
@@ -189,6 +194,8 @@ export function AddExpenseModal({
   members,
   homeCurrency: tripHomeCurrency,
   allowedCurrencies,
+  expenseCategories,
+  expenseCategoriesLoading = false,
 }: AddExpenseModalProps) {
   const { homeCurrency: authHomeCurrency } = useAuth();
   const homeCurrency: CurrencyCode = tripHomeCurrency || authHomeCurrency || "MYR";
@@ -243,6 +250,18 @@ export function AddExpenseModal({
   const [notes, setNotes] = useState("");
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
+  const [showNotesAndReceipts, setShowNotesAndReceipts] = useState(false);
+  
+  // Member helper memos
+  const currentMember = useMemo(() => {
+    return members.find((m) => m.name === currentUser || m.id === currentUser) || members[0];
+  }, [members, currentUser]);
+
+  const currentUserId = currentMember?.id || "";
+
+  const otherMembers = useMemo(() => {
+    return members.filter((m) => m.id !== currentUserId);
+  }, [members, currentUserId]);
   
   // State for live conversion
   const [conversion, setConversion] = useState<{ amount: number; rate: number; available: boolean }>({ 
@@ -290,6 +309,7 @@ export function AddExpenseModal({
     setNotes("");
     setReceiptFile(null);
     setReceiptPreview(null);
+    setShowNotesAndReceipts(false);
   }, [currentUser, members, getMemberIdByName, getLastUsedCurrency]);
 
   // Load editing expense data
@@ -299,7 +319,7 @@ export function AddExpenseModal({
       setAmount(formatAmountInput(editingExpense.amount.toString()));
       setExpenseDate(parseDateToInput(editingExpense.date));
       setCurrency(editingExpense.originalCurrency || "USD");
-      setCategory(editingExpense.category || "other");
+      setCategory(editingExpense.category_code || getExpenseCategoryCode(editingExpense.category) || "other");
       setPaidBy(getMemberIdByName(editingExpense.paidBy));
       setSplitType(editingExpense.splitType || "equal");
       setSplitWith(editingExpense.splitWith || members.map((m) => m.id));
@@ -308,6 +328,10 @@ export function AddExpenseModal({
       // Load existing receipt if available
       if (editingExpense.receipt_url) {
         setReceiptPreview(editingExpense.receipt_url);
+      }
+
+      if (editingExpense.notes || editingExpense.receipt_url) {
+        setShowNotesAndReceipts(true);
       }
       
       // Load custom amounts if available
@@ -413,6 +437,7 @@ export function AddExpenseModal({
       title: title.trim(),
       amount: parseAmountInput(amount),
       category,
+      category_code: category,
       paidBy: getMemberNameById(paidBy),
       splitType,
       splitWith,
@@ -450,6 +475,57 @@ export function AddExpenseModal({
     ? Math.min((totalCustomAmount / totalAmount) * 100, 100)
     : 0;
 
+  const allSelected = members.length > 0 && splitWith.length === members.length;
+  const noneSelected = splitWith.length === 0;
+
+  const settlementSummary = useMemo(() => {
+    if (splitWith.length === 0 || totalAmount <= 0) {
+      return { text: "Nothing to settle yet", colorClass: "text-muted-foreground" };
+    }
+
+    const userIsPayer = paidBy === currentUserId;
+    const userInSplit = splitWith.includes(currentUserId);
+    const payerName = getMemberNameById(paidBy);
+
+    let userShare = 0;
+    if (userInSplit) {
+      if (splitType === "custom") {
+        userShare = parseAmountInput(customAmounts[currentUserId] || "0");
+      } else {
+        userShare = totalAmount / splitWith.length;
+      }
+    }
+
+    if (userIsPayer) {
+      const getBack = totalAmount - userShare;
+      if (getBack > 0) {
+        const getBackHome = currency !== homeCurrency && conversion.available
+          ? getBack * conversion.rate
+          : getBack;
+        return {
+          text: `You get back ${formatCurrencySpaced(getBackHome, homeCurrency)}`,
+          colorClass: "text-emerald-600 dark:text-emerald-400 font-semibold"
+        };
+      }
+      return {
+        text: "You paid for yourself",
+        colorClass: "text-muted-foreground"
+      };
+    }
+
+    if (userInSplit) {
+      return {
+        text: `You owe ${payerName} ${getCurrencySymbol(currency)} ${formatAmountDisplay(userShare)}`,
+        colorClass: "text-rose-600 dark:text-rose-400 font-semibold"
+      };
+    }
+
+    return {
+      text: "You're not part of this split",
+      colorClass: "text-muted-foreground"
+    };
+  }, [totalAmount, splitWith, paidBy, currentUserId, splitType, customAmounts, currency, homeCurrency, conversion, getMemberNameById]);
+
   const isValid = 
     title.trim() && 
     totalAmount > 0 && 
@@ -470,11 +546,11 @@ export function AddExpenseModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg sm:max-w-[520px] h-[90vh] sm:h-auto sm:max-h-[90vh] w-[calc(100%-2rem)] sm:w-full rounded-3xl p-0 flex flex-col overflow-hidden [&>button]:hidden">
+      <DialogContent className="max-w-lg sm:max-w-[560px] h-[92vh] sm:h-auto sm:max-h-[92vh] w-[calc(100%-1rem)] sm:w-full rounded-[28px] p-0 flex flex-col overflow-hidden [&>button]:hidden">
         {/* Fixed Header */}
-        <DialogHeader className="flex-none border-b border-border/50 px-6 py-4">
+        <DialogHeader className="flex-none border-b border-border/60 px-5 py-3 sm:px-6">
           <div className="flex items-center justify-between">
-            <DialogTitle className="flex items-center gap-2.5 text-[17px] font-medium">
+            <DialogTitle className="flex items-center gap-2.5 text-lg font-semibold tracking-tight">
               {isEditMode ? (
                 <>
                   <Pencil className="h-5 w-5 text-foreground" strokeWidth={1.75} />
@@ -492,33 +568,33 @@ export function AddExpenseModal({
               aria-label="Close"
               className="h-8 w-8 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 [-webkit-tap-highlight-color:transparent]"
             >
-              <X className="h-4 w-4" />
+              <X className="h-5 w-5" />
             </button>
           </div>
         </DialogHeader>
 
         {/* Scrollable Body */}
-        <div className="flex-1 overflow-y-auto overscroll-contain scrollbar-hide px-6 py-5 space-y-5">
+        <div className="flex-1 overflow-y-auto overscroll-contain scrollbar-hide px-5 py-3 space-y-2.5 sm:px-6">
           {/* Title */}
-          <div className="space-y-1.5">
-            <Label htmlFor="title">Expense title *</Label>
+          <div className="space-y-1">
+            <Label htmlFor="title" className="text-xs font-medium text-foreground">Expense title *</Label>
             <Input
               id="title"
               placeholder="e.g., Group dinner, Ferry tickets"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               maxLength={100}
-              className={cn("h-12 rounded-xl text-[15px]", fieldFocusReset)}
+              className={cn("h-10 rounded-xl text-sm", fieldFocusReset)}
             />
           </div>
 
           {/* Amount with Currency */}
-          <div className="space-y-1.5">
-            <div className="flex gap-2">
-              <div className="flex-1 space-y-2">
-                <Label htmlFor="amount">Amount *</Label>
-                <div className="relative flex h-14 items-center rounded-xl border border-border bg-background px-3.5">
-                  <span className="pointer-events-none text-[15px] text-muted-foreground">
+          {availableCurrencies.length > 1 ? (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label htmlFor="amount" className="text-xs font-medium text-foreground">Amount *</Label>
+                <div className="relative flex h-10 items-center rounded-xl border border-border bg-background px-3">
+                  <span className="pointer-events-none mr-2 shrink-0 border-r border-border pr-2 text-sm font-semibold text-muted-foreground">
                     {getCurrencySymbol(currency)}
                   </span>
                   <Input
@@ -530,106 +606,127 @@ export function AddExpenseModal({
                     onChange={(e) => setAmount(sanitizeAmountInput(e.target.value))}
                     onFocus={() => setAmount((prev) => prev.replace(/,/g, ""))}
                     onBlur={() => setAmount((prev) => formatAmountInput(prev) || prev)}
-                    className={cn("h-full border-0 pl-2 text-lg tabular-nums", fieldFocusReset, "focus:border-transparent focus-visible:border-transparent")}
+                    className={cn("h-full border-0 p-0 text-base font-semibold tabular-nums", fieldFocusReset)}
                   />
                 </div>
               </div>
-              <div className="flex-1 space-y-2">
-                <Label htmlFor="currency-select">Paid in</Label>
+              <div className="space-y-1">
+                <Label htmlFor="currency-select" className="text-xs font-medium text-foreground">Currency</Label>
                 <Select value={currency} onValueChange={handleCurrencyChange}>
-                    <SelectTrigger id="currency-select" className={cn("h-14 rounded-xl", fieldFocusReset)}>
-                    <span className="flex items-center gap-1.5">
-                      <span>{getCurrencySymbol(currency)}</span>
+                  <SelectTrigger id="currency-select" className={cn("h-10 rounded-xl text-sm", fieldFocusReset)}>
+                    <span className="flex items-center gap-1.5 truncate">
+                      <span className="font-semibold">{getCurrencySymbol(currency)}</span>
                       <span>{currency}</span>
                     </span>
                   </SelectTrigger>
                   <SelectContent className="rounded-xl">
                     {availableCurrencies.map((c) => (
-                      <SelectItem key={c.code} value={c.code} className="rounded-lg">
-                        <span className="flex items-center gap-1.5">
-                          <span>{c.symbol}</span>
-                          <span>{c.code}</span>
+                      <SelectItem key={c.code} value={c.code} className="rounded-lg text-xs">
+                        <span className="flex items-center justify-between gap-2 w-full">
+                          <span>{c.symbol} {c.code}</span>
+                          <span className="text-[10px] text-muted-foreground ml-2">
+                            {c.code === homeCurrency ? "home" : "travel"}
+                          </span>
                         </span>
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-                {currency === homeCurrency ? (
-                  <p className="text-[10px] font-medium text-primary">Home</p>
-                ) : (
-                  <p className="text-[10px] font-medium text-muted-foreground">Travel</p>
-                )}
               </div>
             </div>
-            
-            {/* Conversion preview */}
-            {showConversion && isLoadingConversion && (
-              <p className="text-xs text-muted-foreground animate-pulse">
-                Fetching live rate...
-              </p>
-            )}
-            {showConversion && !isLoadingConversion && conversion.available && (
-              <div className="space-y-1">
-                <p className="text-xs text-muted-foreground">
-                  ≈ {formatCurrencySpaced(conversion.amount, homeCurrency)}
-                  <span className="ml-1 text-[10px] text-green-600">● Live rate</span>
-                </p>
-                <p className="text-[10px] leading-relaxed text-muted-foreground">
-                  Live rate for reference only. Rates may vary over time and across providers. Settlement amounts are calculated using the rate shown at the time of entry.
-                </p>
+          ) : (
+            <div className="space-y-1">
+              <Label htmlFor="amount" className="text-xs font-medium text-foreground">Amount *</Label>
+              <div className="relative flex h-10 items-center rounded-xl border border-border bg-background px-3">
+                <span className="pointer-events-none mr-2 shrink-0 border-r border-border pr-2 text-sm font-semibold text-muted-foreground">
+                  {getCurrencySymbol(currency)}
+                </span>
+                <Input
+                  id="amount"
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="0.00"
+                  value={amount}
+                  onChange={(e) => setAmount(sanitizeAmountInput(e.target.value))}
+                  onFocus={() => setAmount((prev) => prev.replace(/,/g, ""))}
+                  onBlur={() => setAmount((prev) => formatAmountInput(prev) || prev)}
+                  className={cn("h-full border-0 p-0 text-base font-semibold tabular-nums", fieldFocusReset)}
+                />
               </div>
-            )}
-            {showConversion && !isLoadingConversion && !conversion.available && (
-              <p className="text-xs text-muted-foreground flex items-center gap-1">
-                <Info className="h-3 w-3" />
-                Conversion unavailable (using fallback)
-              </p>
-            )}
-          </div>
+            </div>
+          )}
+
+          {showConversion && (
+            <div className="-mt-1">
+              {isLoadingConversion ? (
+                <p className="text-[11px] text-muted-foreground animate-pulse">Fetching live rate...</p>
+              ) : conversion.available ? (
+                <div>
+                  <p className="text-xs text-muted-foreground">
+                    ≈ {formatCurrencySpaced(conversion.amount, homeCurrency)}
+                    <span className="ml-1 text-[10px] text-green-600">● Live rate</span>
+                  </p>
+                  <p className="text-[10px] leading-relaxed text-muted-foreground">
+                    Live rate for reference only. Rates may vary over time and across providers. Settlement amounts are calculated using the rate shown at the time of entry.
+                  </p>
+                </div>
+              ) : (
+                <p className="text-[11px] text-muted-foreground flex items-center gap-1">
+                  <Info className="h-3 w-3" />
+                  Conversion unavailable (using fallback)
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Category + Date */}
           <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-2">
-              <Label>Category *</Label>
-              <Select value={category} onValueChange={setCategory}>
-                <SelectTrigger className={cn("h-12 rounded-xl", fieldFocusReset)}>
+            <div className="space-y-1">
+              <Label className="text-xs font-medium text-foreground">Category *</Label>
+              <Select value={category} onValueChange={setCategory} disabled={expenseCategoriesLoading || expenseCategories.length === 0}>
+                <SelectTrigger className={cn("h-10 rounded-xl text-sm", fieldFocusReset)}>
                   {category ? (
-                    <div className="flex min-w-0 flex-1 items-center gap-3 overflow-hidden pr-2">
-                      <span className="flex h-6 w-6 shrink-0 items-center justify-center text-base">
-                        {expenseCategories.find(c => c.id === category)?.emoji}
+                    <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden pr-2">
+                      <span className="text-sm shrink-0">
+                        {expenseCategories.find(c => c.code === category)?.emoji}
                       </span>
                       <span className="min-w-0 flex-1 truncate">
-                        {expenseCategories.find(c => c.id === category)?.label}
+                        {expenseCategories.find(c => c.code === category)?.name}
                       </span>
                     </div>
+                  ) : expenseCategoriesLoading ? (
+                    <span className="text-muted-foreground">Loading categories...</span>
+                  ) : expenseCategories.length === 0 ? (
+                    <span className="text-muted-foreground">No categories available</span>
                   ) : (
                     <span className="text-muted-foreground">Select category</span>
                   )}
                 </SelectTrigger>
                 <SelectContent className="rounded-xl">
                   {expenseCategories.map((cat) => (
-                    <SelectItem key={cat.id} value={cat.id} className="rounded-lg">
+                    <SelectItem key={cat.code} value={cat.code} className="rounded-lg text-xs">
                       <span className="flex items-center gap-2">
-                        <span className="text-base">{cat.emoji}</span>
-                        <span>{cat.label}</span>
+                        <span className="text-sm">{cat.emoji}</span>
+                        <span>{cat.name}</span>
                       </span>
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="expense-date">Date</Label>
+
+            <div className="space-y-1">
+              <Label htmlFor="expense-date" className="text-xs font-medium text-foreground">Date</Label>
               <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
                 <PopoverTrigger asChild>
                   <Button
                     id="expense-date"
                     type="button"
                     variant="outline"
-                    className={cn("h-12 w-full rounded-xl justify-between font-normal", buttonFocusReset)}
+                    className={cn("h-10 w-full rounded-xl justify-between font-normal text-sm", buttonFocusReset)}
                   >
                     <span>{formatDateForDisplay(expenseDate)}</span>
-                    <CalendarIcon className="h-4 w-4 text-muted-foreground" />
+                    <CalendarIcon className="h-3.5 w-3.5 text-muted-foreground" />
                   </Button>
                 </PopoverTrigger>
                 <PopoverContent className="w-auto p-0" align="start">
@@ -649,23 +746,33 @@ export function AddExpenseModal({
           </div>
 
           {/* Paid By */}
-          <div className="space-y-2">
-            <Label>Paid By</Label>
+          <div className="space-y-1">
+            <Label className="text-xs font-medium text-foreground">Paid By</Label>
             <Select value={paidBy} onValueChange={setPaidBy}>
-              <SelectTrigger className={cn("h-12 rounded-xl", fieldFocusReset)}>
-                <SelectValue />
+              <SelectTrigger className={cn("h-10 rounded-xl text-sm", fieldFocusReset)}>
+                <div className="flex items-center gap-2 min-w-0">
+                  <Avatar className="h-5 w-5 shrink-0">
+                    <AvatarImage src={members.find(m => m.id === paidBy)?.imageUrl || members.find(m => m.id === paidBy)?.avatar} />
+                    <AvatarFallback className="text-[10px]">
+                      {getMemberNameById(paidBy).charAt(0)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <span className="truncate">
+                    {paidBy === currentUserId ? `${getMemberNameById(paidBy)} (You)` : getMemberNameById(paidBy)}
+                  </span>
+                </div>
               </SelectTrigger>
               <SelectContent className="rounded-xl">
                 {members.map((member) => (
-                  <SelectItem key={member.id} value={member.id} className="rounded-lg">
+                  <SelectItem key={member.id} value={member.id} className="rounded-lg text-xs">
                     <span className="flex items-center gap-2">
-                      <Avatar className="h-5 w-5">
+                      <Avatar className="h-5 w-5 shrink-0">
                         <AvatarImage src={member.imageUrl || member.avatar} />
                         <AvatarFallback className="text-[10px]">
                           {member.name ? member.name.charAt(0) : "?"}
                         </AvatarFallback>
                       </Avatar>
-                      <span>{member.name || "Unknown"}</span>
+                      <span>{member.id === currentUserId ? `${member.name} (You)` : member.name || "Unknown"}</span>
                     </span>
                   </SelectItem>
                 ))}
@@ -673,255 +780,350 @@ export function AddExpenseModal({
             </Select>
           </div>
 
-          {/* Split Type */}
-          <div className="space-y-1.5">
-            <Label>Split type</Label>
-            <div className="grid grid-cols-2 gap-1 rounded-xl bg-secondary p-1">
+          {/* Split Type Selector */}
+          <div className="space-y-1 pt-0.5">
+            <div className="flex rounded-full bg-secondary/70 p-0.5">
               <Button
                 type="button"
                 variant="ghost"
                 onClick={() => handleSplitTypeChange("equal")}
                 className={cn(
-                  "h-10 rounded-lg text-sm",
+                  "flex-1 h-9 rounded-full text-sm font-medium transition-all",
                   buttonFocusReset,
-                  splitType === "equal" && "bg-background font-medium text-foreground shadow-sm hover:bg-background"
+                  splitType === "equal"
+                    ? "bg-background text-foreground shadow-sm hover:bg-background font-semibold"
+                    : "text-muted-foreground hover:text-foreground"
                 )}
               >
-                <Users className="mr-1.5 h-4 w-4" />
-                Split equally
+                <Users className="mr-1.5 h-3.5 w-3.5" />
+                Equally
               </Button>
               <Button
                 type="button"
                 variant="ghost"
                 onClick={() => handleSplitTypeChange("custom")}
                 className={cn(
-                  "h-10 rounded-lg text-sm",
+                  "flex-1 h-9 rounded-full text-sm font-medium transition-all",
                   buttonFocusReset,
-                  splitType === "custom" && "bg-background font-medium text-foreground shadow-sm hover:bg-background"
+                  splitType === "custom"
+                    ? "bg-background text-foreground shadow-sm hover:bg-background font-semibold"
+                    : "text-muted-foreground hover:text-foreground"
                 )}
               >
-                <UserCheck className="mr-1.5 h-4 w-4" />
-                Custom split
+                <UserCheck className="mr-1.5 h-3.5 w-3.5" />
+                Custom
               </Button>
             </div>
           </div>
 
           {/* Split With Members */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label>Split With ({splitWith.length} selected)</Label>
-              <div className="flex gap-2">
-                <Button
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between gap-3">
+              <Label className="text-sm font-medium text-foreground">Split with ({splitWith.length} selected)</Label>
+              <div className="flex shrink-0 rounded-full bg-secondary p-0.5">
+                <button
                   type="button"
-                  variant="ghost"
-                  size="sm"
                   onClick={handleSelectAll}
-                  className={cn("h-7 text-xs rounded-lg", buttonFocusReset)}
+                  className={cn(
+                    "min-w-12 rounded-full px-3 py-1 text-xs font-medium transition-all cursor-pointer text-center",
+                    allSelected ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                  )}
                 >
                   All
-                </Button>
-                <Button
+                </button>
+                <button
                   type="button"
-                  variant="ghost"
-                  size="sm"
                   onClick={handleDeselectAll}
-                  className={cn("h-7 text-xs rounded-lg", buttonFocusReset)}
+                  className={cn(
+                    "min-w-12 rounded-full px-3 py-1 text-xs font-medium transition-all cursor-pointer text-center",
+                    noneSelected ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                  )}
                 >
                   None
-                </Button>
+                </button>
               </div>
             </div>
-            <div className="border-t border-border/60">
-              {members.map((member) => {
-                const isSelected = splitWith.includes(member.id);
-                const memberShareAmount = splitType === "custom"
-                  ? parseAmountInput(customAmounts[member.id] || "")
-                  : splitWith.length > 0 ? totalAmount / splitWith.length : 0;
-                const memberSharePercentage = totalAmount > 0
-                  ? Math.round((memberShareAmount / totalAmount) * 100)
-                  : null;
 
-                return (
-                  <div
-                    key={member.id}
-                    className="flex items-center gap-2 border-b border-border/50 last:border-b-0"
-                  >
-                  <button
-                    type="button"
-                    role="checkbox"
-                    aria-checked={isSelected}
-                    aria-label={member.name || "Unknown"}
-                    onClick={() => toggleMemberSplit(member.id)}
-                    className="group -ml-2 flex min-h-[60px] min-w-0 flex-1 items-center gap-3 rounded-xl px-2 py-2.5 text-left hover:bg-secondary outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 [-webkit-tap-highlight-color:transparent]"
-                  >
-                    <span className={cn(
-                      "flex h-5 w-5 shrink-0 items-center justify-center rounded-md border-2 text-transparent transition-colors",
-                      isSelected
-                        ? "border-foreground bg-foreground text-background"
-                        : "border-border bg-background group-hover:border-foreground/60"
-                    )}>
-                      <Check className="h-3.5 w-3.5" strokeWidth={3} />
-                    </span>
-                    <Avatar className={cn(
-                      "h-9 w-9 shrink-0 transition-opacity",
-                      !isSelected && "opacity-50"
-                    )}>
-                      <AvatarImage src={member.imageUrl || member.avatar} />
-                      <AvatarFallback className="text-[10px]">
-                        {member.name ? member.name.charAt(0) : "?"}
-                      </AvatarFallback>
-                    </Avatar>
-                    <span className="min-w-0 flex-1">
-                      <span className={cn(
-                        "block truncate text-sm transition-colors",
-                        isSelected ? "font-medium text-foreground" : "text-muted-foreground"
-                      )}>{member.name || "Unknown"}</span>
-                      <span className="block text-xs tabular-nums text-muted-foreground">
-                        {isSelected && memberSharePercentage !== null
-                          ? `${memberSharePercentage}% of total`
-                          : "Not splitting"}
-                      </span>
-                    </span>
-                  </button>
-                  
-                  {isSelected && (
+            {/* "You" row card */}
+            {currentMember && (
+              <div 
+                onClick={() => toggleMemberSplit(currentMember.id)}
+                className={cn(
+                  "rounded-xl border-2 p-2 transition-all cursor-pointer select-none",
+                  splitWith.includes(currentMember.id)
+                    ? "border-foreground/70 bg-background shadow-sm"
+                    : "border-border/60 bg-muted/20 opacity-60 hover:opacity-80"
+                )}
+              >
+                <div className="flex min-h-10 items-center gap-2">
+                  <span className={cn(
+                    "h-4 w-4 rounded-md flex items-center justify-center shrink-0 transition-colors",
+                    splitWith.includes(currentMember.id)
+                      ? "bg-foreground text-background"
+                      : "border-2 border-border bg-background"
+                  )}>
+                    {splitWith.includes(currentMember.id) && <Check className="h-3 w-3" strokeWidth={2.5} />}
+                  </span>
+                  <Avatar className="h-7 w-7 shrink-0">
+                    <AvatarImage src={currentMember.imageUrl || currentMember.avatar} />
+                    <AvatarFallback className="text-[10px] font-medium">
+                      {currentMember.name ? currentMember.name.charAt(0) : "Y"}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-xs font-semibold text-foreground truncate">
+                        You
+                      </p>
+                      {paidBy === currentMember.id && (
+                        <span className="text-[10px] bg-primary text-primary-foreground px-1.5 py-0.2 rounded font-medium shrink-0">
+                          Paid
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      {splitWith.includes(currentMember.id)
+                        ? totalAmount > 0
+                          ? `${Math.round(((splitType === "custom" ? parseAmountInput(customAmounts[currentMember.id] || "") : (splitWith.length > 0 ? totalAmount / splitWith.length : 0)) / totalAmount) * 100)}% of total`
+                          : "0% of total"
+                        : "Not splitting"}
+                    </p>
+                  </div>
+
+                  {splitWith.includes(currentMember.id) && (
                     splitType === "custom" ? (
-                      <div className="flex h-11 w-[132px] shrink-0 items-center gap-1.5 rounded-xl border border-border bg-background px-3" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex h-8 w-[105px] shrink-0 items-center gap-1 rounded-lg border border-border bg-background px-2" onClick={(e) => e.stopPropagation()}>
                         <span className="text-xs text-muted-foreground">{getCurrencySymbol(currency)}</span>
                         <Input
                           type="number"
                           placeholder="0.00"
-                          value={customAmounts[member.id] || ""}
-                          onChange={(e) => handleCustomAmountChange(member.id, e.target.value)}
-                          className="h-full w-full min-w-0 border-0 p-0 text-right text-sm tabular-nums shadow-none outline-none ring-0 transition-none focus:outline-none focus:ring-0 focus:border-transparent focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:border-transparent"
+                          value={customAmounts[currentMember.id] || ""}
+                          onChange={(e) => handleCustomAmountChange(currentMember.id, e.target.value)}
+                          className="h-full w-full min-w-0 border-0 p-0 text-right text-xs tabular-nums shadow-none outline-none ring-0 focus:outline-none focus:ring-0"
                           min="0"
                           step="0.01"
                         />
                       </div>
                     ) : (
-                      <div className="flex h-11 w-[132px] shrink-0 items-center justify-end pr-3">
-                        <span className={cn("text-sm tabular-nums", totalAmount > 0 ? "text-muted-foreground" : "text-border")}>
-                          {totalAmount > 0 ? `${getCurrencySymbol(currency)} ${perPersonAmount}` : "-"}
-                        </span>
-                      </div>
+                      <span className="shrink-0 text-sm font-semibold tabular-nums text-foreground">
+                        {totalAmount > 0 ? `${getCurrencySymbol(currency)} ${perPersonAmount}` : "-"}
+                      </span>
                     )
                   )}
-                  </div>
-                );
-              })}
-            </div>
-            
-            {/* Summary */}
-            {splitWith.length > 0 && totalAmount > 0 && (
-              <div className="space-y-1.5">
-                {splitType === "equal" ? (
-                  <p className="text-[13px] text-muted-foreground">
-                    Each person pays: <span className="font-medium text-foreground">{getCurrencySymbol(currency)} {perPersonAmount}</span>
+                </div>
+              </div>
+            )}
+
+            {/* Other members list */}
+            {otherMembers.length > 0 && (
+              <div className="space-y-1 pt-1">
+                <p className="px-0.5 text-xs font-medium text-muted-foreground">
+                  Other members
+                </p>
+                <div className="rounded-xl border border-border/60 bg-background divide-y divide-border/50 overflow-hidden">
+                  {otherMembers.map((member) => {
+                    const isSelected = splitWith.includes(member.id);
+                    const isPayer = paidBy === member.id;
+                    const memberShare = splitType === "custom"
+                      ? parseAmountInput(customAmounts[member.id] || "")
+                      : (splitWith.length > 0 ? totalAmount / splitWith.length : 0);
+                    const sharePct = totalAmount > 0 ? Math.round((memberShare / totalAmount) * 100) : 0;
+
+                    return (
+                      <div
+                        key={member.id}
+                        onClick={() => toggleMemberSplit(member.id)}
+                        className={cn(
+                          "flex min-h-12 items-center gap-2 px-3 py-1.5 transition-colors cursor-pointer select-none hover:bg-secondary/40",
+                          !isSelected && "opacity-50 bg-muted/20"
+                        )}
+                      >
+                        <span className={cn(
+                          "h-4 w-4 rounded-md flex items-center justify-center shrink-0 transition-colors",
+                          isSelected
+                            ? "bg-foreground text-background"
+                            : "border-2 border-border bg-background"
+                        )}>
+                          {isSelected && <Check className="h-3 w-3" strokeWidth={2.5} />}
+                        </span>
+                        <Avatar className="h-7 w-7 shrink-0">
+                          <AvatarImage src={member.imageUrl || member.avatar} />
+                          <AvatarFallback className="text-[10px]">
+                            {member.name ? member.name.charAt(0) : "?"}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <p className="truncate text-xs font-medium text-foreground">
+                              {member.name}
+                            </p>
+                            {isPayer && (
+                              <span className="text-[10px] bg-primary text-primary-foreground px-1.5 py-0.2 rounded font-medium shrink-0">
+                                Paid
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-muted-foreground">
+                            {isSelected ? `${sharePct}% of total` : "Not splitting"}
+                          </p>
+                        </div>
+
+                        {isSelected && (
+                          splitType === "custom" ? (
+                            <div className="flex h-8 w-[105px] shrink-0 items-center gap-1 rounded-lg border border-border bg-background px-2" onClick={(e) => e.stopPropagation()}>
+                              <span className="text-xs text-muted-foreground">{getCurrencySymbol(currency)}</span>
+                              <Input
+                                type="number"
+                                placeholder="0.00"
+                                value={customAmounts[member.id] || ""}
+                                onChange={(e) => handleCustomAmountChange(member.id, e.target.value)}
+                                className="h-full w-full min-w-0 border-0 p-0 text-right text-xs tabular-nums shadow-none outline-none ring-0 focus:outline-none focus:ring-0"
+                                min="0"
+                                step="0.01"
+                              />
+                            </div>
+                          ) : (
+                            <span className="shrink-0 text-sm font-semibold tabular-nums text-foreground">
+                              {totalAmount > 0 ? `${getCurrencySymbol(currency)} ${perPersonAmount}` : "-"}
+                            </span>
+                          )
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            {/* Custom split progress block */}
+            {splitType === "custom" && totalAmount > 0 && (
+              <div className="rounded-xl bg-secondary/50 p-2.5 space-y-1.5 mt-1">
+                <div className="flex items-baseline justify-between text-xs">
+                  <span className="text-muted-foreground">Assigned</span>
+                  <span className="tabular-nums font-medium text-foreground">
+                    {getCurrencySymbol(currency)} {formatAmountDisplay(totalCustomAmount)}{" "}
+                    <span className="text-muted-foreground font-normal">of {getCurrencySymbol(currency)} {formatAmountDisplay(totalAmount)}</span>
+                  </span>
+                </div>
+                <Progress value={customSplitProgress} className="h-1.5" />
+                <div className="flex items-center justify-between gap-3 text-xs">
+                  <p className={cn(
+                    "tabular-nums font-medium",
+                    Math.abs(customAmountDifference) < 0.01 ? "text-emerald-600 dark:text-emerald-400" : customAmountDifference < 0 ? "text-destructive" : "text-muted-foreground"
+                  )}>
+                    {Math.abs(customAmountDifference) < 0.01
+                      ? <span className="inline-flex items-center gap-1"><Check className="h-3.5 w-3.5" strokeWidth={2.5} />Balanced</span>
+                      : customAmountDifference > 0
+                        ? `${getCurrencySymbol(currency)} ${formatAmountDisplay(customAmountDifference)} remaining to assign`
+                        : `${getCurrencySymbol(currency)} ${formatAmountDisplay(Math.abs(customAmountDifference))} over-assigned`}
                   </p>
-                ) : (
-                  <div className="mt-3 rounded-xl bg-secondary/50 p-3.5">
-                    <div className="mb-2 flex items-baseline justify-between text-[13px]">
-                      <span className="text-muted-foreground">Assigned</span>
-                      <span className="tabular-nums text-foreground">
-                        {getCurrencySymbol(currency)} {formatAmountDisplay(totalCustomAmount)}{" "}
-                        <span className="text-muted-foreground">of {getCurrencySymbol(currency)} {formatAmountDisplay(totalAmount)}</span>
-                      </span>
-                    </div>
-                    <Progress value={customSplitProgress} className="h-1.5" />
-                    <div className="mt-2.5 flex items-center justify-between gap-3">
-                      <p className={cn(
-                        "text-[13px] tabular-nums",
-                        Math.abs(customAmountDifference) < 0.01 ? "text-green-600" : customAmountDifference < 0 ? "text-destructive" : "text-muted-foreground"
-                      )}>
-                        {Math.abs(customAmountDifference) < 0.01
-                          ? <span className="inline-flex items-center gap-1"><Check className="h-3.5 w-3.5" strokeWidth={2.5} />Balanced</span>
-                          : customAmountDifference > 0
-                            ? `${getCurrencySymbol(currency)} ${formatAmountDisplay(customAmountDifference)} remaining to assign`
-                            : `${getCurrencySymbol(currency)} ${formatAmountDisplay(Math.abs(customAmountDifference))} over-assigned`}
-                      </p>
-                      <span className="shrink-0 text-xs font-medium tabular-nums text-muted-foreground">
-                        {Math.round(customSplitProgress)}%
-                      </span>
-                    </div>
-                  </div>
+                  <span className="shrink-0 text-xs font-medium tabular-nums text-muted-foreground">
+                    {Math.round(customSplitProgress)}%
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Collapsible Notes & Receipts */}
+          <div className="pt-0.5">
+            {!showNotesAndReceipts ? (
+              <button
+                type="button"
+                onClick={() => setShowNotesAndReceipts(true)}
+                className="flex items-center gap-1.5 text-xs font-medium text-foreground hover:text-primary transition-colors py-1 outline-none ring-0 cursor-pointer"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                <span>Add notes or receipt</span>
+                {(notes || receiptPreview) && (
+                  <span className="ml-auto text-[10px] bg-primary/10 text-primary px-2 py-0.5 rounded-full font-medium">
+                    Added
+                  </span>
                 )}
-              </div>
-            )}
-          </div>
-
-          {/* Notes */}
-          <div className="space-y-1.5">
-            <Label htmlFor="notes">Notes</Label>
-            <Textarea
-              id="notes"
-              placeholder="Add any additional details..."
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              rows={2}
-              maxLength={500}
-              className={cn("min-h-[80px] resize-none rounded-xl text-[15px]", fieldFocusReset)}
-            />
-          </div>
-
-          {/* Receipt Upload */}
-          <div className="space-y-1.5">
-            <Label>Receipt</Label>
-            {receiptPreview ? (
-              <div className="relative border border-border rounded-xl p-2 bg-secondary/30">
-                <img
-                  src={receiptPreview}
-                  alt="Receipt preview"
-                  className="w-full h-32 object-cover rounded-lg"
-                />
-                <Button
-                  type="button"
-                  variant="destructive"
-                  size="icon"
-                  className={cn("absolute top-3 right-3 h-7 w-7 rounded-lg", buttonFocusReset)}
-                  onClick={handleRemoveReceipt}
-                >
-                  <X className="h-4 w-4" />
-                </Button>
-              </div>
+              </button>
             ) : (
-              <label className="flex h-[72px] cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-border text-muted-foreground hover:bg-secondary/50">
-                <Upload className="h-[18px] w-[18px]" />
-                <span className="text-[13px]">
-                  Attach a photo
-                </span>
-                <input
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={handleReceiptUpload}
-                />
-              </label>
+              <div className="space-y-3.5 rounded-xl border border-border/60 bg-muted/20 p-3.5">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-medium text-foreground/80 flex items-center gap-1.5">
+                    Notes & Receipt
+                  </Label>
+                  <button
+                    type="button"
+                    onClick={() => setShowNotesAndReceipts(false)}
+                    className="text-xs text-muted-foreground hover:text-foreground cursor-pointer"
+                  >
+                    Hide
+                  </button>
+                </div>
+
+                {/* Notes Textarea */}
+                <div className="space-y-1">
+                  <Textarea
+                    id="notes"
+                    placeholder="Add any additional details..."
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    rows={2}
+                    maxLength={500}
+                    className={cn("min-h-[64px] resize-none rounded-xl text-xs bg-background", fieldFocusReset)}
+                  />
+                </div>
+
+                {/* Receipt Upload */}
+                <div className="space-y-1">
+                  {receiptPreview ? (
+                    <div className="relative border border-border rounded-xl p-2 bg-background">
+                      <img
+                        src={receiptPreview}
+                        alt="Receipt preview"
+                        className="w-full h-28 object-cover rounded-lg"
+                      />
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        size="icon"
+                        className={cn("absolute top-3 right-3 h-6 w-6 rounded-lg", buttonFocusReset)}
+                        onClick={handleRemoveReceipt}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <label className="flex h-[60px] cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-border/80 bg-background text-muted-foreground hover:bg-secondary/50 transition-colors">
+                      <Upload className="h-4 w-4" />
+                      <span className="text-xs font-medium">Attach a photo</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={handleReceiptUpload}
+                      />
+                    </label>
+                  )}
+                </div>
+              </div>
             )}
           </div>
-
-          {/* Actions - Fixed Footer */}
         </div>
         
-        <div className="flex-none border-t border-border/50 bg-background px-6 py-4">
-          <div className="mb-3 flex items-center gap-2 text-[13px] text-muted-foreground">
-            <Wallet className="h-[15px] w-[15px]" strokeWidth={1.75} />
-            {splitWith.length > 0 && totalAmount > 0 ? (
+        {/* Actions - Fixed Footer */}
+        <div className="flex-none border-t border-border/50 bg-background px-5 py-2.5 sm:px-6">
+          <div className="mb-1.5 flex items-center justify-between text-xs">
+            <span className="flex items-center gap-1.5 text-muted-foreground">
+              <Wallet className="h-3.5 w-3.5" strokeWidth={1.75} />
               <span>
-                <span className="font-medium tabular-nums text-foreground">
-                  {getCurrencySymbol(currency)} {formatAmountDisplay(totalAmount)}
-                </span>{" "}
-                across {splitWith.length} {splitWith.length === 1 ? "person" : "people"}
-                {splitType === "equal" && <> · {getCurrencySymbol(currency)} {perPersonAmount} each</>}
+                {formatCurrencySpaced(totalAmount, currency)} · split {splitWith.length} {splitWith.length === 1 ? "way" : "ways"}
               </span>
-            ) : (
-              <span>Nothing to settle yet</span>
-            )}
+            </span>
+            <span className={settlementSummary.colorClass}>
+              {settlementSummary.text}
+            </span>
           </div>
-          <div className="flex gap-3">
+
+          <div className="flex gap-2.5">
             <Button
               type="button"
               variant="outline"
-              className={cn("h-12 flex-1 rounded-xl text-[15px] font-medium", buttonFocusReset)}
+              className={cn("h-9 flex-1 rounded-xl text-sm font-medium", buttonFocusReset)}
               onClick={() => {
                 resetForm();
                 onOpenChange(false);
@@ -931,7 +1133,7 @@ export function AddExpenseModal({
             </Button>
             <Button
               type="button"
-              className={cn("h-12 flex-1 rounded-xl text-[15px] font-medium", buttonFocusReset)}
+              className={cn("h-9 flex-1 rounded-xl text-sm font-medium", buttonFocusReset)}
               onClick={handleSubmit}
               disabled={!isValid}
             >

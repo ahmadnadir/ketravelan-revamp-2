@@ -543,7 +543,7 @@ function NoteCard({ note, isPinned, isPending, onClick, onDelete, onTogglePin, f
                     key={`link-${index}`}
                     type="button"
                     onClick={(e) => handlePreviewLinkClick(e, part)}
-                    className="underline decoration-dotted underline-offset-2 text-primary hover:text-primary/80"
+                    className="underline underline-offset-2 text-blue-600 hover:text-blue-700 font-medium"
                   >
                     {part}
                   </button>

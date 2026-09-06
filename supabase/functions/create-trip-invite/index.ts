@@ -181,7 +181,7 @@ function buildInviteEmail(opts: {
 
 async function sendInviteEmail(opts: {
   inviteeEmail: string;
-  inviteeUserId: string;
+  inviteeUserId: string | null;
   inviterId: string;
   tripId: string;
   tripTitle: string;
@@ -193,13 +193,15 @@ async function sendInviteEmail(opts: {
     .eq("id", opts.inviterId)
     .maybeSingle();
 
-  const { data: inviteeProfile } = await admin
-    .from("profiles")
-    .select("email_notifications")
-    .eq("id", opts.inviteeUserId)
-    .maybeSingle();
+  const inviteeProfile = opts.inviteeUserId
+    ? await admin
+      .from("profiles")
+      .select("email_notifications")
+      .eq("id", opts.inviteeUserId)
+      .maybeSingle()
+    : { data: null };
 
-  if (inviteeProfile && inviteeProfile.email_notifications === false) {
+  if (inviteeProfile.data && inviteeProfile.data.email_notifications === false) {
     return { skipped: true, reason: "Email notifications disabled" };
   }
 
@@ -397,18 +399,11 @@ serve(async (req: Request) => {
       });
     }
 
-    if (!inviteeUserId) {
-      return new Response(JSON.stringify({ error: "User not found for this email" }), {
-        status: 404,
-        headers: { "Content-Type": "application/json", ...corsHeaders },
-      });
-    }
-
     const { data: existing } = await admin
       .from("trip_invites")
       .select("id, status")
       .eq("trip_id", body.tripId)
-      .eq("invitee_user_id", inviteeUserId)
+      .ilike("invitee_email", inviteeEmail)
       .in("status", ["pending"]) 
       .maybeSingle();
 
@@ -421,20 +416,22 @@ serve(async (req: Request) => {
         tripTitle: trip.title,
         coverImage: trip.cover_image,
       });
-      await createInviteNotification({
-        inviteeUserId,
-        inviterId,
-        tripId: trip.id,
-        tripTitle: trip.title,
-        inviteId: existing.id,
-      });
-      await sendInvitePush({
-        inviteeUserId,
-        inviterId,
-        tripId: trip.id,
-        tripTitle: trip.title,
-        inviteId: existing.id,
-      });
+      if (inviteeUserId) {
+        await createInviteNotification({
+          inviteeUserId,
+          inviterId,
+          tripId: trip.id,
+          tripTitle: trip.title,
+          inviteId: existing.id,
+        });
+        await sendInvitePush({
+          inviteeUserId,
+          inviterId,
+          tripId: trip.id,
+          tripTitle: trip.title,
+          inviteId: existing.id,
+        });
+      }
       return new Response(JSON.stringify({
         ok: true,
         inviteId: existing.id,
@@ -477,7 +474,7 @@ serve(async (req: Request) => {
       coverImage: trip.cover_image,
     });
 
-    if (inviteRow?.id) {
+    if (inviteRow?.id && inviteeUserId) {
       await createInviteNotification({
         inviteeUserId,
         inviterId,

@@ -39,7 +39,7 @@ const persistLog = (label: string, data: unknown) => {
   }
 };
 
-persistLog('NotificationsSheet loaded', { timestamp: new Date().toISOString() });
+// persistLog('NotificationsSheet loaded', { timestamp: new Date().toISOString() });
 
 // Add global debug function to window
 if (typeof window !== 'undefined') {

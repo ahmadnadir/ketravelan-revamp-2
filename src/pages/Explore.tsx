@@ -24,6 +24,7 @@ import { isDefaultBudgetRange, formatBudgetRange, BudgetRangeSelector } from "@/
 import { useSimulatedLoading } from "@/hooks/useSimulatedLoading";
 import { convertPrice, getCurrencySymbol, getCurrencyInfo, type CurrencyCode } from "@/lib/currencyUtils";
 import { searchLocations, type LocationResult } from "@/lib/locationApi";
+import { getTripImageUrl } from "@/lib/tripImage";
 import { buildDataIdSelector, useListItemRestore } from "@/hooks/useListItemRestore";
 
 const buildDefaultFilters = (): FilterState => ({
@@ -292,7 +293,7 @@ export default function Explore() {
         creatorId: trip.creator_id ?? trip.creator?.id ?? undefined,
         title: trip.title ?? 'Untitled',
         destination: trip.destination ?? 'Unknown',
-        imageUrl: trip.cover_image || '/default-trip-photo.jpeg',
+        imageUrl: getTripImageUrl(trip.cover_image),
         startDate: trip.start_date || 'TBA',
         endDate: trip.end_date || 'TBA',
         rawStartDate: trip.start_date,

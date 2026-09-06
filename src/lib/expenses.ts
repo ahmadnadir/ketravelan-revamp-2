@@ -7,6 +7,7 @@ export interface CreateExpenseData {
   amount: number;
   currency?: string;
   category: string;
+  category_code?: string;
   expense_date: string;
   receipt_url?: string;
   notes?: string;
@@ -27,6 +28,7 @@ export interface UpdateExpenseData {
   description?: string;
   amount?: number;
   category?: string;
+  category_code?: string;
   expense_date?: string;
   notes?: string;
 }
@@ -190,6 +192,35 @@ export async function updateExpense(expenseId: string, updates: UpdateExpenseDat
   const { data, error } = await supabase
     .from('trip_expenses')
     .update(updates)
+    .eq('id', expenseId)
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+// Upload/replace the expense owner's proof-of-purchase receipt and persist the URL
+export async function uploadExpenseReceipt(expenseId: string, file: File) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not authenticated');
+
+  const fileExt = file.name.split('.').pop();
+  const filePath = `receipts/${expenseId}-${Date.now()}.${fileExt}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from('expense-receipts')
+    .upload(filePath, file);
+
+  if (uploadError) throw uploadError;
+
+  const { data: { publicUrl } } = supabase.storage
+    .from('expense-receipts')
+    .getPublicUrl(filePath);
+
+  const { data, error } = await supabase
+    .from('trip_expenses')
+    .update({ receipt_url: publicUrl })
     .eq('id', expenseId)
     .select()
     .single();

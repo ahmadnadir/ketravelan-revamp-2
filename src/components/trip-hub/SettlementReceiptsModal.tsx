@@ -8,7 +8,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { getCategoryById } from "@/lib/expenseCategories";
+import { ExpenseCategory, getExpenseCategoryCode } from "@/lib/expenseCategories";
 
 interface ReceiptData {
   expenseId: string;
@@ -30,6 +30,7 @@ interface SettlementReceiptsModalProps {
   receipts: ReceiptData[];
   onMarkAllPaid: () => void;
   onBack?: () => void;
+  expenseCategories: ExpenseCategory[];
 }
 
 export function SettlementReceiptsModal({
@@ -41,6 +42,7 @@ export function SettlementReceiptsModal({
   receipts,
   onMarkAllPaid,
   onBack,
+  expenseCategories,
 }: SettlementReceiptsModalProps) {
   const [expandedReceipt, setExpandedReceipt] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
@@ -153,7 +155,8 @@ export function SettlementReceiptsModal({
           {receipts.length > 0 ? (
             receipts.map((receipt) => {
               const isExpanded = expandedReceipt === receipt.expenseId;
-              const categoryData = getCategoryById(receipt.category);
+              const categoryCode = getExpenseCategoryCode(receipt.category) || "other";
+              const categoryData = expenseCategories.find((item) => item.code === categoryCode);
               
               return (
                 <Card key={receipt.expenseId} className="overflow-hidden border-border/50">
@@ -187,7 +190,7 @@ export function SettlementReceiptsModal({
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
                           <p className="font-medium text-foreground text-sm truncate flex items-center gap-1.5">
-                            <span>{categoryData.emoji}</span>
+                            <span>{categoryData?.emoji}</span>
                             {receipt.expenseTitle}
                           </p>
                           <p className="text-xs text-muted-foreground mt-0.5">

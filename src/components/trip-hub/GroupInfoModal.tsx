@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { MessageCircle, X, ChevronRight, Shield, LogOut, MoreVertical, Trash2 } from "lucide-react";
+import { DEFAULT_TRIP_IMAGE, getTripImageUrl } from "@/lib/tripImage";
 import { Button } from "@/components/ui/button";
 import { deleteTripPermanently, leaveTripMember } from "@/lib/trips";
 import { supabase } from "@/lib/supabase";
@@ -82,11 +83,11 @@ const DEFAULT_TRIP_SETTINGS: TripSettingsState = {
 function formatDisplayRole(role?: string | null): string {
   if (!role) return "Member";
 
+  // Members prop already carries the resolved label (Host/Co-Host/Member) from
+  // resolveMemberRoleLabel; this only normalises legacy raw DB role strings.
   const normalized = role.trim().toLowerCase();
-  if (normalized === "organizer") return "Host";
-  if (normalized === "co-organizer") return "Co-host";
-  if (normalized === "cohost") return "Co-host";
-  if (normalized === "host") return "Host";
+  if (normalized === "host" || normalized === "organizer") return "Host";
+  if (normalized === "co-host" || normalized === "co-organizer" || normalized === "cohost") return "Co-Host";
   return role;
 }
 
@@ -636,9 +637,14 @@ export function GroupInfoModal({
                     aria-label="View trip details"
                   >
                     <img
-                      src={trip.imageUrl}
+                      src={getTripImageUrl(trip.imageUrl || DEFAULT_TRIP_IMAGE)}
                       alt={trip.title}
                       className="h-full w-full object-cover"
+                      onError={(event) => {
+                        const img = event.currentTarget;
+                        if (img.src.endsWith(DEFAULT_TRIP_IMAGE)) return;
+                        img.src = DEFAULT_TRIP_IMAGE;
+                      }}
                     />
                   </button>
                 </div>

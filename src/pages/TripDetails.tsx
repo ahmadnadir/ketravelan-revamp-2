@@ -54,7 +54,7 @@ import { supabase } from "@/lib/supabase";
 import SafetyNotice from "@/components/trip-details/SafetyNotice";
 import { tripCategories } from "@/data/categories";
 import { cn } from "@/lib/utils";
-import { createJoinRequest, fetchJoinRequests, createTripInvite, cancelTrip, deleteDraftTrip } from "@/lib/trips";
+import { createJoinRequest, fetchJoinRequests, createTripInvite, cancelTrip, deleteDraftTrip, resolveMemberRoleLabel } from "@/lib/trips";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTripDetails, useJoinRequestStatus } from "@/hooks/useTrips";
 import { useQueryClient } from "@tanstack/react-query";
@@ -166,8 +166,7 @@ const parseDescriptionToBullets = (description: string): string[] => {
 };
 
 import { getExpectationIcon, getExpectationLabel } from "@/lib/expectationUtils";
-
-const DEFAULT_TRIP_IMAGE = "/default-trip-photo.jpeg";
+import { DEFAULT_TRIP_IMAGE, getTripImageUrl } from "@/lib/tripImage";
 
 export default function TripDetails() {
   const { id } = useParams();
@@ -458,47 +457,27 @@ export default function TripDetails() {
   // Transform trip members from DB to UI format
   const transformedMembers = useMemo(() => {
     if (dbTrip?.trip_members) {
-      const isAdminMember = (member: any) => {
-        const normalizedRole = String(member?.role || '').toLowerCase();
-        return Boolean(member?.is_admin || normalizedRole === 'organizer' || normalizedRole === 'admin');
-      };
-
       const activeMembers = dbTrip.trip_members.filter((member: any) => !member.left_at);
-      const activeAdmins = activeMembers.filter((member: any) => isAdminMember(member));
-      const hasMultipleAdmins = activeAdmins.length > 1;
-      const firstAdminId = activeAdmins[0]?.user?.id;
+      const roleInputs = activeMembers.map((member: any) => ({
+        id: member.user?.id || '',
+        role: member.role,
+        is_admin: member.is_admin,
+      }));
 
       return activeMembers.map((member: any) => {
         const memberId = member.user?.id || '';
-        const isCreator = String(memberId) === String(dbTrip.creator_id || '');
-
-        let roleLabel = 'Member';
-        if (isAdminMember(member)) {
-          if (isCreator) {
-            roleLabel = 'Host';
-          } else if (hasMultipleAdmins) {
-            roleLabel = 'Co-Host';
-          } else {
-            roleLabel = 'Host';
-          }
-
-          // Fallback when creator is not in the active member list:
-          // first admin is the Host, remaining admins are Co-Host.
-          if (!dbTrip.creator_id && hasMultipleAdmins) {
-            roleLabel = String(memberId) === String(firstAdminId || '') ? 'Host' : 'Co-Host';
-          }
-        }
 
         return {
           id: memberId,
           name: member.user?.full_name || member.user?.username || 'User',
           imageUrl: member.user?.avatar_url || getDefaultAvatar(member.user?.id || member.user?.full_name || 'User'),
-          role: roleLabel,
+          role: resolveMemberRoleLabel(memberId, roleInputs, dbTrip.creator_id),
         };
       });
     }
     return [];
   }, [dbTrip]);
+
 
 
   // Find organizer from members or use creator from database
@@ -1449,7 +1428,7 @@ export default function TripDetails() {
       <Dialog open={lightboxOpen} onOpenChange={setLightboxOpen}>
         <DialogContent className="max-w-4xl w-[95vw] h-[90vh] p-0 overflow-hidden bg-black/95">
           <div
-            className="relative w-full h-full flex items-center justify-center"
+            className="absolute inset-0 flex items-center justify-center"
             onTouchStart={handleLightboxTouchStart}
             onTouchMove={handleLightboxTouchMove}
             onTouchEnd={handleLightboxTouchEnd}
@@ -1462,20 +1441,18 @@ export default function TripDetails() {
               <X className="h-5 w-5 text-white" />
             </button>
             
-            <div className="inline-flex items-center justify-center">
-              <img
-                src={images[lightboxIndex]}
-                alt={`Gallery image ${lightboxIndex + 1}`}
-                onDoubleClick={toggleLightboxZoom}
-                className={cn(
-                  "max-h-[calc(90vh-2rem)] max-w-[calc(95vw-2rem)] object-contain transition-all duration-300 ease-out",
-                  lightboxAnimating
-                    ? (lightboxDirection === 1 ? "opacity-0 translate-x-6" : "opacity-0 -translate-x-6")
-                    : "opacity-100 translate-x-0"
-                )}
-                style={{ transform: `scale(${lightboxScale})` }}
-              />
-            </div>
+            <img
+              src={images[lightboxIndex]}
+              alt={`Gallery image ${lightboxIndex + 1}`}
+              onDoubleClick={toggleLightboxZoom}
+              className={cn(
+                "max-h-[calc(100%-2rem)] max-w-[calc(100%-2rem)] object-contain transition-all duration-300 ease-out",
+                lightboxAnimating
+                  ? (lightboxDirection === 1 ? "opacity-0 translate-x-6" : "opacity-0 -translate-x-6")
+                  : "opacity-100 translate-x-0"
+              )}
+              style={{ transform: `scale(${lightboxScale})` }}
+            />
 
             {images.length > 1 && (
               <>

@@ -36,8 +36,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { mockExpenses as initialMockExpenses, mockMembers } from "@/data/mockData";
 import { toast } from "@/hooks/use-toast";
-import { getCategoryFromTitle } from "@/lib/expenseCategories";
-import { fetchTripExpenses, createExpense, deleteExpense, calculateTripBalances, getWhoOwesWho, fetchTripPaymentMethods, addExpensePayments, markParticipantsAsPaid, uploadPaymentQR, upsertPaymentMethod, uploadReceipt } from "@/lib/expenses";
+import { ExpenseCategory, fetchExpenseCategories, getExpenseCategoryCode } from "@/lib/expenseCategories";
+import { fetchTripExpenses, createExpense, deleteExpense, calculateTripBalances, getWhoOwesWho, fetchTripPaymentMethods, addExpensePayments, markParticipantsAsPaid, uploadPaymentQR, upsertPaymentMethod, uploadReceipt, uploadExpenseReceipt } from "@/lib/expenses";
 import { getTripCurrencySettings, updateTripCurrencySettings, isTripNotificationEnabled } from "@/lib/trips";
 import { supabase } from "@/lib/supabase";
 import { sendSettlementReminder } from "@/lib/settlementReminders";
@@ -46,26 +46,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { ExpenseSettingsSheet } from "./ExpenseSettingSheet";
 import { CurrencyCode, convertToHomeCurrencyLive, getCurrencySymbol } from "@/lib/currencyUtils";
 import { sendSystemMessage } from "@/lib/system-messages";
-
-// Category configuration with colors and emojis
-const CATEGORY_CONFIG: Record<string, { color: string; emoji: string }> = {
-  "Transport": { color: "bg-stat-blue", emoji: "🚗" },
-  "transport": { color: "bg-stat-blue", emoji: "🚗" },
-  "transportation": { color: "bg-stat-blue", emoji: "🚗" },
-  "Food & Drinks": { color: "bg-stat-orange", emoji: "🍴" },
-  "food & drinks": { color: "bg-stat-orange", emoji: "🍴" },
-  "food": { color: "bg-stat-orange", emoji: "🍴" },
-  "Accommodation": { color: "bg-purple-500", emoji: "🏨" },
-  "accommodation": { color: "bg-purple-500", emoji: "🏨" },
-  "Activities": { color: "bg-stat-green", emoji: "🎫" },
-  "activities": { color: "bg-stat-green", emoji: "🎫" },
-  "Shopping": { color: "bg-pink-500", emoji: "🛍️" },
-  "shopping": { color: "bg-pink-500", emoji: "🛍️" },
-  "Entertainment": { color: "bg-yellow-500", emoji: "🎭" },
-  "entertainment": { color: "bg-yellow-500", emoji: "🎭" },
-  "Other": { color: "bg-gray-500", emoji: "📦" },
-  "other": { color: "bg-gray-500", emoji: "📦" },
-};
+import { fetchTripConversation } from "@/lib/conversations";
 
 // Member color palette for contribution charts
 const MEMBER_COLORS = [
@@ -122,6 +103,16 @@ interface Settlement {
   originalCurrency?: CurrencyCode;
   receiptUrl?: string;
 }
+
+const isAwaitingConfirmation = (
+  expense: ExpenseData,
+  payment?: ExpenseData["payments"] extends Array<infer Payment> ? Payment : never,
+  latestExpenseCreatedAt = expense.createdAt,
+) => {
+  if (!payment?.receiptUrl || payment.confirmedByPayer) return false;
+  if (!latestExpenseCreatedAt || !payment.uploadedAt) return true;
+  return new Date(payment.uploadedAt).getTime() > new Date(latestExpenseCreatedAt).getTime();
+};
 
 const calculateNetSettlements = (
   expenses: ExpenseData[], 
@@ -320,6 +311,8 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
   const [balances, setBalances] = useState<any[]>([]);
   const [debts, setDebts] = useState<any[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<any[]>([]);
+  const [expenseCategories, setExpenseCategories] = useState<ExpenseCategory[]>([]);
+  const [isLoadingExpenseCategories, setIsLoadingExpenseCategories] = useState(true);
 
   // Currency settings sheet state
   const [settingsSheetOpen, setSettingsSheetOpen] = useState(false);
@@ -385,6 +378,23 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
     }));
   }, [providedMembers]);
 
+  const loadExpenseCategories = useCallback(async () => {
+    try {
+      setIsLoadingExpenseCategories(true);
+      setExpenseCategories(await fetchExpenseCategories(true));
+    } catch (error) {
+      console.error("Error loading expense categories:", error);
+      toast({
+        title: "Error",
+        description: "Failed to load expense categories",
+        variant: "destructive",
+      });
+      setExpenseCategories([]);
+    } finally {
+      setIsLoadingExpenseCategories(false);
+    }
+  }, []);
+
   const loadExpenses = useCallback(async () => {
     try {
       setIsLoadingExpenses(true);
@@ -430,11 +440,13 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
         
         return {
           id: exp.id,
+          createdAt: exp.created_at,
           title: exp.description,
           amount: Number(exp.amount),
           paidBy: payerProfile?.full_name || payerProfile?.username || 'Unknown',
           date: exp.expense_date,
           category: exp.category,
+          category_code: exp.category_code || getExpenseCategoryCode(exp.category),
           imageUrl: exp.receipt_url,
           receipt_url: exp.receipt_url,
           hasReceipt: !!exp.receipt_url,
@@ -475,6 +487,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
               memberId: p.user_id,
               status,
               receiptUrl,
+              uploadedAt: participantReceipt?.created_at,
               confirmedByPayer: p.is_paid,
             };
           }) || [],
@@ -533,8 +546,9 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
   useEffect(() => {
     loadCurrentUser();
     loadExpenses();
+    loadExpenseCategories();
     loadCurrencySettings();
-  }, [tripId, loadExpenses, loadCurrencySettings]);
+  }, [tripId, loadExpenses, loadExpenseCategories, loadCurrencySettings]);
 
   const loadCurrentUser = async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -683,6 +697,8 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
   const [detailsModalOpen, setDetailsModalOpen] = useState(false);
   const [viewingExpenseDetails, setViewingExpenseDetails] = useState<ExpenseData | null>(null);
   const [initialModalTab, setInitialModalTab] = useState<"overview" | "payments">("overview");
+  // True when the expense detail modal was opened via settlement drill-down navigation
+  const [viewingExpenseFromSettlement, setViewingExpenseFromSettlement] = useState(false);
   
   // Settlement breakdown modal state
   const [breakdownModalOpen, setBreakdownModalOpen] = useState(false);
@@ -691,6 +707,11 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
   // Unified settlement confirmation modal state
   const [settlementConfirmModalOpen, setSettlementConfirmModalOpen] = useState(false);
   const [settlementToConfirm, setSettlementToConfirm] = useState<Settlement | null>(null);
+  // Which modal (if any) the confirm modal was opened from, so the back button can return to it
+  const [confirmModalOrigin, setConfirmModalOrigin] = useState<"breakdown" | "receipts" | null>(null);
+  // Swallows one spurious dismiss on the reopened modal caused by the click that triggered Back
+  const ignoreNextBreakdownDismissRef = useRef(false);
+  const ignoreNextReceiptsDismissRef = useRef(false);
   
   // Settlement receipts modal state
   const [receiptsModalOpen, setReceiptsModalOpen] = useState(false);
@@ -710,7 +731,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
     
     // Sum up amounts by category using selected currency view
     expenses.forEach(expense => {
-      const category = expense.category || "Other";
+      const category = expense.category_code || getExpenseCategoryCode(expense.category) || "other";
       const originalAmount = Number(expense.amount) || 0;
       const homeAmount = Number(expense.convertedAmountHome ?? originalAmount) || 0;
       const addAmount = homeAmount;
@@ -723,14 +744,14 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
     // Transform into array with percentages
     return Object.entries(categoryTotals)
       .map(([category, amount]) => ({
-        category,
+        category: expenseCategories.find((item) => item.code === category)?.name || category,
         amount,
         percentage: total > 0 ? Math.round((amount / total) * 100) : 0,
-        color: CATEGORY_CONFIG[category]?.color || "bg-gray-500",
-        emoji: CATEGORY_CONFIG[category]?.emoji || "📦",
+        categoryCode: category,
+        emoji: expenseCategories.find((item) => item.code === category)?.emoji || "",
       }))
       .sort((a, b) => b.amount - a.amount); // Sort by amount descending
-  }, [expenses]);
+  }, [expenses, expenseCategories]);
 
   // Calculate member contributions from balances (always home currency for summary)
   const memberContributions = useMemo(() => {
@@ -801,7 +822,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
           const key = `${memberId}-${payerId}`;
           const payment = expense.payments?.find((p) => p.memberId === memberId);
           const isSettled = payment?.status === "settled" && !!payment?.confirmedByPayer;
-          const isAwaiting = !!payment?.receiptUrl && !payment?.confirmedByPayer;
+          const isAwaiting = isAwaitingConfirmation(expense, payment);
           const isPending = !isSettled && !isAwaiting;
 
           if (!directionMap.has(key)) {
@@ -929,6 +950,11 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
         expense.payer?.id === fromUserId && expense.splitWith?.includes(toUserId)
       );
 
+      const latestPairExpenseCreatedAt = [...expensesToUserPaid, ...expensesFromUserPaid]
+        .map((expense) => expense.createdAt)
+        .filter((createdAt): createdAt is string => Boolean(createdAt))
+        .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
+
       const isPaymentSettled = (payment?: { status?: string; confirmedByPayer?: boolean }) => {
         return payment?.status === "settled" && !!payment?.confirmedByPayer;
       };
@@ -948,14 +974,14 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
       let receiptUrl: string | undefined;
       const hasAwaitingConfirmation = expensesToUserPaid.some(expense => {
         const payment = expense.payments?.find(p => p.memberId === fromUserId);
-        if (payment?.receiptUrl && !payment?.confirmedByPayer) {
+        if (isAwaitingConfirmation(expense, payment, latestPairExpenseCreatedAt)) {
           receiptUrl = payment.receiptUrl;
           return true;
         }
         return false;
       }) || expensesFromUserPaid.some(expense => {
         const payment = expense.payments?.find(p => p.memberId === toUserId);
-        if (payment?.receiptUrl && !payment?.confirmedByPayer) {
+        if (isAwaitingConfirmation(expense, payment, latestPairExpenseCreatedAt)) {
           receiptUrl = payment.receiptUrl;
           return true;
         }
@@ -1506,35 +1532,21 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
     const storedCategory = typeof expense.category === "string" ? expense.category.trim() : "";
     if (storedCategory) {
       const normalized = storedCategory.toLowerCase();
-      if (normalized === "transport" || normalized === "transportation") return "Transport";
-      if (normalized === "food & drinks" || normalized === "food" || normalized === "food and drinks") return "Food & Drinks";
-      if (normalized === "accommodation") return "Accommodation";
-      if (normalized === "activities") return "Activities";
-      if (normalized === "shopping") return "Shopping";
-      if (normalized === "entertainment") return "Entertainment";
-      if (normalized === "other") return "Other";
-      return storedCategory;
+      return getExpenseCategoryCode(storedCategory) || storedCategory;
     }
 
-    return getCategoryFromTitle(expense.title);
+    return "other";
   }, []);
 
   const normalizeCategoryForFilter = useCallback((value?: string | null): string => {
-    if (!value) return "Other";
+    if (!value) return "other";
 
     const trimmed = value.trim();
-    if (!trimmed) return "Other";
+    if (!trimmed) return "other";
 
     const normalized = trimmed.toLowerCase();
 
-    if (["transport", "transportation"].includes(normalized)) return "Transport";
-    if (["food & drinks", "food and drinks", "food", "food & drink"].includes(normalized)) return "Food & Drinks";
-    if (["accommodation"].includes(normalized)) return "Accommodation";
-    if (["activities", "activity"].includes(normalized)) return "Activities";
-    if (["shopping"].includes(normalized)) return "Shopping";
-    if (["other"].includes(normalized)) return "Other";
-
-    return trimmed;
+    return getExpenseCategoryCode(trimmed) || trimmed;
   }, []);
 
   const filteredExpenses = useMemo(() => {
@@ -1664,7 +1676,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
             date: expense.date,
             shareAmount,
             status,
-            category: expense.category || getCategoryFromTitle(expense.title),
+            category: expense.category_code || getExpenseCategoryCode(expense.category) || "other",
             paidBy: expense.paidBy,
           });
         }
@@ -1690,7 +1702,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
             date: expense.date,
             shareAmount,
             status,
-            category: expense.category || getCategoryFromTitle(expense.title),
+            category: expense.category_code || getExpenseCategoryCode(expense.category) || "other",
             paidBy: expense.paidBy,
           });
         }
@@ -1712,6 +1724,25 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
   // Handler for settlement card click
   const handleSettlementCardClick = (settlement: Settlement) => {
     setSelectedSettlementForBreakdown(settlement);
+    setBreakdownModalOpen(true);
+  };
+
+  // Drill-down: tapping an item inside the settlement breakdown opens its expense detail
+  const handleViewExpenseFromSettlement = (expenseId: string) => {
+    const expense = expenses.find(e => e.id === expenseId);
+    if (!expense) return;
+    setViewingExpenseDetails(expense);
+    setInitialModalTab("overview");
+    setViewingExpenseFromSettlement(true);
+    setBreakdownModalOpen(false);
+    setDetailsModalOpen(true);
+  };
+
+  // Back from the expense detail drill-down returns to the settlement breakdown, always collapsed
+  const handleBackFromExpenseToSettlement = () => {
+    setDetailsModalOpen(false);
+    setViewingExpenseDetails(null);
+    setViewingExpenseFromSettlement(false);
     setBreakdownModalOpen(true);
   };
 
@@ -1816,6 +1847,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
   // Handler for initiating settlement confirmation (direct to unified modal)
   const handleInitiateSettlement = (settlement: Settlement) => {
     setSettlementToConfirm(settlement);
+    setConfirmModalOrigin(null);
     setSettlementConfirmModalOpen(true);
   };
 
@@ -1923,8 +1955,27 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
     if (selectedSettlementForBreakdown) {
       setSettlementToConfirm(selectedSettlementForBreakdown);
       setBreakdownModalOpen(false);
+      setConfirmModalOrigin("breakdown");
       setSettlementConfirmModalOpen(true);
     }
+  };
+
+  // Handler for navigating back from the confirm modal to whichever modal opened it
+  const handleBackFromSettlementConfirm = () => {
+    setSettlementConfirmModalOpen(false);
+    setSettlementToConfirm(null);
+    if (confirmModalOrigin === "breakdown") {
+      // The click that reopens this dialog can be misread by Radix as an outside
+      // interaction, immediately dismissing it; ignore that one spurious close.
+      ignoreNextBreakdownDismissRef.current = true;
+      setBreakdownModalOpen(true);
+      setTimeout(() => { ignoreNextBreakdownDismissRef.current = false; }, 400);
+    } else if (confirmModalOrigin === "receipts") {
+      ignoreNextReceiptsDismissRef.current = true;
+      setReceiptsModalOpen(true);
+      setTimeout(() => { ignoreNextReceiptsDismissRef.current = false; }, 400);
+    }
+    setConfirmModalOrigin(null);
   };
 
   // Handler for viewing settlement receipts
@@ -2011,6 +2062,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
   const handleMarkPaid = (settlement: Settlement) => {
     logSettlementPendingDetails(settlement);
     setSettlementToConfirm(settlement);
+    setConfirmModalOrigin(null);
     setSettlementConfirmModalOpen(true);
   };
 
@@ -2021,50 +2073,11 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
 
   // Handler for "Upload Receipt" - opens receipts modal for settlement
   const handleUploadReceipt = (settlement: Settlement) => {
-    // Get the first expense where the user owes money
-    const { owedToReceiver } = getContributingExpenses(settlement);
-    
-    const firstUnpaidExpense = owedToReceiver.find(e => e.status === "pending");
-    
-    if (firstUnpaidExpense) {
-      const expense = expenses.find(exp => exp.id === firstUnpaidExpense.expenseId);
-      
-      if (expense) {
-        setViewingExpenseDetails(expense);
-        setInitialModalTab("payments"); // Open to Payments tab
-        setDetailsModalOpen(true);
-      }
-    } else {
-      toast({
-        title: "No pending expenses",
-        description: "All expenses in this settlement have been paid.",
-        variant: "default",
-      });
-    }
+    setSettlementToConfirm(settlement);
+    setConfirmModalOrigin(null);
+    setSettlementConfirmModalOpen(true);
   };
 
-  const handleViewSettlementReceipt = (settlement: Settlement) => {
-    if (settlement.receiptUrl) {
-      setViewingReceipt({
-        title: `Receipt from ${settlement.fromUser.name}`,
-        url: settlement.receiptUrl
-      });
-      setReceiptViewerOpen(true);
-    } else {
-      // If no receipt URL, try to open the expense details
-      const { owedToReceiver } = getContributingExpenses(settlement);
-      const awaitingExpense = owedToReceiver.find(e => e.status === "settled");
-      
-      if (awaitingExpense) {
-        const expense = expenses.find(exp => exp.id === awaitingExpense.expenseId);
-        if (expense) {
-          setViewingExpenseDetails(expense);
-          setInitialModalTab("payments");
-          setDetailsModalOpen(true);
-        }
-      }
-    }
-  };
 
   const handleReminderSend = async (message: string) => {
     if (!selectedSettlement) {
@@ -2184,6 +2197,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
         amount: newExpense.amount,
         currency: newExpense.originalCurrency || 'MYR',
         category: newExpense.category,
+        category_code: newExpense.category_code || newExpense.category,
         expense_date: newExpense.date,
         notes: newExpense.notes,
         payer_id: payerId, // Use UUID, not name
@@ -2299,6 +2313,18 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
   const handleEditExpense = async (id: string, updatedExpense: NewExpense) => {
     try {
       const existingExpense = expenses.find((expense) => expense.id === id);
+      const amountChanged = existingExpense
+        ? Math.abs(Number(existingExpense.amount || 0) - Number(updatedExpense.amount || 0)) >= 0.01
+        : true;
+      const participantsChanged = existingExpense
+        ? existingExpense.splitType !== updatedExpense.splitType ||
+          !areSameMembers(existingExpense.splitWith || [], updatedExpense.splitWith || []) ||
+          !areSameCustomSplits(
+            existingExpense.customSplitAmounts || [],
+            updatedExpense.customSplitAmounts || [],
+          )
+        : true;
+      const financialChange = amountChanged || participantsChanged;
 
       // Get the payer's user ID
       const payerMember = members.find(m => m.name === updatedExpense.paidBy);
@@ -2341,6 +2367,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
         description: updatedExpense.title,
         amount: updatedExpense.amount,
         category: updatedExpense.category,
+        category_code: updatedExpense.category_code || updatedExpense.category,
         expense_date: updatedExpense.date,
         notes: updatedExpense.notes,
         original_currency: updatedExpense.originalCurrency,
@@ -2361,63 +2388,59 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
 
       if (updateExpenseError) throw updateExpenseError;
 
-      // 2. Update expense_payments (who paid)
-      // Delete existing payment records
-      const { error: deletePaymentsError } = await supabase
-        .from('expense_payments')
-        .delete()
-        .eq('expense_id', id);
+      if (financialChange) {
+        // Reset payment records only when the amount or split participants changed.
+        const { error: deletePaymentsError } = await supabase
+          .from('expense_payments')
+          .delete()
+          .eq('expense_id', id);
 
-      if (deletePaymentsError) throw deletePaymentsError;
+        if (deletePaymentsError) throw deletePaymentsError;
 
-      // Insert new payment record
-      const { error: insertPaymentError } = await supabase
-        .from('expense_payments')
-        .insert({
-          expense_id: id,
-          user_id: payerId,
-          amount_paid: updatedExpense.amount
+        const { error: insertPaymentError } = await supabase
+          .from('expense_payments')
+          .insert({
+            expense_id: id,
+            user_id: payerId,
+            amount_paid: updatedExpense.amount
+          });
+
+        if (insertPaymentError) throw insertPaymentError;
+
+        // Recalculate participant allocations only for financial changes.
+        const { error: deleteParticipantsError } = await supabase
+          .from('expense_participants')
+          .delete()
+          .eq('expense_id', id);
+
+        if (deleteParticipantsError) throw deleteParticipantsError;
+
+        const participants = updatedExpense.splitWith.map(memberId => {
+          let amountOwed = 0;
+
+          if (updatedExpense.splitType === "custom" && updatedExpense.customSplitAmounts) {
+            const customAmount = updatedExpense.customSplitAmounts.find(a => a.memberId === memberId);
+            amountOwed = customAmount?.amount || 0;
+          } else {
+            amountOwed = updatedExpense.amount / updatedExpense.splitWith.length;
+          }
+
+          return {
+            expense_id: id,
+            user_id: memberId,
+            amount_owed: amountOwed,
+            is_paid: memberId === payerId,
+            paid_at: memberId === payerId ? new Date().toISOString() : null
+          };
         });
 
-      if (insertPaymentError) throw insertPaymentError;
+        if (participants.length > 0) {
+          const { error: insertParticipantsError } = await supabase
+            .from('expense_participants')
+            .insert(participants);
 
-      // 3. Update expense_participants (who owes what)
-      // Delete existing participants
-      const { error: deleteParticipantsError } = await supabase
-        .from('expense_participants')
-        .delete()
-        .eq('expense_id', id);
-
-      if (deleteParticipantsError) throw deleteParticipantsError;
-
-      // Calculate and insert new participants
-      const participants = updatedExpense.splitWith.map(memberId => {
-        let amountOwed = 0;
-        
-        if (updatedExpense.splitType === "custom" && updatedExpense.customSplitAmounts) {
-          const customAmount = updatedExpense.customSplitAmounts.find(a => a.memberId === memberId);
-          amountOwed = customAmount?.amount || 0;
-        } else {
-          // Equal split
-          amountOwed = updatedExpense.amount / updatedExpense.splitWith.length;
+          if (insertParticipantsError) throw insertParticipantsError;
         }
-
-        return {
-          expense_id: id,
-          user_id: memberId,
-          amount_owed: amountOwed,
-          // Auto-mark as paid if participant is also the payer
-          is_paid: memberId === payerId,
-          paid_at: memberId === payerId ? new Date().toISOString() : null
-        };
-      });
-
-      if (participants.length > 0) {
-        const { error: insertParticipantsError } = await supabase
-          .from('expense_participants')
-          .insert(participants);
-
-        if (insertParticipantsError) throw insertParticipantsError;
       }
 
       // Reload expenses from database to reflect changes
@@ -2559,9 +2582,31 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
     console.log("Mark as received for member:", memberId);
   };
 
-  // Handle uploading proof from modal
-  const handleUploadProof = (file: File, note?: string) => {
-    console.log("Proof uploaded:", file, note);
+  // Handle uploading the expense owner's proof-of-purchase receipt
+  const handleUploadProof = async (file: File) => {
+    if (!viewingExpenseDetails) return;
+    try {
+      const updated = await uploadExpenseReceipt(viewingExpenseDetails.id, file);
+      setExpenses(prev => prev.map(e =>
+        e.id === viewingExpenseDetails.id
+          ? { ...e, receipt_url: updated.receipt_url, hasReceipt: true }
+          : e
+      ));
+      setViewingExpenseDetails(prev =>
+        prev ? { ...prev, receipt_url: updated.receipt_url, hasReceipt: true } : prev
+      );
+      toast({
+        title: "Receipt uploaded",
+        description: "The expense receipt has been saved.",
+      });
+    } catch (error) {
+      console.error("Error uploading expense receipt:", error);
+      toast({
+        title: "Upload failed",
+        description: "Failed to upload receipt. Please try again.",
+        variant: "destructive",
+      });
+    }
   };
 
   // Handle submitting payment proof from modal (user marks themselves as paid)
@@ -2750,32 +2795,74 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
       {/* Always Visible: Header + Stat Cards */}
       <div className="px-3 sm:px-4 pt-3 sm:pt-4 space-y-4">
         {/* Header */}
-        <div className="flex items-start justify-between gap-3">
-          <div>
+        <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
+          <div className="min-w-0 flex-1">
             <h2 className="text-lg sm:text-xl font-semibold text-foreground">Trip Expenses Overview</h2>
-            <p className="text-sm text-muted-foreground">See where the money went and who's settled.</p>
           </div>
-          <div className="flex gap-2">
-            {subTab === "expenses" && canSwitchCurrency && (
+          <div className="flex shrink-0 items-center justify-end gap-2">
+            {canSwitchCurrency && (
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-8 w-8 shrink-0 -mt-1"
+                className="h-9 w-9 shrink-0 rounded-lg text-foreground hover:bg-secondary"
                 onClick={() => setViewCurrency(viewCurrency === "home" ? "original" : "home")}
                 title={`Switch to ${viewCurrency === "home" ? "original" : "home"} currency`}
               >
-                <ArrowLeftRight className="h-4 w-4" />
+                <ArrowLeftRight className="h-5 w-5" />
               </Button>
             )}
+            {canSwitchCurrency && <div className="h-7 w-px bg-border" aria-hidden="true" />}
             <Button
               variant="ghost"
               size="icon"
-              className="h-8 w-8 shrink-0 -mt-1"
               onClick={() => setSettingsSheetOpen(true)}
+              aria-haspopup="dialog"
+              aria-controls="currency-sheet"
+              aria-label="Manage trip currencies"
+              className="h-9 w-9 shrink-0 rounded-lg text-foreground hover:bg-secondary"
             >
-              <Settings className="h-4 w-4" />
-            </Button>
+                  <svg
+                    width="21"
+                    height="21"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    aria-hidden="true"
+                  >
+                    <circle cx="6.5" cy="7" r="3.5" stroke="currentColor" strokeWidth="1.7" />
+                    <path
+                      d="M6.5 4.9v4.2M5.2 6h1.7c.8 0 1.3.4 1.3 1s-.5 1-1.3 1H5.1"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                    />
+                    <path
+                      d="M11 6h8m0 0-2.4-2.4M19 6l-2.4 2.4"
+                      stroke="currentColor"
+                      strokeWidth="1.7"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                    <circle cx="17.5" cy="17" r="3.5" stroke="currentColor" strokeWidth="1.7" />
+                    <path
+                      d="M16 15.4l1.5 1.6 1.5-1.6M17.5 17v2"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                    <path
+                      d="M13 18H5m0 0 2.4-2.4M5 18l2.4 2.4"
+                      stroke="currentColor"
+                      strokeWidth="1.7"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>            
+                  </Button>
           </div>
+          <p className="basis-full whitespace-nowrap text-sm text-muted-foreground">
+            See where the money went and who's settled.
+          </p>
         </div>
 
         {/* Debug: show ID and net components */}
@@ -2967,7 +3054,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
                       </div>
                       <div className="h-1.5 sm:h-2 bg-secondary rounded-full overflow-hidden">
                         <div
-                          className={`h-full ${item.color} rounded-full transition-all duration-700 ease-out`}
+                          className="h-full bg-primary rounded-full transition-all duration-700 ease-out"
                           style={{ 
                             width: `${item.percentage}%`,
                             animation: `growWidth 0.7s ease-out ${200 + index * 100}ms both`
@@ -3141,12 +3228,11 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Categories</SelectItem>
-                      <SelectItem value="Transport">Transport</SelectItem>
-                      <SelectItem value="Food & Drinks">Food & Drinks</SelectItem>
-                      <SelectItem value="Accommodation">Accommodation</SelectItem>
-                      <SelectItem value="Activities">Activities</SelectItem>
-                      <SelectItem value="Shopping">Shopping</SelectItem>
-                      <SelectItem value="Other">Other</SelectItem>
+                      {expenseCategories.map((category) => (
+                        <SelectItem key={category.code} value={category.code}>
+                          {category.emoji} {category.name}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
 
@@ -3309,10 +3395,10 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
                       formatAmount={formatTwoDecimalAmount}
                       currency={summaryDisplayCurrency}
                       showReminder={canShowReminder(settlement)}
-                      onCardClick={() => settlement.status === "awaiting" ? handleViewSettlementReceipt(settlement) : handleSettlementCardClick(settlement)}
+                      onCardClick={() => handleSettlementCardClick(settlement)}
                       onViewPayment={() => handleViewQR(settlement)}
                       onViewDetails={() => handleSettlementCardClick(settlement)}
-                      onViewReceipt={() => handleViewSettlementReceipt(settlement)}
+                      onViewReceipt={() => handleSettlementCardClick(settlement)}
                       onSendReminder={() => handleSendReminder(settlement)}
                       onMarkPaid={() => handleMarkPaid(settlement)}
                       onUploadReceipt={() => handleUploadReceipt(settlement)}
@@ -3445,6 +3531,8 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
         members={members}
         homeCurrency={homeCurrency}
         allowedCurrencies={tripTravelCurrencies}
+        expenseCategories={expenseCategories}
+        expenseCategoriesLoading={isLoadingExpenseCategories}
       />
 
       {/* Delete Expense Dialog */}
@@ -3502,8 +3590,12 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
         open={detailsModalOpen}
         onOpenChange={(open) => {
           setDetailsModalOpen(open);
-          if (!open) setViewingExpenseDetails(null);
+          if (!open) {
+            setViewingExpenseDetails(null);
+            setViewingExpenseFromSettlement(false);
+          }
         }}
+        onBack={viewingExpenseFromSettlement ? handleBackFromExpenseToSettlement : undefined}
         expense={viewingExpenseDetails}
         currentUser={currentUserName}
         initialTab={initialModalTab}
@@ -3527,6 +3619,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
         onConfirmPaymentReceived={handleConfirmPaymentSettled}
         onSubmitPayment={handleSubmitPayment}
         members={members}
+        expenseCategories={expenseCategories}
       />
 
       {/* Settlement Breakdown Modal */}
@@ -3536,6 +3629,10 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
           <SettlementBreakdownModal
             open={breakdownModalOpen}
             onOpenChange={(open) => {
+              if (!open && ignoreNextBreakdownDismissRef.current) {
+                ignoreNextBreakdownDismissRef.current = false;
+                return;
+              }
               setBreakdownModalOpen(open);
               if (!open) setSelectedSettlementForBreakdown(null);
             }}
@@ -3550,6 +3647,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
             currentUserId={currentUserId || "1"}
             onUploadProof={() => {
               handleMarkPaid(selectedSettlementForBreakdown);
+              setConfirmModalOrigin("breakdown");
               setBreakdownModalOpen(false);
             }}
             onMarkAllPaid={handleMarkAllPaidFromBreakdown}
@@ -3559,9 +3657,9 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
             }}
             onViewQR={() => {
               handleViewQR(selectedSettlementForBreakdown);
-              setBreakdownModalOpen(false);
             }}
             onViewReceipts={handleViewSettlementReceipts}
+            onViewExpense={handleViewExpenseFromSettlement}
           />
         );
       })()}
@@ -3571,6 +3669,10 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
         <SettlementReceiptsModal
           open={receiptsModalOpen}
           onOpenChange={(open) => {
+            if (!open && ignoreNextReceiptsDismissRef.current) {
+              ignoreNextReceiptsDismissRef.current = false;
+              return;
+            }
             setReceiptsModalOpen(open);
             if (!open) setSelectedSettlementForBreakdown(null);
           }}
@@ -3581,8 +3683,10 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
           onMarkAllPaid={() => {
             setSettlementToConfirm(selectedSettlementForBreakdown);
             setReceiptsModalOpen(false);
+            setConfirmModalOrigin("receipts");
             setSettlementConfirmModalOpen(true);
           }}
+          expenseCategories={expenseCategories}
         />
       )}
 
@@ -3598,6 +3702,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
             }}
             fromUser={settlementToConfirm.fromUser}
             toUser={settlementToConfirm.toUser}
+            currentUserId={currentUserId || undefined}
             netAmount={Math.max(0, Number((breakdown.grossOwed - breakdown.grossOffset).toFixed(2)))}
             owedToReceiver={breakdown.owedToReceiver.map(e => ({ title: e.title, amount: e.shareAmount }))}
             owedToDebtor={breakdown.owedToDebtor.map(e => ({ title: e.title, amount: e.shareAmount }))}
@@ -3614,6 +3719,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
             onUploadReceipt={handleSettlementReceiptUpload}
             onRemoveReceipt={handleSettlementReceiptRemove}
             onConfirm={handleConfirmSettlement}
+            onBack={confirmModalOrigin ? handleBackFromSettlementConfirm : undefined}
           />
         );
       })()}
@@ -3677,10 +3783,10 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
                       <RadioGroupItem value="all" id="all-categories" />
                       <Label htmlFor="all-categories">All Categories</Label>
                     </div>
-                    {["Transport", "Food & Drinks", "Accommodation", "Activities", "Shopping", "Other"].map((cat) => (
-                      <div key={cat} className="flex items-center space-x-2">
-                        <RadioGroupItem value={cat} id={`cat-${cat}`} />
-                        <Label htmlFor={`cat-${cat}`}>{cat}</Label>
+                    {expenseCategories.map((category) => (
+                      <div key={category.code} className="flex items-center space-x-2">
+                        <RadioGroupItem value={category.code} id={`cat-${category.code}`} />
+                        <Label htmlFor={`cat-${category.code}`}>{category.emoji} {category.name}</Label>
                       </div>
                     ))}
                   </RadioGroup>
@@ -3738,40 +3844,90 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
         open={settingsSheetOpen}
         onOpenChange={setSettingsSheetOpen}
         homeCurrency={homeCurrency}
-        onHomeCurrencyChange={async (nextHomeCurrency) => {
+        tripTravelCurrencies={tripTravelCurrencies}
+        onSaveCurrencies={async (nextHomeCurrency, nextTravelCurrencies) => {
           const previousHomeCurrency = homeCurrency;
-          setTripHomeCurrency(nextHomeCurrency);
+          const previousTravelCurrencies = tripTravelCurrencies;
+          const homeCurrencyChanged = nextHomeCurrency !== previousHomeCurrency;
+          const travelCurrenciesChanged =
+            nextTravelCurrencies.length !== previousTravelCurrencies.length ||
+            nextTravelCurrencies.some((currency) => !previousTravelCurrencies.includes(currency));
+
+          if (!homeCurrencyChanged && !travelCurrenciesChanged) {
+            setSettingsSheetOpen(false);
+            return;
+          }
+
           try {
             await updateTripCurrencySettings(tripId, {
               home_currency: nextHomeCurrency,
-              travel_currencies: tripTravelCurrencies,
+              travel_currencies: nextTravelCurrencies,
             });
-            await recalculateTripExpensesForHomeCurrency(nextHomeCurrency);
+
+            if (homeCurrencyChanged) {
+              await recalculateTripExpensesForHomeCurrency(nextHomeCurrency);
+            }
+
+            setTripHomeCurrency(nextHomeCurrency);
+            setTripTravelCurrencies(nextTravelCurrencies);
+            writeCachedTripCurrencies(tripId, nextTravelCurrencies);
+
+            const newlyAdded = nextTravelCurrencies.filter(
+              (currency) => !previousTravelCurrencies.includes(currency)
+            );
+            if (newlyAdded.length > 0) {
+              let targetConvoId = conversationId;
+              if (!targetConvoId) {
+                try {
+                  const convo = await fetchTripConversation(tripId);
+                  targetConvoId = convo?.id;
+                } catch (e) {
+                  console.warn("Failed to fetch trip conversation for travel currency notification", e);
+                }
+              }
+
+              for (const addedCode of newlyAdded) {
+                if (targetConvoId) {
+                  try {
+                    await sendSystemMessage({
+                      conversationId: targetConvoId,
+                      action: "travel_currency_added",
+                      senderName: currentUserName,
+                      details: addedCode,
+                    });
+                  } catch (e) {
+                    console.warn("Failed to send travel currency system message:", e);
+                  }
+                }
+
+                try {
+                  await supabase.functions.invoke("send-travel-currency-added", {
+                    body: { tripId, currencyCode: addedCode },
+                  });
+                } catch (e) {
+                  console.warn("Failed to send travel currency push notification:", e);
+                }
+              }
+            }
+
             toast({
-              title: "Trip currency updated",
-              description: "All expense totals have been recalculated.",
+              title: "Trip currencies saved",
+              description: homeCurrencyChanged
+                ? "Currency settings and expense totals have been updated."
+                : "Travel currencies have been updated.",
             });
+            setSettingsSheetOpen(false);
           } catch (e) {
-            console.error('Failed to save trip home currency setting', e);
+            console.error("Failed to save trip currency settings", e);
             setTripHomeCurrency(previousHomeCurrency);
+            setTripTravelCurrencies(previousTravelCurrencies);
+            writeCachedTripCurrencies(tripId, previousTravelCurrencies);
             toast({
               title: "Currency update failed",
-              description: "Could not recalculate expense totals. Please try again.",
+              description: "Could not save currency settings. Please try again.",
               variant: "destructive",
             });
-          }
-        }}
-        tripTravelCurrencies={tripTravelCurrencies}
-        onTravelCurrenciesChange={async (currs) => {
-          setTripTravelCurrencies(currs);
-          writeCachedTripCurrencies(tripId, currs);
-          try {
-            await updateTripCurrencySettings(tripId, {
-              home_currency: homeCurrency,
-              travel_currencies: currs,
-            });
-          } catch (e) {
-            console.error('Failed to save trip currency settings', e);
+            throw e;
           }
         }}
       />

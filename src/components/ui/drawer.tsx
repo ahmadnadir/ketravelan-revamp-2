@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 
 const Drawer = ({
   shouldScaleBackground = false,
+  repositionInputs = false,
   onOpenChange,
   ...props
 }: React.ComponentProps<typeof DrawerPrimitive.Root>) => {
@@ -22,6 +23,7 @@ const Drawer = ({
   return (
     <DrawerPrimitive.Root
       shouldScaleBackground={shouldScaleBackground}
+      repositionInputs={repositionInputs}
       onOpenChange={handleOpenChange}
       {...props}
     />
@@ -46,15 +48,17 @@ DrawerOverlay.displayName = DrawerPrimitive.Overlay.displayName;
 const DrawerContent = React.forwardRef<
   React.ElementRef<typeof DrawerPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DrawerPrimitive.Content>
->(({ className, children, ...props }, ref) => (
+>(({ className, children, "data-enable-drag": enableDrag, ...props }, ref) => (
   <DrawerPortal>
     <DrawerOverlay />
     <DrawerPrimitive.Content
       ref={ref}
       className={cn(
-          "fixed inset-x-0 bottom-0 z-[121] mt-24 flex h-auto flex-col rounded-t-[var(--radius)] border-2 border-border bg-background shadow-xl overscroll-contain",
+        "fixed inset-x-0 bottom-0 z-[121] mt-24 flex h-auto flex-col rounded-t-[var(--radius)] border-2 border-border bg-background shadow-xl overscroll-contain",
+        enableDrag !== "true" && "[transform:none!important]",
         className,
       )}
+      data-enable-drag={enableDrag}
       {...props}
     >
       <div className="mx-auto mt-4 h-2 w-[100px] rounded-full bg-muted" />

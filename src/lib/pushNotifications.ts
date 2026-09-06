@@ -18,7 +18,7 @@ function isNative() {
 
 async function upsertToken(token: string) {
   if (!activeUserId) {
-    console.warn("upsertToken called without activeUserId; skipping", { token });
+    // console.warn("upsertToken called without activeUserId; skipping", { token });
     return;
   }
 
@@ -28,15 +28,15 @@ async function upsertToken(token: string) {
   try {
     const { data: userResult, error: userError } = await supabase.auth.getUser();
     if (userError) {
-      console.warn("upsertToken: failed to get Supabase user; skipping RPC", userError);
+      // console.warn("upsertToken: failed to get Supabase user; skipping RPC", userError);
       return;
     }
     if (!userResult?.user?.id) {
-      console.warn("upsertToken: no authenticated Supabase user; skipping RPC", { token });
+      // console.warn("upsertToken: no authenticated Supabase user; skipping RPC", { token });
       return;
     }
   } catch (err) {
-    console.warn("upsertToken: exception when checking Supabase user; skipping RPC", err);
+    // console.warn("upsertToken: exception when checking Supabase user; skipping RPC", err);
     return;
   }
 
@@ -49,11 +49,11 @@ async function upsertToken(token: string) {
     deviceId = null;
   }
 
-  console.info("upsertToken: calling RPC upsert_push_token", {
-    tokenPreview: token.slice(0, 12),
-    platform,
-    deviceId,
-  });
+  // console.info("upsertToken: calling RPC upsert_push_token", {
+  //   tokenPreview: token.slice(0, 12),
+  //   platform,
+  //   deviceId,
+  // });
 
   const { error } = await supabase.rpc("upsert_push_token", {
     p_token: token,
@@ -62,9 +62,9 @@ async function upsertToken(token: string) {
   });
 
   if (error) {
-    console.warn("upsertToken: failed to call upsert_push_token", error);
+    // console.warn("upsertToken: failed to call upsert_push_token", error);
   } else {
-    console.info("upsertToken: successfully upserted push token");
+    // console.info("upsertToken: successfully upserted push token");
   }
 }
 

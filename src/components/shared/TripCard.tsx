@@ -21,8 +21,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { isTripSaved, saveTrip, unsaveTrip } from "@/lib/savedTrips";
 import { buildPublicUrl, buildTripShareUrl } from "@/lib/publicUrl";
 import { savePendingListItemRestore } from "@/hooks/useListItemRestore";
-
-const DEFAULT_TRIP_IMAGE = "/default-trip-photo.jpeg";
+import { DEFAULT_TRIP_IMAGE, getTripImageUrl } from "@/lib/tripImage";
 
 const formatTripDateLabel = (value: string): string => {
   const trimmed = String(value || "").trim();

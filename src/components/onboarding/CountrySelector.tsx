@@ -50,6 +50,10 @@ export const countries: Country[] = [
   { name: "Bangladesh", flag: "🇧🇩", currency: "USD" },
   { name: "Pakistan", flag: "🇵🇰", currency: "USD" },
   
+  // Central Asia
+  { name: "Kazakhstan", flag: "🇰🇿", currency: "KZT" },
+  { name: "Kyrgyzstan", flag: "🇰🇬", currency: "KGS" },
+
   // Middle East
   { name: "United Arab Emirates", flag: "🇦🇪", currency: "USD" },
   { name: "Saudi Arabia", flag: "🇸🇦", currency: "SAR" },
@@ -94,7 +98,7 @@ export const countries: Country[] = [
   
   // Africa
   { name: "South Africa", flag: "🇿🇦", currency: "USD" },
-  { name: "Egypt", flag: "🇪🇬", currency: "USD" },
+  { name: "Egypt", flag: "🇪🇬", currency: "EGP" },
   { name: "Morocco", flag: "🇲🇦", currency: "EUR" },
   { name: "Kenya", flag: "🇰🇪", currency: "USD" },
   { name: "Nigeria", flag: "🇳🇬", currency: "USD" },
