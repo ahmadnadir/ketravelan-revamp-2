@@ -196,6 +196,7 @@ export const mockMembers = [
 // Payment tracking for each expense member
 export interface ExpensePayment {
   memberId: string;
+  expenseParticipantId?: string;
   status: "pending" | "settled";
   receiptUrl?: string;
   uploadedAt?: string;

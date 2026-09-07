@@ -19,6 +19,8 @@ interface ReceiptData {
   payerNote?: string;
   uploadedAt?: string;
   category: string;
+  status?: "pending" | "approved" | "rejected";
+  rejectionReason?: string;
 }
 
 interface SettlementReceiptsModalProps {
@@ -28,6 +30,7 @@ interface SettlementReceiptsModalProps {
   toUser: { id: string; name: string; imageUrl?: string };
   totalAmount: number;
   receipts: ReceiptData[];
+  paymentStatus?: string;
   onMarkAllPaid: () => void;
   onBack?: () => void;
   expenseCategories: ExpenseCategory[];
@@ -40,6 +43,7 @@ export function SettlementReceiptsModal({
   toUser,
   totalAmount,
   receipts,
+  paymentStatus,
   onMarkAllPaid,
   onBack,
   expenseCategories,
@@ -122,7 +126,7 @@ export function SettlementReceiptsModal({
             </div>
 
             {/* Arrow */}
-            <div className="flex flex-col items-center gap-1">
+            <div className="flex flex-col items-center gap-1 -mt-6">
               <ArrowRight className="h-5 w-5 text-muted-foreground" />
             </div>
 
@@ -214,9 +218,14 @@ export function SettlementReceiptsModal({
                         </div>
                       </div>
                       <div className="mt-2">
-                        <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400">
-                          Pending
+                          <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                          {(receipt.status || "pending").replace(/_/g, " ")}
                         </span>
+                          {receipt.rejectionReason && (
+                            <p className="text-xs text-destructive mt-1 line-clamp-2">
+                              {receipt.rejectionReason}
+                            </p>
+                          )}
                       </div>
                     </div>
                   </button>
@@ -334,7 +343,7 @@ export function SettlementReceiptsModal({
           </div>
 
           {/* Action Buttons */}
-          {receipts.length > 0 && (
+          {receipts.length > 0 && (!paymentStatus || paymentStatus === "pending" || paymentStatus === "awaiting_confirmation") && (
             <Button 
               className="w-full h-11 text-sm bg-foreground text-background hover:bg-foreground/90"
               onClick={handleConfirmPayment}

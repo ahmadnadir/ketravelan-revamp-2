@@ -64,6 +64,27 @@ export async function fetchTripExpenses(tripId: string) {
 
   if (error) throw error;
 
+  // Fetch pending proofs explicitly as well as through the nested relation.
+  // This keeps grouped settlements reliable when PostgREST omits nested rows.
+  const expenseIds = (data || []).map((expense) => expense.id);
+  const { data: pendingReceipts, error: receiptsError } = expenseIds.length > 0
+    ? await supabase
+      .from('expense_receipts')
+      .select('id, expense_id, participant_id, receipt_url, description, status, created_at')
+      .in('expense_id', expenseIds)
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false })
+    : { data: [], error: null };
+
+  if (receiptsError) throw receiptsError;
+
+  const receiptsByExpense = new Map<string, any[]>();
+  (pendingReceipts || []).forEach((receipt: any) => {
+    const existing = receiptsByExpense.get(receipt.expense_id) || [];
+    existing.push(receipt);
+    receiptsByExpense.set(receipt.expense_id, existing);
+  });
+
   // Fetch creator and participant profiles separately since they reference auth.users
   if (data && data.length > 0) {
     // Get all unique user IDs (creators + participants + payers)
@@ -98,7 +119,7 @@ export async function fetchTripExpenses(tripId: string) {
         ...payment,
         user: profiles?.find(p => p.id === payment.user_id) || null
       })) || [],
-      expense_receipts: expense.expense_receipts || []
+      expense_receipts: receiptsByExpense.get(expense.id) || expense.expense_receipts || []
     }));
 
     return enrichedData;
@@ -281,6 +302,163 @@ export async function uploadReceipt(expenseId: string, participantId: string, fi
     })
     .select()
     .single();
+
+  if (error) throw error;
+  return data;
+}
+
+export interface SettlementPaymentAllocationInput {
+  expenseParticipantId: string;
+  amountApplied: number;
+}
+
+export async function createSettlementPayment(params: {
+  tripId: string;
+  recipientId: string;
+  amount: number;
+  currency: string;
+  idempotencyKey: string;
+  allocations: SettlementPaymentAllocationInput[];
+}) {
+  const { data, error } = await supabase.rpc('create_settlement_payment', {
+    p_trip_id: params.tripId,
+    p_recipient_id: params.recipientId,
+    p_amount: params.amount,
+    p_currency: params.currency,
+    p_idempotency_key: params.idempotencyKey,
+    p_allocations: params.allocations.map((allocation) => ({
+      expense_participant_id: allocation.expenseParticipantId,
+      amount_applied: allocation.amountApplied,
+    })),
+  });
+
+  if (error) throw error;
+  return data;
+}
+
+export async function fetchSettlementPayment(settlementPaymentId: string) {
+  const { data, error } = await supabase
+    .from('settlement_payments')
+    .select('*')
+    .eq('id', settlementPaymentId)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data;
+}
+
+export async function fetchSettlementPaymentsForTrip(tripId: string) {
+  const { data, error } = await supabase
+    .from('settlement_payments')
+    .select(`
+      *,
+      settlement_payment_receipts(
+        id,
+        receipt_url,
+        description,
+        status,
+        reviewed_at,
+        rejection_reason,
+        created_at
+      )
+    `)
+    .eq('trip_id', tripId)
+    .order('created_at', { ascending: false });
+
+  if (error) throw error;
+  return data || [];
+}
+
+export async function fetchSettlementPaymentAllocations(settlementPaymentId: string) {
+  const { data, error } = await supabase
+    .from('settlement_payment_expenses')
+    .select(`
+      id,
+      settlement_payment_id,
+      expense_participant_id,
+      amount_applied,
+      expense_participant:expense_participants(
+        id,
+        expense_id,
+        user_id,
+        amount_owed,
+        is_paid,
+        paid_at,
+        expense:trip_expenses(
+          id,
+          description,
+          amount,
+          currency,
+          original_currency,
+          converted_amount_home,
+          home_currency,
+          expense_date
+        )
+      )
+    `)
+    .eq('settlement_payment_id', settlementPaymentId);
+
+  if (error) throw error;
+  return data || [];
+}
+
+export async function fetchSettlementPaymentReceipt(settlementPaymentId: string) {
+  const { data, error } = await supabase
+    .from('settlement_payment_receipts')
+    .select('*')
+    .eq('settlement_payment_id', settlementPaymentId)
+    .order('created_at', { ascending: false })
+    .maybeSingle();
+
+  if (error) throw error;
+  return data;
+}
+
+export async function submitSettlementPaymentReceipt(
+  settlementPaymentId: string,
+  file: File,
+  description?: string,
+) {
+  const fileExt = file.name.split('.').pop() || 'jpg';
+  const filePath = `settlement-receipts/${settlementPaymentId}-${Date.now()}.${fileExt}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from('expense-receipts')
+    .upload(filePath, file);
+
+  if (uploadError) throw uploadError;
+
+  const { data: { publicUrl } } = supabase.storage
+    .from('expense-receipts')
+    .getPublicUrl(filePath);
+
+  const { data, error } = await supabase.rpc('submit_settlement_payment_receipt', {
+    p_settlement_payment_id: settlementPaymentId,
+    p_receipt_url: publicUrl,
+    p_description: description || null,
+  });
+
+  if (error) {
+    throw new Error(`Receipt uploaded but could not be submitted: ${error.message}`);
+  }
+
+  return data;
+}
+
+export async function rejectSettlementPaymentReceipt(settlementPaymentId: string, reason: string) {
+  const { data, error } = await supabase.rpc('reject_settlement_payment_receipt', {
+    p_settlement_payment_id: settlementPaymentId,
+    p_reason: reason,
+  });
+
+  if (error) throw error;
+  return data;
+}
+
+export async function confirmSettlementPayment(settlementPaymentId: string) {
+  const { data, error } = await supabase.rpc('confirm_settlement_payment', {
+    p_settlement_payment_id: settlementPaymentId,
+  });
 
   if (error) throw error;
   return data;

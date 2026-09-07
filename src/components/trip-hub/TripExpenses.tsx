@@ -37,7 +37,7 @@ import { Badge } from "@/components/ui/badge";
 import { mockExpenses as initialMockExpenses, mockMembers } from "@/data/mockData";
 import { toast } from "@/hooks/use-toast";
 import { ExpenseCategory, fetchExpenseCategories, getExpenseCategoryCode } from "@/lib/expenseCategories";
-import { fetchTripExpenses, createExpense, deleteExpense, calculateTripBalances, getWhoOwesWho, fetchTripPaymentMethods, addExpensePayments, markParticipantsAsPaid, uploadPaymentQR, upsertPaymentMethod, uploadReceipt, uploadExpenseReceipt } from "@/lib/expenses";
+import { fetchTripExpenses, createExpense, deleteExpense, calculateTripBalances, getWhoOwesWho, fetchTripPaymentMethods, fetchSettlementPaymentsForTrip, fetchSettlementPayment, fetchSettlementPaymentAllocations, fetchSettlementPaymentReceipt, addExpensePayments, markParticipantsAsPaid, uploadPaymentQR, upsertPaymentMethod, uploadReceipt, uploadExpenseReceipt, createSettlementPayment, submitSettlementPaymentReceipt, confirmSettlementPayment, rejectSettlementPaymentReceipt } from "@/lib/expenses";
 import { getTripCurrencySettings, updateTripCurrencySettings, isTripNotificationEnabled } from "@/lib/trips";
 import { supabase } from "@/lib/supabase";
 import { sendSettlementReminder } from "@/lib/settlementReminders";
@@ -110,9 +110,11 @@ interface Settlement {
   fromUser: { id: string; name: string; imageUrl: string };
   toUser: { id: string; name: string; imageUrl: string; qrCodeUrl?: string };
   amount: number;
-  status: "pending" | "settled" | "awaiting";
+  status: "pending" | "settled" | "awaiting" | "rejected" | "cancelled";
   originalCurrency?: CurrencyCode;
   receiptUrl?: string;
+  settlementPaymentId?: string;
+  settlementPaymentStatus?: string;
 }
 
 const isAwaitingConfirmation = (
@@ -419,6 +421,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
       
       // Fetch payment methods
       const paymentMethods = await fetchTripPaymentMethods(tripId);
+      const persistedSettlementPayments = await fetchSettlementPaymentsForTrip(tripId);
       
       const formattedExpenses: ExpenseData[] = data.map((exp: any) => {
         // Get the actual payer from expense_payments (who paid upfront)
@@ -498,6 +501,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
             
             return {
               memberId: p.user_id,
+              expenseParticipantId: p.id,
               status,
               receiptUrl,
               uploadedAt: participantReceipt?.created_at,
@@ -515,6 +519,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
       setBalances(balances || []);
       setDebts(debts || []);
       setPaymentMethods(paymentMethods || []);
+      setSettlementPayments(persistedSettlementPayments || []);
       
     } catch (error) {
       console.error('Error loading expenses:', error);
@@ -562,6 +567,30 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
     loadExpenseCategories();
     loadCurrencySettings();
   }, [tripId, loadExpenses, loadExpenseCategories, loadCurrencySettings]);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel(`trip-expenses-${tripId}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'expense_receipts',
+      }, () => {
+        void loadExpenses();
+      })
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'expense_participants',
+      }, () => {
+        void loadExpenses();
+      })
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [tripId, loadExpenses]);
 
   const loadCurrentUser = async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -663,7 +692,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
   
   // Settlement filters
   const [directionFilter, setDirectionFilter] = useState<"all" | "owesMe" | "iOwe">("all");
-  const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "settled">("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "awaiting" | "settled">("all");
   
   // QR Codes sub-view toggle
   const [qrSubView, setQrSubView] = useState<"myqr" | "others">("myqr");
@@ -720,6 +749,16 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
   // Unified settlement confirmation modal state
   const [settlementConfirmModalOpen, setSettlementConfirmModalOpen] = useState(false);
   const [settlementToConfirm, setSettlementToConfirm] = useState<Settlement | null>(null);
+  const [settlementPaymentId, setSettlementPaymentId] = useState<string | null>(null);
+  const [settlementPaymentStatus, setSettlementPaymentStatus] = useState<string | null>(null);
+  const [settlementPaymentReceipt, setSettlementPaymentReceipt] = useState<{ receipt_url: string } | null>(null);
+  const settlementPaymentIdempotencyKeyRef = useRef<string | null>(null);
+  const [settlementPayments, setSettlementPayments] = useState<any[]>([]);
+  const [selectedSettlementPaymentDetails, setSelectedSettlementPaymentDetails] = useState<{
+    payment: any;
+    allocations: any[];
+    receipt: any;
+  } | null>(null);
   // Which modal (if any) the confirm modal was opened from, so the back button can return to it
   const [confirmModalOrigin, setConfirmModalOrigin] = useState<"breakdown" | "receipts" | null>(null);
   // Swallows one spurious dismiss on the reopened modal caused by the click that triggered Back
@@ -728,6 +767,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
   
   // Settlement receipts modal state
   const [receiptsModalOpen, setReceiptsModalOpen] = useState(false);
+  const [receiptsOpenedFromCard, setReceiptsOpenedFromCard] = useState(false);
 
   // Track recently settled expense IDs for visual feedback
   const [recentlySettledIds, setRecentlySettledIds] = useState<string[]>([]);
@@ -823,20 +863,6 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
 
       const directionMap = new Map<string, DirectionalSummary>();
 
-      const latestExpenseCreatedAtByDirection = new Map<string, string | undefined>();
-      expenses.forEach((expense) => {
-        const payerId = expense.payer?.id;
-        if (!payerId || !expense.createdAt) return;
-        expense.splitWith.forEach((memberId) => {
-          if (memberId === payerId) return;
-          const key = `${memberId}-${payerId}`;
-          const current = latestExpenseCreatedAtByDirection.get(key);
-          if (!current || new Date(expense.createdAt!).getTime() > new Date(current).getTime()) {
-            latestExpenseCreatedAtByDirection.set(key, expense.createdAt);
-          }
-        });
-      });
-
       expenses.forEach((expense) => {
         const payerId = expense.payer?.id;
         if (!payerId) return;
@@ -850,11 +876,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
           const key = `${memberId}-${payerId}`;
           const payment = expense.payments?.find((p) => p.memberId === memberId);
           const isSettled = payment?.status === "settled" && !!payment?.confirmedByPayer;
-          const isAwaiting = isAwaitingConfirmation(
-            expense,
-            payment,
-            latestExpenseCreatedAtByDirection.get(key),
-          );
+          const isAwaiting = isAwaitingConfirmation(expense, payment);
           const isPending = !isSettled && !isAwaiting;
 
           if (!directionMap.has(key)) {
@@ -982,11 +1004,6 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
         expense.payer?.id === fromUserId && expense.splitWith?.includes(toUserId)
       );
 
-      const latestPairExpenseCreatedAt = [...expensesToUserPaid, ...expensesFromUserPaid]
-        .map((expense) => expense.createdAt)
-        .filter((createdAt): createdAt is string => Boolean(createdAt))
-        .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
-
       const isPaymentSettled = (payment?: { status?: string; confirmedByPayer?: boolean }) => {
         return payment?.status === "settled" && !!payment?.confirmedByPayer;
       };
@@ -1006,14 +1023,14 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
       let receiptUrl: string | undefined;
       const hasAwaitingConfirmation = expensesToUserPaid.some(expense => {
         const payment = expense.payments?.find(p => p.memberId === fromUserId);
-        if (isAwaitingConfirmation(expense, payment, latestPairExpenseCreatedAt)) {
+        if (isAwaitingConfirmation(expense, payment)) {
           receiptUrl = payment.receiptUrl;
           return true;
         }
         return false;
       }) || expensesFromUserPaid.some(expense => {
         const payment = expense.payments?.find(p => p.memberId === toUserId);
-        if (isAwaitingConfirmation(expense, payment, latestPairExpenseCreatedAt)) {
+        if (isAwaitingConfirmation(expense, payment)) {
           receiptUrl = payment.receiptUrl;
           return true;
         }
@@ -1156,6 +1173,8 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
         awaiting: 3,
         pending: 2,
         settled: 1,
+        rejected: 0,
+        cancelled: 0,
       };
 
       const round2 = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
@@ -1218,6 +1237,8 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
         awaiting: 3,
         pending: 2,
         settled: 1,
+        rejected: 0,
+        cancelled: 0,
       };
 
       const round2 = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
@@ -1310,10 +1331,50 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
 
     // Merge by directional pair first, then collapse opposite directions into one pair card
     const mergedSettlements = mergeByDirectionalPair(allSettlements);
+    const persistedPaymentByPair = new Map(
+      settlementPayments.map((payment) => [`${payment.payer_id}-${payment.recipient_id}`, payment]),
+    );
+    const persistedPaymentByUnorderedPair = new Map(
+      settlementPayments.map((payment) => {
+        const pair = [payment.payer_id, payment.recipient_id].sort().join("-");
+        return [pair, payment];
+      }),
+    );
+    const applyPersistedPayment = (settlement: Settlement): Settlement => {
+      const payment = persistedPaymentByPair.get(`${settlement.fromUser.id}-${settlement.toUser.id}`)
+        || persistedPaymentByUnorderedPair.get(
+          [settlement.fromUser.id, settlement.toUser.id].sort().join("-")
+        );
+      if (!payment) return settlement;
+
+      const receipts = [...(payment.settlement_payment_receipts || [])]
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      const latestReceipt = receipts[0];
+      const status = payment.status === "awaiting_confirmation"
+        ? "awaiting"
+        : payment.status as Settlement["status"];
+
+      return {
+        ...settlement,
+        fromUser: {
+          ...settlement.fromUser,
+          id: payment.payer_id,
+        },
+        toUser: {
+          ...settlement.toUser,
+          id: payment.recipient_id,
+        },
+        amount: Number(payment.amount),
+        status,
+        settlementPaymentId: payment.id,
+        settlementPaymentStatus: payment.status,
+        ...(latestReceipt?.receipt_url ? { receiptUrl: latestReceipt.receipt_url } : {}),
+      };
+    };
     const finalSettlements = collapseByUnorderedPair(mergedSettlements).map(s => ({
       ...s,
       status: settlementStatuses[s.id] ? settlementStatuses[s.id] : s.status,
-    }));
+    })).map(applyPersistedPayment);
 
     if (finalSettlements.length > 0) {
       return finalSettlements;
@@ -1327,8 +1388,8 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
     return fallbackCollapsed.map((s) => ({
       ...s,
       status: settlementStatuses[s.id] ? settlementStatuses[s.id] : s.status,
-    }));
-  }, [debts, members, expenses, paymentMethods, settlementStatuses, currentUserId]);
+    })).map(applyPersistedPayment);
+  }, [debts, members, expenses, paymentMethods, settlementPayments, settlementStatuses, currentUserId]);
 
   // Get current user's name from members array
   const currentUserName = useMemo(() => {
@@ -1647,6 +1708,8 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
       pending: 0,
       awaiting: 1,
       settled: 2,
+      rejected: 3,
+      cancelled: 4,
     };
 
     return settlements.filter(s => {
@@ -1756,6 +1819,8 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
   // Handler for settlement card click
   const handleSettlementCardClick = (settlement: Settlement) => {
     setSelectedSettlementForBreakdown(settlement);
+    setSelectedSettlementPaymentDetails(null);
+    void loadSettlementPaymentDetails(settlement);
     setBreakdownModalOpen(true);
   };
 
@@ -1780,8 +1845,54 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
 
   const getSettlementDisplayAmount = (settlement: Settlement): number => {
     const breakdown = getContributingExpenses(settlement);
-    return Math.max(0, Number((breakdown.grossOwed - breakdown.grossOffset).toFixed(2)));
+    return Math.abs(Number((breakdown.grossOwed - breakdown.grossOffset).toFixed(2)));
   };
+
+  const loadSettlementPaymentDetails = async (settlement: Settlement) => {
+    if (!settlement.settlementPaymentId) {
+      setSelectedSettlementPaymentDetails(null);
+      return;
+    }
+
+    try {
+      const [payment, allocations, receipt] = await Promise.all([
+        fetchSettlementPayment(settlement.settlementPaymentId),
+        fetchSettlementPaymentAllocations(settlement.settlementPaymentId),
+        fetchSettlementPaymentReceipt(settlement.settlementPaymentId),
+      ]);
+      setSelectedSettlementPaymentDetails({ payment, allocations, receipt });
+    } catch (error) {
+      console.error("Failed to load settlement payment details:", error);
+      toast({
+        title: "Details unavailable",
+        description: "Could not load the settlement payment details.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const getSettlementPaymentExpenses = (details: typeof selectedSettlementPaymentDetails): SettlementExpense[] => {
+    if (!details) return [];
+
+    return details.allocations.map((allocation: any) => {
+      const participant = Array.isArray(allocation.expense_participant)
+        ? allocation.expense_participant[0]
+        : allocation.expense_participant;
+      const expense = Array.isArray(participant?.expense) ? participant.expense[0] : participant?.expense;
+      const payer = members.find((member) => member.id === details.payment?.recipient_id);
+
+      return {
+        expenseId: expense?.id || participant?.expense_id || allocation.expense_participant_id,
+        title: expense?.description || "Settlement allocation",
+        date: expense?.expense_date || details.payment?.created_at,
+        shareAmount: Number(allocation.amount_applied || 0),
+        status: details.payment?.status === "settled" ? "settled" : "pending",
+        category: expense?.category || "other",
+        paidBy: payer?.name || "Recipient",
+      };
+    });
+  };
+
   // Helper: Get all expense payments contributing to a settlement
   const getExpensePaymentsForSettlement = (settlement: Settlement): { expenseId: string; memberId: string }[] => {
     const result: { expenseId: string; memberId: string }[] = [];
@@ -1811,6 +1922,46 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
     });
 
     return result;
+  };
+
+  // Build allocations only for the positive payer -> recipient direction.
+  // Reverse expenses remain offsets in the existing netting calculation.
+  const getSettlementPaymentAllocations = (settlement: Settlement) => {
+    const breakdown = getContributingExpenses(settlement);
+    const settlementAmount = Number((breakdown.grossOwed - breakdown.grossOffset).toFixed(2));
+    if (settlementAmount <= 0.009) return [];
+
+    const allocations = breakdown.owedToReceiver
+      .filter((expense) => expense.status !== "settled")
+      .map((expense) => {
+        const sourceExpense = expenses.find((item) => item.id === expense.expenseId);
+        const payment = sourceExpense?.payments?.find(
+          (item) => item.memberId === settlement.fromUser.id,
+        );
+
+        return {
+          expenseParticipantId: payment?.expenseParticipantId,
+          amountApplied: Number(expense.shareAmount.toFixed(2)),
+        };
+      });
+
+    if (allocations.some((allocation) => !allocation.expenseParticipantId)) {
+      throw new Error("Could not identify an expense participant for this settlement");
+    }
+
+    const totalAllocated = Number(
+      allocations.reduce((sum, allocation) => sum + allocation.amountApplied, 0).toFixed(2),
+    );
+
+    // The current confirmation RPC marks a participant fully paid, so do not
+    // create a partial allocation when reverse-direction netting is present.
+    if (Math.abs(totalAllocated - settlementAmount) > 0.009) {
+      throw new Error(
+        "This netted settlement needs an exact participant allocation before payment can be submitted.",
+      );
+    }
+
+    return allocations as { expenseParticipantId: string; amountApplied: number }[];
   };
 
   // Helper: Cascade settlement to update all related expense payments
@@ -1879,6 +2030,8 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
   // Handler for initiating settlement confirmation (direct to unified modal)
   const handleInitiateSettlement = (settlement: Settlement) => {
     setSettlementToConfirm(settlement);
+    setSettlementPaymentId(settlement.settlementPaymentId || null);
+    setSettlementPaymentStatus(settlement.settlementPaymentStatus || null);
     setConfirmModalOrigin(null);
     setSettlementConfirmModalOpen(true);
   };
@@ -1886,28 +2039,52 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
   // Upload receipt file inside the Confirm Settlement modal
   const handleSettlementReceiptUpload = async (file: File) => {
     if (!settlementToConfirm || !currentUserId) return;
-
-    // Find first pending expense where current user owes money (to upload against)
-    const { owedToReceiver } = getContributingExpenses(settlementToConfirm);
-    const firstPending = owedToReceiver.find(e => e.status === "pending");
-    const expenseId = firstPending?.expenseId ?? owedToReceiver[0]?.expenseId;
-
-    if (!expenseId) {
-      toast({ title: "No expense found", description: "Could not attach receipt to any expense.", variant: "destructive" });
+    if (settlementPaymentStatus === "awaiting_confirmation" && settlementPaymentId) {
+      toast({ title: "Receipt already submitted", description: "This settlement is awaiting confirmation." });
       return;
     }
 
     try {
-      const data = await uploadReceipt(expenseId, currentUserId, file);
-      const url = data.receipt_url as string;
+      const allocations = getSettlementPaymentAllocations(settlementToConfirm);
+      if (allocations.length === 0) {
+        throw new Error("No outstanding positive-direction expenses found for this settlement");
+      }
 
-      // Patch local settlement state so modal shows the uploaded image immediately
-      setSettlementToConfirm(prev => prev ? { ...prev, receiptUrl: url } : prev);
+      const idempotencyKey = settlementPaymentIdempotencyKeyRef.current || crypto.randomUUID();
+      settlementPaymentIdempotencyKeyRef.current = idempotencyKey;
+
+      const payment = await createSettlementPayment({
+        tripId,
+        recipientId: settlementToConfirm.toUser.id,
+        amount: getSettlementDisplayAmount(settlementToConfirm),
+        currency: homeCurrency,
+        idempotencyKey,
+        allocations,
+      });
+
+      setSettlementPaymentId(payment.id);
+      setSettlementPaymentStatus(payment.status);
+
+      const receipt = await submitSettlementPaymentReceipt(payment.id, file);
+      const url = receipt.receipt_url as string;
+
+      setSettlementPaymentStatus("awaiting_confirmation");
+      setSettlementPaymentReceipt({ receipt_url: url });
+      setSettlementToConfirm(prev => prev ? {
+        ...prev,
+        status: "awaiting",
+        receiptUrl: url,
+      } : prev);
+      await loadExpenses();
 
       toast({ title: "Receipt uploaded", description: "Your payment receipt has been attached." });
     } catch (err) {
       console.error("Settlement receipt upload failed:", err);
-      toast({ title: "Upload failed", description: "Could not upload receipt. Please try again.", variant: "destructive" });
+      toast({
+        title: "Upload failed",
+        description: err instanceof Error ? err.message : "Could not submit receipt. Please try again.",
+        variant: "destructive",
+      });
     }
   };
 
@@ -1919,6 +2096,32 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
   // Handler for confirming settlement from unified modal
   const handleConfirmSettlement = async () => {
     if (settlementToConfirm) {
+      const newSettlementPaymentId = settlementPaymentId || settlementToConfirm.settlementPaymentId;
+      if (newSettlementPaymentId) {
+        if (settlementPaymentStatus === "settled" || settlementToConfirm.settlementPaymentStatus === "settled") {
+          toast({ title: "Settlement already settled", description: "This payment has already been confirmed." });
+          return;
+        }
+
+        try {
+          await confirmSettlementPayment(newSettlementPaymentId);
+          setSettlementPaymentId(newSettlementPaymentId);
+          setSettlementPaymentStatus("settled");
+          await loadExpenses();
+          setSubTab("settle");
+          setSettlementToConfirm(null);
+          toast({ title: "Settlement completed", description: "The settlement payment was confirmed." });
+        } catch (error) {
+          console.error("Settlement payment confirmation failed:", error);
+          toast({
+            title: "Confirmation failed",
+            description: error instanceof Error ? error.message : "Could not confirm this settlement payment.",
+            variant: "destructive",
+          });
+        }
+        return;
+      }
+
       try {
         // Get affected expense IDs and details
         const expenseUpdates = getExpensePaymentsForSettlement(settlementToConfirm);
@@ -1982,10 +2185,35 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
     }
   };
 
+  const handleRejectSettlement = async (reason: string, settlementOverride?: Settlement) => {
+    const targetSettlement = settlementOverride || settlementToConfirm;
+    if (!targetSettlement) return;
+    const newSettlementPaymentId = targetSettlement.settlementPaymentId || settlementPaymentId;
+    if (!newSettlementPaymentId) return;
+
+    try {
+      await rejectSettlementPaymentReceipt(newSettlementPaymentId, reason);
+      setSettlementPaymentId(newSettlementPaymentId);
+      setSettlementPaymentStatus("rejected");
+      await loadExpenses();
+      setSettlementToConfirm(null);
+      toast({ title: "Receipt rejected", description: "The payer can submit a replacement receipt." });
+    } catch (error) {
+      console.error("Settlement payment rejection failed:", error);
+      toast({
+        title: "Rejection failed",
+        description: error instanceof Error ? error.message : "Could not reject this settlement payment.",
+        variant: "destructive",
+      });
+    }
+  };
+
   // Handler for marking all as paid from breakdown modal
   const handleMarkAllPaidFromBreakdown = () => {
     if (selectedSettlementForBreakdown) {
       setSettlementToConfirm(selectedSettlementForBreakdown);
+      setSettlementPaymentId(selectedSettlementForBreakdown.settlementPaymentId || null);
+      setSettlementPaymentStatus(selectedSettlementForBreakdown.settlementPaymentStatus || null);
       setBreakdownModalOpen(false);
       setConfirmModalOrigin("breakdown");
       setSettlementConfirmModalOpen(true);
@@ -2013,9 +2241,23 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
   // Handler for viewing settlement receipts
   const handleViewSettlementReceipts = () => {
     if (selectedSettlementForBreakdown) {
+      setReceiptsOpenedFromCard(false);
       setBreakdownModalOpen(false);
       setReceiptsModalOpen(true);
     }
+  };
+
+  const handleViewSettlementReceiptFromCard = (settlement: Settlement) => {
+    setSelectedSettlementForBreakdown(settlement);
+    setSelectedSettlementPaymentDetails(null);
+    setReceiptsOpenedFromCard(true);
+    void loadSettlementPaymentDetails(settlement);
+    setReceiptsModalOpen(true);
+  };
+
+  const handleBackFromSettlementReceipts = () => {
+    setReceiptsModalOpen(false);
+    setBreakdownModalOpen(true);
   };
 
   // Get receipts for a settlement
@@ -2039,6 +2281,33 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
           category: e.category,
         };
       });
+  };
+
+  const getSettlementReceiptRows = (settlement: Settlement) => {
+    const settlementPaymentId = settlement.settlementPaymentId;
+
+    if (
+      settlementPaymentId &&
+      selectedSettlementPaymentDetails?.payment?.id === settlementPaymentId
+    ) {
+      const { payment, receipt } = selectedSettlementPaymentDetails;
+      if (!receipt) return [];
+      return [{
+        expenseId: payment.id,
+        expenseTitle: "Settlement payment",
+        amount: Number(payment.amount || 0),
+        date: receipt.created_at || payment.created_at,
+        receiptUrl: receipt.receipt_url,
+        uploadedAt: receipt.created_at,
+        category: "other",
+        status: receipt.status,
+        rejectionReason: receipt.rejection_reason,
+      }];
+    }
+
+    if (settlementPaymentId) return [];
+
+    return getReceiptsForSettlement(settlement);
   };
 
   // Card tap handlers
@@ -2094,6 +2363,8 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
   const handleMarkPaid = (settlement: Settlement) => {
     logSettlementPendingDetails(settlement);
     setSettlementToConfirm(settlement);
+    setSettlementPaymentId(settlement.settlementPaymentId || null);
+    setSettlementPaymentStatus(settlement.settlementPaymentStatus || null);
     setConfirmModalOrigin(null);
     setSettlementConfirmModalOpen(true);
   };
@@ -2106,6 +2377,10 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
   // Handler for "Upload Receipt" - opens receipts modal for settlement
   const handleUploadReceipt = (settlement: Settlement) => {
     setSettlementToConfirm(settlement);
+    setSettlementPaymentId(settlement.settlementPaymentId || null);
+    setSettlementPaymentStatus(settlement.settlementPaymentStatus || null);
+    setSettlementPaymentReceipt(null);
+    settlementPaymentIdempotencyKeyRef.current = null;
     setConfirmModalOrigin(null);
     setSettlementConfirmModalOpen(true);
   };
@@ -3425,7 +3700,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
               {/* Status Filter Dropdown */}
               <Select 
                 value={statusFilter} 
-                onValueChange={(value: "all" | "pending" | "settled") => setStatusFilter(value)}
+                onValueChange={(value: "all" | "pending" | "awaiting" | "settled") => setStatusFilter(value)}
               >
                 <SelectTrigger className="w-full h-9 text-xs rounded-full bg-secondary border-0 px-4">
                   <SelectValue placeholder="Status" />
@@ -3433,6 +3708,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
                 <SelectContent className="bg-background border-border">
                   <SelectItem value="all">All</SelectItem>
                   <SelectItem value="pending">Pending</SelectItem>
+                  <SelectItem value="awaiting">Awaiting confirmation</SelectItem>
                   <SelectItem value="settled">Settled</SelectItem>
                 </SelectContent>
               </Select>
@@ -3456,7 +3732,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
                       onCardClick={() => handleSettlementCardClick(settlement)}
                       onViewPayment={() => handleViewQR(settlement)}
                       onViewDetails={() => handleSettlementCardClick(settlement)}
-                      onViewReceipt={() => handleSettlementCardClick(settlement)}
+                      onViewReceipt={() => handleViewSettlementReceiptFromCard(settlement)}
                       onSendReminder={() => handleSendReminder(settlement)}
                       onMarkPaid={() => handleMarkPaid(settlement)}
                       onUploadReceipt={() => handleUploadReceipt(settlement)}
@@ -3682,7 +3958,18 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
 
       {/* Settlement Breakdown Modal */}
       {selectedSettlementForBreakdown && (() => {
+        // Breakdown always uses the existing bilateral expense calculation.
+        // Settlement payment data is only payment metadata/action state.
         const breakdown = getContributingExpenses(selectedSettlementForBreakdown);
+        // Explicit ID guard: without it, a legacy settlement (no payment id)
+        // matches an empty details object via undefined === undefined.
+        const settlementPaymentId = selectedSettlementForBreakdown.settlementPaymentId;
+        const isNewSettlement = !!settlementPaymentId
+          && selectedSettlementPaymentDetails?.payment?.id === settlementPaymentId;
+        const paymentStatus = isNewSettlement ? selectedSettlementPaymentDetails?.payment?.status : undefined;
+        const displayStatus = isNewSettlement
+          ? (paymentStatus === "awaiting_confirmation" ? "awaiting" : paymentStatus)
+          : selectedSettlementForBreakdown.status;
         return (
           <SettlementBreakdownModal
             open={breakdownModalOpen}
@@ -3696,8 +3983,11 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
             }}
             fromUser={selectedSettlementForBreakdown.fromUser}
             toUser={selectedSettlementForBreakdown.toUser}
-            totalAmount={Math.max(0, Number((breakdown.grossOwed - breakdown.grossOffset).toFixed(2)))}
-            status={selectedSettlementForBreakdown.status === "awaiting" ? "pending" : selectedSettlementForBreakdown.status}
+            totalAmount={Math.abs(Number((breakdown.grossOwed - breakdown.grossOffset).toFixed(2)))}
+            status={displayStatus as Settlement["status"]}
+            paymentStatus={paymentStatus}
+            paymentCurrency={isNewSettlement ? selectedSettlementPaymentDetails?.payment?.currency : undefined}
+            paymentReceiptUrl={isNewSettlement ? selectedSettlementPaymentDetails?.receipt?.receipt_url : undefined}
             contributingExpenses={breakdown.owedToReceiver}
             reverseExpenses={breakdown.owedToDebtor}
             grossOwed={breakdown.grossOwed}
@@ -3709,6 +3999,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
               setBreakdownModalOpen(false);
             }}
             onMarkAllPaid={handleMarkAllPaidFromBreakdown}
+            onReject={(reason) => void handleRejectSettlement(reason, selectedSettlementForBreakdown)}
             onSendReminder={() => {
               handleSendReminder(selectedSettlementForBreakdown);
               setBreakdownModalOpen(false);
@@ -3732,12 +4023,17 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
               return;
             }
             setReceiptsModalOpen(open);
-            if (!open) setSelectedSettlementForBreakdown(null);
+            if (!open) {
+              setSelectedSettlementForBreakdown(null);
+              setReceiptsOpenedFromCard(false);
+            }
           }}
           fromUser={selectedSettlementForBreakdown.fromUser}
           toUser={selectedSettlementForBreakdown.toUser}
           totalAmount={selectedSettlementForBreakdown.amount}
-          receipts={getReceiptsForSettlement(selectedSettlementForBreakdown)}
+          receipts={getSettlementReceiptRows(selectedSettlementForBreakdown)}
+          paymentStatus={selectedSettlementPaymentDetails?.payment?.status}
+          onBack={receiptsOpenedFromCard ? undefined : handleBackFromSettlementReceipts}
           onMarkAllPaid={() => {
             setSettlementToConfirm(selectedSettlementForBreakdown);
             setReceiptsModalOpen(false);
@@ -3766,7 +4062,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
             owedToDebtor={breakdown.owedToDebtor.map(e => ({ title: e.title, amount: e.shareAmount }))}
             grossOwed={breakdown.grossOwed}
             grossOffset={breakdown.grossOffset}
-            receiptUrl={settlementToConfirm.receiptUrl}
+            receiptUrl={settlementPaymentReceipt?.receipt_url || settlementToConfirm.receiptUrl}
             onViewReceipt={() => {
               setViewingReceipt({ 
                 title: "Payment Receipt", 

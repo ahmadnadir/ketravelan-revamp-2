@@ -10,7 +10,7 @@ interface SettlementCardProps {
   amount: number;
   currency?: string;
   formatAmount?: (amount: number) => string;
-  status: "pending" | "settled" | "awaiting";
+  status: "pending" | "settled" | "awaiting" | "rejected" | "cancelled";
   currentUserId?: string;
   receiptAvailable?: boolean;
   showReminder?: boolean;
@@ -111,7 +111,7 @@ export function SettlementCard({
       {/* Actions - Role-based at bottom */}
       <div className="flex flex-col gap-1.5 pt-2 border-t border-border/50">
         {/* If I OWE someone and PENDING: Show View QR and Upload Receipt */}
-        {isUserPayer && status === "pending" && (
+        {isUserPayer && (status === "pending" || status === "rejected") && (
           <>
             <Button 
               variant="outline" 
@@ -146,17 +146,27 @@ export function SettlementCard({
           </Button>
         )}
         
-        {/* If I OWE someone and SETTLED: Show View Details */}
-        {isUserPayer && status === "settled" && (
-          <Button 
-            variant="outline" 
-            size="sm" 
-            className="w-full h-10 text-sm"
-            onClick={(e) => { e.stopPropagation(); onViewDetails?.(); }}
-          >
-            <FileText className="h-4 w-4 mr-2" />
-            View Details
-          </Button>
+        {/* Settled payments show the settlement-level receipt directly */}
+        {status === "settled" && (
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full h-10 text-sm"
+              onClick={(e) => { e.stopPropagation(); onViewDetails?.(); }}
+            >
+              <FileText className="h-4 w-4 mr-2" />
+              View Details
+            </Button>
+            <Button
+              size="sm"
+              className="w-full h-10 text-sm bg-foreground text-background hover:bg-foreground/90"
+              onClick={(e) => { e.stopPropagation(); onViewReceipt?.(); }}
+            >
+              <FileText className="h-4 w-4 mr-2" />
+              View Receipt
+            </Button>
+          </>
         )}
         
         {/* If someone owes ME and AWAITING: Show View Details + Confirm Payment */}
@@ -182,8 +192,8 @@ export function SettlementCard({
           </Button>
         )}
         
-        {/* If someone owes ME and PENDING or SETTLED: Show View Details */}
-        {isUserReceiver && (status === "pending" || status === "settled") && (
+        {/* If someone owes ME and PENDING: Show View Details */}
+        {isUserReceiver && status === "pending" && (
           <Button 
             variant="outline" 
             size="sm" 

@@ -18,7 +18,7 @@ export interface SettlementExpense {
   title: string;
   date: string;
   shareAmount: number;
-  status: "pending" | "settled";
+  status: "pending" | "settled" | "awaiting" | "rejected" | "cancelled";
   category: string;
   paidBy: string;
   originalCurrency?: CurrencyCode;
@@ -30,7 +30,10 @@ interface SettlementBreakdownModalProps {
   fromUser: { id: string; name: string; imageUrl?: string };
   toUser: { id: string; name: string; imageUrl?: string };
   totalAmount: number;
-  status: "pending" | "settled";
+  status: "pending" | "settled" | "awaiting" | "rejected" | "cancelled";
+  paymentStatus?: string;
+  paymentCurrency?: string;
+  paymentReceiptUrl?: string;
   contributingExpenses: SettlementExpense[];
   reverseExpenses?: SettlementExpense[];  // Expenses in reverse direction (offset)
   grossOwed?: number;                      // Total before netting
@@ -38,6 +41,7 @@ interface SettlementBreakdownModalProps {
   currentUserId: string;
   onUploadProof?: () => void;
   onMarkAllPaid?: () => void;
+  onReject?: (reason: string) => void;
   onSendReminder?: () => void;
   onViewQR?: () => void;
   onViewReceipts?: () => void;
@@ -60,6 +64,9 @@ export function SettlementBreakdownModal({
   toUser,
   totalAmount,
   status,
+  paymentStatus,
+  paymentCurrency,
+  paymentReceiptUrl,
   contributingExpenses,
   reverseExpenses = [],
   grossOwed,
@@ -67,6 +74,7 @@ export function SettlementBreakdownModal({
   currentUserId,
   onUploadProof,
   onMarkAllPaid,
+  onReject,
   onSendReminder,
   onViewQR,
   onViewReceipts,
@@ -310,6 +318,13 @@ export function SettlementBreakdownModal({
             <p className="text-[12px] text-muted-foreground mb-0.5">Net outstanding</p>
             <p className="text-2xl font-semibold text-foreground">{netAmountLabel}</p>
             <p className="text-[12px] text-muted-foreground mt-0.5">{netSubtitle}</p>
+            {paymentStatus && (
+              <p className="text-[12px] text-muted-foreground mt-2">
+                Payment status: {paymentStatus.replace(/_/g, " ")}
+                {paymentCurrency ? ` · ${paymentCurrency}` : ""}
+                {paymentReceiptUrl ? " · Receipt available" : ""}
+              </p>
+            )}
           </div>
         </DialogHeader>
 
@@ -368,7 +383,7 @@ export function SettlementBreakdownModal({
         <div className="flex-none p-4 pt-3 border-t border-border/50">
           <div className="flex flex-col gap-2">
             {/* Primary Action */}
-            {status === "pending" && (
+            {(status === "pending" || (status === "rejected" && isViewerOwing)) && (
               isViewerOwing ? (
                 <Button
                   className="w-full h-11 text-[15px] sm:text-sm bg-foreground text-background hover:bg-foreground/90"
@@ -387,9 +402,49 @@ export function SettlementBreakdownModal({
                   }}
                 >
                   <CheckCircle2 className="h-4 w-4 mr-2" />
-                  Settle {netAmountLabel}
+                  Mark as Paid
                 </Button>
               ) : null
+            )}
+
+            {/* Awaiting: match the settlement card's Confirm Payment action */}
+            {status === "awaiting" && isViewerReceiving && (
+              <Button
+                className="w-full h-11 text-[15px] sm:text-sm bg-foreground text-background hover:bg-foreground/90"
+                onClick={() => {
+                  onMarkAllPaid?.();
+                }}
+              >
+                <CheckCircle2 className="h-4 w-4 mr-2" />
+                Confirm Payment
+              </Button>
+            )}
+
+            {status === "awaiting" && isViewerReceiving && onReject && (
+              <Button
+                variant="outline"
+                className="w-full h-10 text-[15px] sm:text-sm text-destructive border-destructive/40"
+                onClick={() => {
+                  const reason = window.prompt("Reason for rejecting this receipt:");
+                  if (reason?.trim()) onReject(reason.trim());
+                }}
+              >
+                Reject receipt
+              </Button>
+            )}
+
+            {/* View Receipt: settlement-level receipt remains visible after submit/settle */}
+            {(status === "awaiting" || status === "settled" || status === "rejected") && paymentReceiptUrl && (
+              <Button
+                variant="outline"
+                className="w-full h-10 text-[15px] sm:text-sm"
+                onClick={() => {
+                  onViewReceipts?.();
+                }}
+              >
+                <Receipt className="h-4 w-4 mr-2" />
+                View Receipt
+              </Button>
             )}
 
             {/* Secondary Actions */}

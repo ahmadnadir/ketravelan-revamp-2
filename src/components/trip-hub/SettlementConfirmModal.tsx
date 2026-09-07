@@ -87,6 +87,7 @@ export function SettlementConfirmModal({
   // Only the debtor (person who owes) can upload/replace/remove their own payment proof;
   // the receiver can only view what was uploaded to them.
   const isViewerOwing = currentUserId === fromUser.id;
+  const canConfirmSettlement = !isViewerOwing;
 
   // Determine which currency to display
   const needsDualDisplay = originalCurrency && originalCurrency !== homeCurrency;
@@ -339,9 +340,14 @@ export function SettlementConfirmModal({
         <div className="flex-none p-4 pt-3 border-t border-border/50 space-y-2">
           <Button 
             onClick={handleConfirm} 
+            disabled={!canConfirmSettlement}
             className="w-full h-12 rounded-xl font-medium text-[15px]"
           >
-            Confirm & Settle {formatCurrencySpaced(primaryAmount, primaryCurrency)}
+            {canConfirmSettlement
+              ? `Approve & Settle ${formatCurrencySpaced(primaryAmount, primaryCurrency)}`
+              : receiptUrl
+                ? "Awaiting confirmation"
+                : "Upload receipt to continue"}
           </Button>
           <Button 
             variant="outline" 
