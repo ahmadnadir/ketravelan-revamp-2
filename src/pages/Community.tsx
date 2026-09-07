@@ -14,9 +14,11 @@ import ParentalPinOnboarding from "@/components/ParentalPinOnboarding";
 import { buildDataIdSelector, useListItemRestore } from "@/hooks/useListItemRestore";
 
 const DISCUSSION_LOCATION_STORAGE_KEY = "ketravelan-discussion-country";
+const DISCUSSION_EXPLICIT_LOCATION_STORAGE_KEY = "ketravelan-discussion-country-explicit";
 
 function CommunityContent() {
   const [searchParams] = useSearchParams();
+  const { profile } = useAuth();
   const {
     mode,
     setMode,
@@ -67,19 +69,38 @@ function CommunityContent() {
 
     (async () => {
       try {
+        const explicitCountry = typeof window !== "undefined"
+          ? window.localStorage.getItem(DISCUSSION_EXPLICIT_LOCATION_STORAGE_KEY)?.trim() || null
+          : null;
         const cachedCountry = getStoredCountry();
-        if (isMounted && cachedCountry) {
-          setLocationFilter(cachedCountry);
+        const profileRecord = profile as Record<string, unknown> | null;
+        const profileCountry = typeof profileRecord?.country === "string"
+          ? profileRecord.country.trim()
+          : typeof profileRecord?.location === "string"
+            ? profileRecord.location.trim()
+            : null;
+        const detectedCountry = detectCountryFromLocale();
+        const localeCountry = detectedCountry?.trim() === "United States" ? null : detectedCountry?.trim();
+        const preferredCountry = explicitCountry
+          || profileCountry
+          || (cachedCountry && cachedCountry !== "United States" ? cachedCountry : null)
+          || localeCountry;
+
+        if (isMounted && preferredCountry) {
+          setLocationFilter(preferredCountry);
         }
 
-        const detectedCountry = detectCountryFromLocale();
-        const normalizedCountry = detectedCountry?.trim();
+        const normalizedCountry = preferredCountry;
 
         if (!isMounted || !normalizedCountry) return;
 
         if (normalizedCountry !== cachedCountry) {
           setLocationFilter(normalizedCountry);
-          storeCountry(normalizedCountry);
+          if (explicitCountry || profileCountry) {
+            storeCountry(normalizedCountry);
+          } else if (cachedCountry === "United States") {
+            window.localStorage.removeItem(DISCUSSION_LOCATION_STORAGE_KEY);
+          }
 
           if (cachedCountry) {
             await refreshDiscussions();
@@ -93,7 +114,7 @@ function CommunityContent() {
     return () => {
       isMounted = false;
     };
-  }, [refreshDiscussions, setLocationFilter]);
+  }, [profile, refreshDiscussions, setLocationFilter]);
 
   return (
     <>

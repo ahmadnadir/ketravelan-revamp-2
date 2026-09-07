@@ -50,6 +50,7 @@ export function SettlementReceiptsModal({
 }: SettlementReceiptsModalProps) {
   const [expandedReceipt, setExpandedReceipt] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
+  const [fullScreenReceipt, setFullScreenReceipt] = useState<ReceiptData | null>(null);
 
   const handleZoomIn = () => {
     setZoom((prev) => Math.min(prev + 0.25, 3));
@@ -245,7 +246,8 @@ export function SettlementReceiptsModal({
                                   <img
                                     src={receipt.receiptUrl}
                                     alt={`Receipt for ${receipt.expenseTitle}`}
-                                    className="max-w-full h-auto rounded-xl shadow-lg max-h-[300px]"
+                                    className="max-w-full h-auto rounded-xl shadow-lg max-h-[300px] cursor-zoom-in"
+                                    onClick={() => setFullScreenReceipt(receipt)}
                                   />
                                 </div>
                               </div>
@@ -333,6 +335,23 @@ export function SettlementReceiptsModal({
             </Card>
           )}
         </div>
+
+        <Dialog
+          open={!!fullScreenReceipt}
+          onOpenChange={(open) => {
+            if (!open) setFullScreenReceipt(null);
+          }}
+        >
+          <DialogContent className="max-w-5xl w-[calc(100%-2rem)] h-[90vh] p-4 bg-background/95 flex items-center justify-center">
+            {fullScreenReceipt?.receiptUrl && (
+              <img
+                src={fullScreenReceipt.receiptUrl}
+                alt={`Receipt for ${fullScreenReceipt.expenseTitle}`}
+                className="max-h-full max-w-full object-contain rounded-lg"
+              />
+            )}
+          </DialogContent>
+        </Dialog>
 
         {/* Sticky Footer */}
         <div className="flex-none p-4 pt-3 border-t border-border/50 space-y-3">

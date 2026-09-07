@@ -1,5 +1,5 @@
 import { useParams, Link, useNavigate, useLocation } from "react-router-dom";
-import { ArrowLeft, Heart, Bookmark, Share2, MapPin, Clock, Send, Pencil, Trash2, Check, Instagram, Youtube, Facebook, Twitter, Link2 } from "lucide-react";
+import { ArrowLeft, Heart, Bookmark, Share2, MapPin, Clock, Send, Pencil, Trash2, Check, MoreVertical, Instagram, Youtube, Facebook, Twitter, Link2 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -18,6 +18,10 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { buildUniversalLinkUrl } from "@/lib/publicUrl";
 import { getLoadErrorFeedback } from "@/lib/requestErrors";
 import { ModerationMenu } from "@/components/moderation/ModerationMenu";
+import { DEFAULT_TRIP_IMAGE } from "@/lib/tripImage";
+import { useScrollProgress } from "@/hooks/useScrollProgress";
+import { useStickyHeader } from "@/hooks/useStickyHeader";
+import { FloatingNavigation } from "@/components/trip-details/FloatingNavigation";
 
 const TikTok = ({ className }: { className?: string }) => (
   <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -135,6 +139,16 @@ const processContentForPreview = (htmlContent: string): string => {
     }
   });
 
+  doc.querySelectorAll("img").forEach((img) => {
+    if (!img.getAttribute("src")) {
+      img.setAttribute("src", DEFAULT_TRIP_IMAGE);
+    }
+    img.setAttribute(
+      "onerror",
+      `this.onerror=null;this.src='${DEFAULT_TRIP_IMAGE}'`,
+    );
+  });
+
   linkifyTextNodes(doc.body);
   
   return doc.body.innerHTML;
@@ -211,6 +225,13 @@ export default function StoryDetail() {
   const commentRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const desktopCommentInputRef = useRef<HTMLInputElement | null>(null);
   const mobileCommentInputRef = useRef<HTMLInputElement | null>(null);
+  const { scrollY } = useScrollProgress({ containerSelector: ".app-shell-content" });
+  const mobileHeader = useStickyHeader({
+    scrollY,
+    transitionStart: 120,
+    transitionEnd: 240,
+    topResetThreshold: 2,
+  });
   const handleBackNavigation = () => {
     if (typeof window !== "undefined" && window.history.length > 1) {
       navigate(-1);
@@ -649,6 +670,124 @@ export default function StoryDetail() {
 
   return (
     <AppLayout wideLayout>
+      <FloatingNavigation
+        title={story?.title || "Story"}
+        backLabel="Back to Community"
+        onBack={handleBackNavigation}
+        rightActions={(
+          <>
+            {isOwner ? (
+              <>
+                <button
+                  type="button"
+                  onClick={handleEdit}
+                  className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-secondary"
+                  aria-label="Edit story"
+                >
+                  <Pencil className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowDeleteDialog(true)}
+                  className="flex h-8 w-8 items-center justify-center rounded-full text-destructive hover:bg-destructive/10"
+                  aria-label="Delete story"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </>
+            ) : story ? (
+              <ModerationMenu
+                reportType="STORY"
+                targetId={story.id}
+                reportedUserId={story.author.id}
+                targetLabel="Story"
+                reportLabel="Report Story"
+              />
+            ) : null}
+            <button
+              type="button"
+              onClick={handleShare}
+              className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-secondary"
+              aria-label="Share story"
+            >
+              <Share2 className="h-4 w-4" />
+            </button>
+          </>
+        )}
+        visible={mobileHeader.showFloatingNavigation}
+        opacity={mobileHeader.opacity}
+        translateY={mobileHeader.translateY}
+        scale={mobileHeader.scale}
+        blurPx={mobileHeader.blurPx}
+        shadowOpacity={mobileHeader.shadowOpacity}
+      />
+      <div
+        className="pointer-events-none fixed inset-x-0 top-0 z-[80] hidden px-4 md:left-60 md:block"
+        aria-hidden={scrollY <= 120}
+      >
+        <div
+          className="pointer-events-auto flex items-center gap-3 rounded-[22px] border border-white/50 bg-white/70 px-3 py-2 shadow-lg backdrop-blur transition-all duration-200"
+          style={{
+            marginTop: "calc(var(--header-total-height) + 0.75rem)",
+            opacity: scrollY > 120 ? 1 : 0,
+            transform: scrollY > 120 ? "translateY(0)" : "translateY(-12px)",
+          }}
+        >
+          <button
+            type="button"
+            onClick={handleBackNavigation}
+            aria-label="Back to Community"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-secondary hover:bg-secondary/80"
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </button>
+          <h2 className="truncate text-base font-semibold text-foreground">
+            {story?.title || "Story"}
+          </h2>
+          <div className="ml-auto flex shrink-0 items-center gap-1">
+            {isOwner ? (
+              <>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={handleEdit}
+                  title="Edit story"
+                  aria-label="Edit story"
+                >
+                  <Pencil className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setShowDeleteDialog(true)}
+                  title="Delete story"
+                  aria-label="Delete story"
+                  className="text-destructive hover:text-destructive"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </>
+            ) : story ? (
+              <ModerationMenu
+                reportType="STORY"
+                targetId={story.id}
+                reportedUserId={story.author.id}
+                targetLabel="Story"
+                reportLabel="Report Story"
+              />
+            ) : null}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={handleShare}
+              title="Share story"
+              aria-label="Share story"
+            >
+              <Share2 className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      </div>
       <SEOHead
         title={`${story?.title || "Story"} | Ketravelan Stories`}
         description={story?.excerpt || ""}
@@ -659,9 +798,13 @@ export default function StoryDetail() {
       <div className="relative -mx-5 sm:-mx-6 -mt-4 lg:-mx-8">
         <div className="aspect-[16/9]">
           <img
-            src={story?.coverImage}
+            src={story?.coverImage || DEFAULT_TRIP_IMAGE}
             alt={story?.title}
             className="w-full h-full object-cover"
+            onError={(event) => {
+              if (event.currentTarget.src.endsWith(DEFAULT_TRIP_IMAGE)) return;
+              event.currentTarget.src = DEFAULT_TRIP_IMAGE;
+            }}
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-black/30" />
         </div>
@@ -858,7 +1001,7 @@ export default function StoryDetail() {
           <h3 className="font-semibold text-lg">Comments ({story?.commentsList?.length || 0})</h3>
 
           {/* Comments List - hidden on mobile to show above navbar */}
-          <div className="space-y-3 sm:space-y-4 pb-0 sm:pb-8">
+          <div className="space-y-3 sm:space-y-4 pb-24 sm:pb-8">
             {story?.commentsList && story.commentsList.length > 0 ? (
               getNestedComments().map((comment) => {
                 const isCommentOwner = user && comment.author.id === user.id;
@@ -1012,13 +1155,13 @@ export default function StoryDetail() {
 
       {/* Mobile Comment CTA - Above navbar */}
       <div 
-        className="sm:hidden fixed left-0 right-0 z-40 bg-background/95 backdrop-blur border-t border-black/[0.07] px-3 py-2"
+        className="sm:hidden fixed left-0 right-0 z-40 bg-background/95 backdrop-blur border-t border-black/[0.07] px-3 py-1"
         style={{
           bottom: 'calc(var(--keyboard-height, 0px) + var(--tabbar-height) + env(safe-area-inset-bottom, 0px))',
         }}
       >
         {user ? (
-          <div className="space-y-1.5">
+          <div className="space-y-1">
             {editingCommentId && (
               <div className="text-xs text-muted-foreground flex items-center gap-2">
                 <span>Editing your comment</span>
@@ -1033,7 +1176,7 @@ export default function StoryDetail() {
                 </button>
               </div>
             )}
-            <div className="flex gap-2 items-center rounded-full border border-border/70 bg-muted/35 pl-1.5 pr-1.5 py-1">
+            <div className="flex gap-2 items-center rounded-full border border-border/70 bg-muted/35 pl-1.5 pr-1.5 py-0.5">
               <div className="relative flex-1">
                 <Input
                   ref={mobileCommentInputRef}
@@ -1047,13 +1190,13 @@ export default function StoryDetail() {
                       handleSubmitComment();
                     }
                   }}
-                  className="h-10 text-sm leading-5 px-3 border-0 bg-transparent shadow-none focus-visible:ring-0 focus-visible:border-transparent"
+                  className="h-8 text-sm leading-5 px-3 border-0 bg-transparent shadow-none focus-visible:ring-0 focus-visible:border-transparent"
                   disabled={isSubmittingComment}
                 />
               </div>
               <Button
                 size={editingCommentId ? "sm" : "icon"}
-                className={editingCommentId ? "rounded-full flex-shrink-0 h-10 px-3 text-sm" : "rounded-full flex-shrink-0 h-10 w-10"}
+                className={editingCommentId ? "rounded-full flex-shrink-0 h-8 px-3 text-sm" : "rounded-full flex-shrink-0 h-8 w-8"}
                 onClick={handleSubmitComment}
                 disabled={!commentText.trim() || isSubmittingComment}
               >

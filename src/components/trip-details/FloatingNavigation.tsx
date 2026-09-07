@@ -12,6 +12,7 @@ interface FloatingNavigationProps {
   scale: number;
   blurPx: number;
   shadowOpacity: number;
+  fullWidth?: boolean;
 }
 
 export function FloatingNavigation({
@@ -25,6 +26,7 @@ export function FloatingNavigation({
   scale,
   blurPx,
   shadowOpacity,
+  fullWidth = false,
 }: FloatingNavigationProps) {
   const resolvedOpacity = visible ? opacity : 0;
   const resolvedTranslateY = visible ? translateY : -16;
@@ -40,7 +42,10 @@ export function FloatingNavigation({
     >
       <div
         className={cn(
-          "mx-auto max-w-[calc(100%-0.25rem)] rounded-[22px] border border-white/50 bg-white/70 px-3 py-2",
+          "mx-auto border border-white/50 bg-white/70 px-3 py-2",
+          fullWidth
+            ? "max-w-none rounded-none border-x-0"
+            : "max-w-[calc(100%-0.25rem)] rounded-[22px]",
           visible ? "pointer-events-auto" : "pointer-events-none"
         )}
         style={{

@@ -86,11 +86,6 @@ export default function DiscussionDetail() {
   const replyRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const replyInputRef = useRef<HTMLInputElement | null>(null);
   const handleBackNavigation = () => {
-    if (typeof window !== "undefined" && window.history.length > 1) {
-      navigate(-1);
-      return;
-    }
-
     navigate("/community?tab=discussions", { replace: true });
   };
   

@@ -62,6 +62,7 @@ import { cn } from "@/lib/utils";
 import { ImageCropModal } from "@/components/profile/ImageCropModal";
 import { uploadImageFromDataUrl } from "@/lib/imageStorage";
 import { countries } from "@/components/onboarding/CountrySelector";
+import { DEFAULT_TRIP_IMAGE, getTripImageUrl } from "@/lib/tripImage";
 
 
 // Helper to map stored travel style id/label to display label + emoji for consistent rendering
@@ -1139,9 +1140,13 @@ export default function Profile() {
                         <div className="flex gap-3 p-3">
                           <div className="h-16 w-20 rounded-lg overflow-hidden shrink-0">
                             <img
-                              src={trip.cover_image || trip.coverImage || ''}
+                              src={getTripImageUrl(trip.cover_image || trip.coverImage)}
                               alt={trip.title}
                               className="h-full w-full object-cover"
+                              onError={(event) => {
+                                if (event.currentTarget.src.endsWith(DEFAULT_TRIP_IMAGE)) return;
+                                event.currentTarget.src = DEFAULT_TRIP_IMAGE;
+                              }}
                             />
                           </div>
                           <div className="flex-1 min-w-0">
@@ -1212,9 +1217,13 @@ export default function Profile() {
                         <div className="flex gap-3 p-3">
                           <div className="h-16 w-20 rounded-lg overflow-hidden shrink-0">
                             <img
-                              src={trip.cover_image || trip.coverImage || ''}
+                              src={getTripImageUrl(trip.cover_image || trip.coverImage)}
                               alt={trip.title}
                               className="h-full w-full object-cover"
+                              onError={(event) => {
+                                if (event.currentTarget.src.endsWith(DEFAULT_TRIP_IMAGE)) return;
+                                event.currentTarget.src = DEFAULT_TRIP_IMAGE;
+                              }}
                             />
                           </div>
                           <div className="flex-1 min-w-0">

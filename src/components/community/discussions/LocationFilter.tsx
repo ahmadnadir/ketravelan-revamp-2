@@ -10,8 +10,15 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 
+const DISCUSSION_EXPLICIT_LOCATION_STORAGE_KEY = "ketravelan-discussion-country-explicit";
+
 export function LocationFilter() {
   const { filters, setLocationFilter } = useCommunity();
+
+  const selectLocation = (location: string | "global") => {
+    setLocationFilter(location);
+    window.localStorage.setItem(DISCUSSION_EXPLICIT_LOCATION_STORAGE_KEY, location);
+  };
 
   const currentLocation =
     filters.location === "global"
@@ -29,7 +36,7 @@ export function LocationFilter() {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-56 max-h-80 overflow-y-auto">
         <DropdownMenuItem
-          onClick={() => setLocationFilter("global")}
+          onClick={() => selectLocation("global")}
           className="gap-2"
         >
           <Globe className="h-4 w-4" />
@@ -39,7 +46,7 @@ export function LocationFilter() {
         {countries.map((country) => (
             <DropdownMenuItem
               key={country.name}
-              onClick={() => setLocationFilter(country.name)}
+              onClick={() => selectLocation(country.name)}
               className="gap-2"
             >
               <span>{country.flag}</span>
