@@ -67,6 +67,17 @@ const getMemberColor = (memberName: string, index: number): typeof MEMBER_COLORS
   return MEMBER_COLORS[colorIndex];
 };
 
+const CATEGORY_BAR_COLORS: Record<string, string> = {
+  flight: "bg-cyan-500",
+  food_and_drinks: "bg-teal-400",
+  transport: "bg-orange-500",
+  accommodation: "bg-amber-400",
+  activities: "bg-pink-500",
+  shopping: "bg-fuchsia-500",
+  equipment_rentals: "bg-emerald-500",
+  other: "bg-slate-500",
+};
+
 // Helper function for consistent currency formatting
 const formatCurrency = (amount: number): string => {
   return `RM${amount.toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -466,7 +477,9 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
           },
           payments: exp.expense_participants?.map((p: any) => {
             // Check if this participant has uploaded a receipt
-            const participantReceipt = receipts.find((r: any) => r.participant_id === p.user_id);
+            const participantReceipt = receipts.find(
+              (r: any) => r.participant_id === p.user_id && r.status === "pending"
+            );
             
             let status: 'pending' | 'settled' = 'pending';
             let receiptUrl: string | undefined;
@@ -749,6 +762,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
         percentage: total > 0 ? Math.round((amount / total) * 100) : 0,
         categoryCode: category,
         emoji: expenseCategories.find((item) => item.code === category)?.emoji || "",
+        barColor: CATEGORY_BAR_COLORS[category] || "bg-sky-500",
       }))
       .sort((a, b) => b.amount - a.amount); // Sort by amount descending
   }, [expenses, expenseCategories]);
@@ -809,6 +823,20 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
 
       const directionMap = new Map<string, DirectionalSummary>();
 
+      const latestExpenseCreatedAtByDirection = new Map<string, string | undefined>();
+      expenses.forEach((expense) => {
+        const payerId = expense.payer?.id;
+        if (!payerId || !expense.createdAt) return;
+        expense.splitWith.forEach((memberId) => {
+          if (memberId === payerId) return;
+          const key = `${memberId}-${payerId}`;
+          const current = latestExpenseCreatedAtByDirection.get(key);
+          if (!current || new Date(expense.createdAt!).getTime() > new Date(current).getTime()) {
+            latestExpenseCreatedAtByDirection.set(key, expense.createdAt);
+          }
+        });
+      });
+
       expenses.forEach((expense) => {
         const payerId = expense.payer?.id;
         if (!payerId) return;
@@ -822,7 +850,11 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
           const key = `${memberId}-${payerId}`;
           const payment = expense.payments?.find((p) => p.memberId === memberId);
           const isSettled = payment?.status === "settled" && !!payment?.confirmedByPayer;
-          const isAwaiting = isAwaitingConfirmation(expense, payment);
+          const isAwaiting = isAwaitingConfirmation(
+            expense,
+            payment,
+            latestExpenseCreatedAtByDirection.get(key),
+          );
           const isPending = !isSettled && !isAwaiting;
 
           if (!directionMap.has(key)) {
@@ -2389,7 +2421,19 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
       if (updateExpenseError) throw updateExpenseError;
 
       if (financialChange) {
-        // Reset payment records only when the amount or split participants changed.
+        // Financial changes invalidate old participant payment proof in the database.
+        const { error: invalidateReceiptsError } = await supabase
+          .from('expense_receipts')
+          .update({
+            status: 'rejected',
+            rejection_reason: 'Expense amount or participants changed',
+            reviewed_at: new Date().toISOString(),
+          })
+          .eq('expense_id', id)
+          .eq('status', 'pending');
+
+        if (invalidateReceiptsError) throw invalidateReceiptsError;
+
         const { error: deletePaymentsError } = await supabase
           .from('expense_payments')
           .delete()
@@ -2441,6 +2485,20 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
 
           if (insertParticipantsError) throw insertParticipantsError;
         }
+
+        const payerIdForStatus = existingExpense?.payer?.id || payerId;
+        const participantIds = existingExpense?.splitWith || updatedExpense.splitWith;
+        const affectedMemberIds = [...new Set([payerIdForStatus, ...participantIds])];
+        setSettlementStatuses((previous) => {
+          const next = { ...previous };
+          affectedMemberIds.forEach((memberId) => {
+            if (memberId && memberId !== payerIdForStatus) {
+              next[`settlement-${memberId}-${payerIdForStatus}`] = "pending";
+              next[`settlement-${payerIdForStatus}-${memberId}`] = "pending";
+            }
+          });
+          return next;
+        });
       }
 
       // Reload expenses from database to reflect changes
@@ -2645,12 +2703,12 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
             status: "pending" as const
           }));
           
-          // Update the specific member's payment to "settled" (awaiting payer confirmation)
+          // Keep uploaded payment proof pending until payer confirmation.
           const updatedPayments = existingPayments.map(p => 
             p.memberId === memberId 
               ? { 
                   ...p, 
-                  status: "settled" as const,
+                  status: "pending" as const,
                   receiptUrl,
                   payerNote,
                   uploadedAt,
@@ -2670,7 +2728,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
           ...prev,
           payments: (prev.payments || prev.splitWith.map(id => ({ memberId: id, status: "pending" as const }))).map(p => 
             p.memberId === memberId 
-              ? { ...p, status: "settled" as const, receiptUrl, payerNote, uploadedAt, confirmedByPayer: false } 
+              ? { ...p, status: "pending" as const, receiptUrl, payerNote, uploadedAt, confirmedByPayer: false }
               : p
           )
         } : null);
@@ -3054,7 +3112,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
                       </div>
                       <div className="h-1.5 sm:h-2 bg-secondary rounded-full overflow-hidden">
                         <div
-                          className="h-full bg-primary rounded-full transition-all duration-700 ease-out"
+                          className={`h-full ${item.barColor} rounded-full transition-all duration-700 ease-out`}
                           style={{ 
                             width: `${item.percentage}%`,
                             animation: `growWidth 0.7s ease-out ${200 + index * 100}ms both`
