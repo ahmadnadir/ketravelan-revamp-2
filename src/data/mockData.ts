@@ -197,6 +197,7 @@ export const mockMembers = [
 export interface ExpensePayment {
   memberId: string;
   expenseParticipantId?: string;
+  amountSettled?: number;
   status: "pending" | "settled";
   receiptUrl?: string;
   uploadedAt?: string;

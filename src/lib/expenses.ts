@@ -42,6 +42,7 @@ export async function fetchTripExpenses(tripId: string) {
         id,
         user_id,
         amount_owed,
+        amount_settled,
         is_paid,
         paid_at
       ),
@@ -197,6 +198,7 @@ export async function createExpense(expenseData: CreateExpenseData) {
           expense_id: expense.id,
           user_id: p.user_id,
           amount_owed: p.amount_owed,
+          amount_settled: p.user_id === payerId ? p.amount_owed : 0,
           // Auto-mark as paid if participant is also the payer
           is_paid: p.user_id === payerId,
           paid_at: p.user_id === payerId ? new Date().toISOString() : null
@@ -813,10 +815,20 @@ export async function markParticipantsAsPaid(
 
   // Mark all participants as paid - this automatically updates the balance calculation
   for (const expenseId of expenseIds) {
+    const { data: participant, error: participantError } = await supabase
+      .from('expense_participants')
+      .select('amount_owed')
+      .eq('expense_id', expenseId)
+      .eq('user_id', participantId)
+      .single();
+
+    if (participantError) throw participantError;
+
     const { error: updateError } = await supabase
       .from('expense_participants')
       .update({
         is_paid: true,
+        amount_settled: participant.amount_owed,
         paid_at: new Date().toISOString()
       })
       .eq('expense_id', expenseId)
@@ -922,7 +934,7 @@ export async function fetchTripsExpenseOverview(tripIds: string[], userId?: stri
   // 2. Rows where the current user is a participant (money they owe)
   const { data: owed, error: owedErr } = await supabase
     .from('expense_participants')
-    .select('expense_id, amount_owed, is_paid')
+    .select('expense_id, amount_owed, amount_settled, is_paid')
     .eq('user_id', currentUserId)
     .in('expense_id', expenseIds);
   if (owedErr) throw owedErr;
@@ -940,7 +952,7 @@ export async function fetchTripsExpenseOverview(tripIds: string[], userId?: stri
   if (paidExpenseIds.length > 0) {
     const { data: creditData } = await supabase
       .from('expense_participants')
-      .select('expense_id, amount_owed, is_paid')
+      .select('expense_id, amount_owed, amount_settled, is_paid')
       .neq('user_id', currentUserId)
       .in('expense_id', paidExpenseIds)
       .eq('is_paid', false);

@@ -1,13 +1,14 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { Plus, DollarSign, TrendingUp, TrendingDown, Wallet, QrCode, SlidersHorizontal, Settings, ArrowLeftRight, Loader2 } from "lucide-react";
+import { Plus, DollarSign, TrendingUp, TrendingDown, Wallet, QrCode, SlidersHorizontal, Settings, ArrowLeftRight, Loader2, Clock, FileText } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { SegmentedControl } from "@/components/shared/SegmentedControl";
 import { ScrollableTabBar } from "@/components/shared/ScrollableTabBar";
 import { StatCard } from "@/components/shared/StatCard";
 import { ExpenseCard } from "@/components/shared/ExpenseCard";
 import { SettlementCard } from "@/components/shared/SettlementCard";
+import { StatusBadge } from "@/components/shared/StatusBadge";
 import { ViewQRModal } from "@/components/trip-hub/ViewQRModal";
 import { SendReminderModal } from "@/components/trip-hub/SendReminderModal";
 import { YourQRSection } from "@/components/trip-hub/YourQRSection";
@@ -114,7 +115,9 @@ interface Settlement {
   originalCurrency?: CurrencyCode;
   receiptUrl?: string;
   settlementPaymentId?: string;
+  settlementReceiptPaymentId?: string;
   settlementPaymentStatus?: string;
+  settlementPaymentNeedsReset?: boolean;
 }
 
 const isAwaitingConfirmation = (
@@ -274,6 +277,23 @@ const calculateUserShareOriginal = (expense: ExpenseData, userId: string): numbe
     return customAmount?.amount || 0;
   }
   return originalAmount / expense.splitWith.length;
+};
+
+const calculateOutstandingUserShare = (
+  expense: ExpenseData,
+  userId: string,
+  payment?: ExpenseData["payments"] extends Array<infer Payment> ? Payment : never,
+): number => {
+  const fullShare = calculateUserShare(expense, userId);
+  if (!payment?.amountSettled) return fullShare;
+
+  const originalShare = expense.splitType === "custom" && expense.customSplitAmounts
+    ? Number(expense.customSplitAmounts.find((item) => item.memberId === userId)?.amount || 0)
+    : Number(expense.amount || 0) / Math.max(expense.splitWith.length, 1);
+  if (originalShare <= 0) return 0;
+
+  const remainingOriginal = Math.max(0, originalShare - Number(payment.amountSettled));
+  return fullShare * (remainingOriginal / originalShare);
 };
 
 interface TripExpensesProps {
@@ -447,9 +467,19 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
           : undefined;
         const receipts = exp.expense_receipts || [];
         const totalParticipants = participants.length;
-        const paidParticipants = participants.filter((p: any) => p.is_paid).length;
-        const paymentProgress = totalParticipants > 0 
-          ? Math.round((paidParticipants / totalParticipants) * 100) 
+        const settledTotal = participants.reduce(
+          (sum: number, participant: any) => sum + Math.min(
+            Number(participant.amount_settled || 0),
+            Number(participant.amount_owed || 0),
+          ),
+          0,
+        );
+        const owedTotal = participants.reduce(
+          (sum: number, participant: any) => sum + Number(participant.amount_owed || 0),
+          0,
+        );
+        const paymentProgress = owedTotal > 0
+          ? Math.round((settledTotal / owedTotal) * 100)
           : 0;
         
         return {
@@ -502,6 +532,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
             return {
               memberId: p.user_id,
               expenseParticipantId: p.id,
+              amountSettled: Number(p.amount_settled || 0),
               status,
               receiptUrl,
               uploadedAt: participantReceipt?.created_at,
@@ -839,8 +870,17 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
       .sort((a, b) => b.amount - a.amount); // Sort by amount descending
   }, [expenses, members]);
 
-  // Generate settlements from database debts and fallback to expense-derived pairs; apply local status overrides
-  const settlements = useMemo(() => {
+  // Historical payments remain one record per database transaction.
+  // They are intentionally separate from current expense-derived balances.
+  const historicalSettlementPayments = useMemo(
+    () => settlementPayments
+      .filter((payment) => payment.status === "settled")
+      .map((payment) => ({ ...payment })),
+    [settlementPayments],
+  );
+
+  // Generate current outstanding settlements from expenses and unpaid shares.
+  const currentOutstandingSettlements = useMemo(() => {
     // Helper to compute a settlement for a given from/to pair
     const getFallbackMember = (userId: string) => {
       const payerMatch = expenses.find(expense => expense.payer?.id === userId)?.payer;
@@ -870,12 +910,14 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
         expense.splitWith.forEach((memberId) => {
           if (memberId === payerId) return;
 
-          const shareAmount = calculateUserShare(expense, memberId);
+          const payment = expense.payments?.find((p) => p.memberId === memberId);
+          const isSettled = payment?.status === "settled" && !!payment?.confirmedByPayer;
+          if (isSettled) return;
+
+          const shareAmount = calculateOutstandingUserShare(expense, memberId, payment);
           if (!Number.isFinite(shareAmount) || shareAmount <= 0) return;
 
           const key = `${memberId}-${payerId}`;
-          const payment = expense.payments?.find((p) => p.memberId === memberId);
-          const isSettled = payment?.status === "settled" && !!payment?.confirmedByPayer;
           const isAwaiting = isAwaitingConfirmation(expense, payment);
           const isPending = !isSettled && !isAwaiting;
 
@@ -934,59 +976,6 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
         .filter((s) => s.amount > 0.009);
     };
 
-    const buildSettledSettlementsFromExpenses = (): Settlement[] => {
-      const settledMap = new Map<string, { fromUserId: string; toUserId: string; amount: number }>();
-
-      expenses.forEach((expense) => {
-        const payerId = expense.payer?.id;
-        if (!payerId) return;
-
-        expense.splitWith.forEach((memberId) => {
-          if (memberId === payerId) return;
-
-          const payment = expense.payments?.find((p) => p.memberId === memberId);
-          const isSettled = payment?.status === "settled" && !!payment?.confirmedByPayer;
-          if (!isSettled) return;
-
-          const shareAmount = calculateUserShare(expense, memberId);
-          if (!Number.isFinite(shareAmount) || shareAmount <= 0) return;
-
-          const key = `${memberId}-${payerId}`;
-          if (!settledMap.has(key)) {
-            settledMap.set(key, { fromUserId: memberId, toUserId: payerId, amount: 0 });
-          }
-
-          const summary = settledMap.get(key)!;
-          summary.amount += shareAmount;
-        });
-      });
-
-      return Array.from(settledMap.values())
-        .map((summary) => {
-          const fromMember = members.find((m) => m.id === summary.fromUserId) || getFallbackMember(summary.fromUserId);
-          const toMember = members.find((m) => m.id === summary.toUserId) || getFallbackMember(summary.toUserId);
-          const qrCodeUrl = paymentMethods.find((pm) => pm.user_id === toMember.id)?.qr_code_url;
-
-          return {
-            id: `settlement-${summary.fromUserId}-${summary.toUserId}-settled`,
-            fromUser: {
-              id: fromMember.id,
-              name: fromMember.name,
-              imageUrl: fromMember.imageUrl || "",
-            },
-            toUser: {
-              id: toMember.id,
-              name: toMember.name,
-              imageUrl: toMember.imageUrl || "",
-              ...(qrCodeUrl && { qrCodeUrl }),
-            },
-            amount: Math.round(summary.amount * 100) / 100,
-            status: "settled" as const,
-          };
-        })
-        .filter((s) => s.amount > 0.009);
-    };
-
     const computeSettlementForPair = (fromUserId: string, toUserId: string, dbAmount?: number) => {
       const fromMember = members.find(m => m.id === fromUserId) || getFallbackMember(fromUserId);
       const toMember = members.find(m => m.id === toUserId) || getFallbackMember(toUserId);
@@ -1008,13 +997,13 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
         return payment?.status === "settled" && !!payment?.confirmedByPayer;
       };
 
-      // Check if there are ANY unpaid expenses in either direction
-      const hasUnpaidToUser = expensesToUserPaid.some(expense => {
+      // Current outstanding considers only participant shares that remain unpaid.
+      const hasOutstandingToUser = expensesToUserPaid.some(expense => {
         const payment = expense.payments?.find(p => p.memberId === fromUserId);
         return !isPaymentSettled(payment);
       });
 
-      const hasUnpaidFromUser = expensesFromUserPaid.some(expense => {
+      const hasOutstandingFromUser = expensesFromUserPaid.some(expense => {
         const payment = expense.payments?.find(p => p.memberId === toUserId);
         return !isPaymentSettled(payment);
       });
@@ -1037,35 +1026,27 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
         return false;
       });
 
-      // Settlement is "settled" only if there are related expenses AND no unpaid items
-      const allPaid = (expensesToUserPaid.length > 0 || expensesFromUserPaid.length > 0)
-        && !hasUnpaidToUser
-        && !hasUnpaidFromUser;
-
-      // Status precedence: awaiting > settled > pending
-      let status: "pending" | "settled" | "awaiting" = "pending";
+      // Current outstanding status is never derived from historical settled rows.
+      let status: "pending" | "awaiting" = "pending";
       if (hasAwaitingConfirmation) {
         status = "awaiting";
-      } else if (allPaid) {
-        status = "settled";
+      } else if (!hasOutstandingToUser && !hasOutstandingFromUser) {
+        return null;
       }
 
-      // Calculate net settlement amount from included shares (home currency)
-      const includeSettledOnly = status === "settled";
+      // Calculate current net outstanding from remaining shares only.
       const owedSum = expensesToUserPaid.reduce((sum, expense) => {
         const payment = expense.payments?.find(p => p.memberId === fromUserId);
         const isSettled = isPaymentSettled(payment);
-        const shouldInclude = includeSettledOnly ? isSettled : !isSettled;
-        if (!shouldInclude) return sum;
-        return sum + calculateUserShare(expense, fromUserId);
+        if (isSettled) return sum;
+        return sum + calculateOutstandingUserShare(expense, fromUserId, payment);
       }, 0);
 
       const offsetSum = expensesFromUserPaid.reduce((sum, expense) => {
         const payment = expense.payments?.find(p => p.memberId === toUserId);
         const isSettled = isPaymentSettled(payment);
-        const shouldInclude = includeSettledOnly ? isSettled : !isSettled;
-        if (!shouldInclude) return sum;
-        return sum + calculateUserShare(expense, toUserId);
+        if (isSettled) return sum;
+        return sum + calculateOutstandingUserShare(expense, toUserId, payment);
       }, 0);
 
       const netRaw = Math.round((owedSum - offsetSum) * 100) / 100;
@@ -1323,28 +1304,19 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
       return collapsed;
     };
 
-    // Merge ALL settlements (pending + settled) at source level
-    const allSettlements = [
-      ...generated,
-      ...buildSettledSettlementsFromExpenses(),
-    ];
+    // Current outstanding is expense-derived only. Historical payments are kept
+    // separately in historicalSettlementPayments and must not create current cards.
+    const allSettlements = generated;
 
     // Merge by directional pair first, then collapse opposite directions into one pair card
     const mergedSettlements = mergeByDirectionalPair(allSettlements);
-    const persistedPaymentByPair = new Map(
-      settlementPayments.map((payment) => [`${payment.payer_id}-${payment.recipient_id}`, payment]),
-    );
-    const persistedPaymentByUnorderedPair = new Map(
-      settlementPayments.map((payment) => {
-        const pair = [payment.payer_id, payment.recipient_id].sort().join("-");
-        return [pair, payment];
-      }),
+    const activePaymentByPair = new Map(
+      settlementPayments
+        .filter((payment) => ["pending", "awaiting_confirmation", "rejected"].includes(payment.status))
+        .map((payment) => [`${payment.payer_id}-${payment.recipient_id}`, payment]),
     );
     const applyPersistedPayment = (settlement: Settlement): Settlement => {
-      const payment = persistedPaymentByPair.get(`${settlement.fromUser.id}-${settlement.toUser.id}`)
-        || persistedPaymentByUnorderedPair.get(
-          [settlement.fromUser.id, settlement.toUser.id].sort().join("-")
-        );
+      const payment = activePaymentByPair.get(`${settlement.fromUser.id}-${settlement.toUser.id}`);
       if (!payment) return settlement;
 
       const receipts = [...(payment.settlement_payment_receipts || [])]
@@ -1356,6 +1328,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
 
       return {
         ...settlement,
+        status,
         fromUser: {
           ...settlement.fromUser,
           id: payment.payer_id,
@@ -1364,8 +1337,6 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
           ...settlement.toUser,
           id: payment.recipient_id,
         },
-        amount: Number(payment.amount),
-        status,
         settlementPaymentId: payment.id,
         settlementPaymentStatus: payment.status,
         ...(latestReceipt?.receipt_url ? { receiptUrl: latestReceipt.receipt_url } : {}),
@@ -1390,6 +1361,38 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
       status: settlementStatuses[s.id] ? settlementStatuses[s.id] : s.status,
     })).map(applyPersistedPayment);
   }, [debts, members, expenses, paymentMethods, settlementPayments, settlementStatuses, currentUserId]);
+
+  // Keep the existing Settlement tab rendering on current outstanding data for now.
+  const settlements = currentOutstandingSettlements;
+
+  const historicalSettlementCards = useMemo<Settlement[]>(() => {
+    const getMember = (userId: string) => {
+      const member = members.find((item) => item.id === userId);
+      return {
+        id: userId,
+        name: member?.name || "Member",
+        imageUrl: member?.imageUrl || "",
+      };
+    };
+
+    return historicalSettlementPayments
+      .filter((payment) => payment.payer_id === currentUserId || payment.recipient_id === currentUserId)
+      .map((payment) => {
+        const receipts = [...(payment.settlement_payment_receipts || [])]
+          .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        const status = payment.status === "awaiting_confirmation" ? "awaiting" : payment.status;
+        return {
+          id: `historical-settlement-${payment.id}`,
+          fromUser: getMember(payment.payer_id),
+          toUser: getMember(payment.recipient_id),
+          amount: Number(payment.amount || 0),
+          status,
+          settlementPaymentId: payment.id,
+          settlementPaymentStatus: payment.status,
+          ...(receipts[0]?.receipt_url ? { receiptUrl: receipts[0].receipt_url } : {}),
+        } as Settlement;
+      });
+  }, [historicalSettlementPayments, members, currentUserId]);
 
   // Get current user's name from members array
   const currentUserName = useMemo(() => {
@@ -1734,8 +1737,10 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
     });
   }, [settlements, directionFilter, statusFilter, currentUserId]);
 
-  // Compute contributing expenses for each settlement (both directions for net calculation)
-  const getContributingExpenses = (settlement: Settlement): {
+  // Compute contributing expenses for each settlement (both directions for net calculation).
+  // ignoreStatusFilter: used for historical breakdowns, where offset-direction expenses never
+  // get their own is_paid flag flipped (only the net direction is recorded as paid).
+  const getContributingExpenses = (settlement: Settlement, ignoreStatusFilter = false): {
     owedToReceiver: SettlementExpense[];
     owedToDebtor: SettlementExpense[];
     grossOwed: number;
@@ -1753,15 +1758,17 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
       
       // Direction 1: toUser paid, fromUser owes
       if (payer.id === settlement.toUser.id && expense.splitWith?.includes(settlement.fromUser.id)) {
-        const shareAmount = calculateUserShare(expense, settlement.fromUser.id);
         const memberPayment = expense.payments?.find(p => p.memberId === settlement.fromUser.id);
+        const shareAmount = calculateOutstandingUserShare(expense, settlement.fromUser.id, memberPayment);
         const status: SettlementExpense["status"] = memberPayment?.status === "settled" 
           ? "settled" 
           : "pending";
         
         // Include settled expenses when viewing a settled settlement
-        const shouldInclude = settlement.status === "settled" 
-          ? status === "settled" 
+        const shouldInclude = ignoreStatusFilter
+          ? true
+          : settlement.status === "settled"
+          ? status === "settled"
           : status !== "settled";
         
         if (shouldInclude) {
@@ -1779,15 +1786,17 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
       
       // Direction 2: fromUser paid, toUser owes (reverse - this gets subtracted)
       if (payer.id === settlement.fromUser.id && expense.splitWith?.includes(settlement.toUser.id)) {
-        const shareAmount = calculateUserShare(expense, settlement.toUser.id);
         const memberPayment = expense.payments?.find(p => p.memberId === settlement.toUser.id);
+        const shareAmount = calculateOutstandingUserShare(expense, settlement.toUser.id, memberPayment);
         const status: SettlementExpense["status"] = memberPayment?.status === "settled" 
           ? "settled" 
           : "pending";
         
         // Include settled expenses when viewing a settled settlement
-        const shouldInclude = settlement.status === "settled" 
-          ? status === "settled" 
+        const shouldInclude = ignoreStatusFilter
+          ? true
+          : settlement.status === "settled"
+          ? status === "settled"
           : status !== "settled";
         
         if (shouldInclude) {
@@ -1849,16 +1858,17 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
   };
 
   const loadSettlementPaymentDetails = async (settlement: Settlement) => {
-    if (!settlement.settlementPaymentId) {
+    const paymentId = settlement.settlementPaymentId || settlement.settlementReceiptPaymentId;
+    if (!paymentId) {
       setSelectedSettlementPaymentDetails(null);
       return;
     }
 
     try {
       const [payment, allocations, receipt] = await Promise.all([
-        fetchSettlementPayment(settlement.settlementPaymentId),
-        fetchSettlementPaymentAllocations(settlement.settlementPaymentId),
-        fetchSettlementPaymentReceipt(settlement.settlementPaymentId),
+        fetchSettlementPayment(paymentId),
+        fetchSettlementPaymentAllocations(paymentId),
+        fetchSettlementPaymentReceipt(paymentId),
       ]);
       setSelectedSettlementPaymentDetails({ payment, allocations, receipt });
     } catch (error) {
@@ -1871,26 +1881,70 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
     }
   };
 
-  const getSettlementPaymentExpenses = (details: typeof selectedSettlementPaymentDetails): SettlementExpense[] => {
-    if (!details) return [];
+  // Splits real settlement_payment_expenses allocations by direction, using the frozen
+  // amount_owed/amount_applied snapshot instead of live (mutable) expense state.
+  const splitHistoricalAllocationsByDirection = (
+    details: typeof selectedSettlementPaymentDetails,
+  ): { owedToReceiver: SettlementExpense[]; owedToDebtor: SettlementExpense[] } => {
+    if (!details) return { owedToReceiver: [], owedToDebtor: [] };
 
-    return details.allocations.map((allocation: any) => {
+    const payerId = details.payment?.payer_id;
+    const recipientId = details.payment?.recipient_id;
+    const payerMember = members.find((member) => member.id === payerId);
+    const recipientMember = members.find((member) => member.id === recipientId);
+
+    const owedToReceiver: SettlementExpense[] = [];
+    const owedToDebtor: SettlementExpense[] = [];
+
+    details.allocations.forEach((allocation: any) => {
       const participant = Array.isArray(allocation.expense_participant)
         ? allocation.expense_participant[0]
         : allocation.expense_participant;
       const expense = Array.isArray(participant?.expense) ? participant.expense[0] : participant?.expense;
-      const payer = members.find((member) => member.id === details.payment?.recipient_id);
+      const amountApplied = Number(allocation.amount_applied || 0);
+      // Primary amount is this participant's original share, not the total trip expense.
+      const shareAmount = Number(participant?.amount_owed ?? expense?.amount ?? amountApplied);
 
-      return {
+      const item: SettlementExpense = {
         expenseId: expense?.id || participant?.expense_id || allocation.expense_participant_id,
         title: expense?.description || "Settlement allocation",
         date: expense?.expense_date || details.payment?.created_at,
-        shareAmount: Number(allocation.amount_applied || 0),
+        shareAmount,
+        amountApplied,
         status: details.payment?.status === "settled" ? "settled" : "pending",
         category: expense?.category || "other",
-        paidBy: payer?.name || "Recipient",
+        paidBy: "",
       };
+
+      if (participant?.user_id === payerId) {
+        owedToReceiver.push({ ...item, paidBy: recipientMember?.name || "Recipient" });
+      } else if (participant?.user_id === recipientId) {
+        owedToDebtor.push({ ...item, paidBy: payerMember?.name || "Payer" });
+      }
     });
+
+    return { owedToReceiver, owedToDebtor };
+  };
+
+  const getHistoricalSettlementBreakdown = (
+    details: typeof selectedSettlementPaymentDetails,
+  ) => {
+    const { owedToReceiver, owedToDebtor } = splitHistoricalAllocationsByDirection(details);
+    const settledAmount = Number(details?.payment?.amount || 0);
+    const round2 = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
+
+    // Use the frozen amount_applied snapshot for gross/net math so it never drifts
+    // as amount_settled changes on other, unrelated settlements later.
+    const grossOffset = round2(
+      owedToDebtor.reduce((sum, item) => sum + (item.amountApplied ?? item.shareAmount), 0),
+    );
+
+    return {
+      owedToReceiver,
+      owedToDebtor,
+      grossOwed: round2(settledAmount + grossOffset),
+      grossOffset,
+    };
   };
 
   // Helper: Get all expense payments contributing to a settlement
@@ -1924,44 +1978,45 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
     return result;
   };
 
-  // Build allocations only for the positive payer -> recipient direction.
-  // Reverse expenses remain offsets in the existing netting calculation.
+  // Persist every expense participant that contributed to the net settlement amount,
+  // for both the positive payer->recipient direction and the reverse/offset direction.
+  // Each row stores the full (positive) share amount for that expense participant;
+  // direction is derived from the linked expense participant, never from the sign of amount_applied.
   const getSettlementPaymentAllocations = (settlement: Settlement) => {
     const breakdown = getContributingExpenses(settlement);
     const settlementAmount = Number((breakdown.grossOwed - breakdown.grossOffset).toFixed(2));
     if (settlementAmount <= 0.009) return [];
 
-    const allocations = breakdown.owedToReceiver
-      .filter((expense) => expense.status !== "settled")
-      .map((expense) => {
-        const sourceExpense = expenses.find((item) => item.id === expense.expenseId);
-        const payment = sourceExpense?.payments?.find(
-          (item) => item.memberId === settlement.fromUser.id,
-        );
+    const buildAllocation = (expense: SettlementExpense, owingUserId: string) => {
+      const sourceExpense = expenses.find((item) => item.id === expense.expenseId);
+      const payment = sourceExpense?.payments?.find((item) => item.memberId === owingUserId);
 
-        return {
-          expenseParticipantId: payment?.expenseParticipantId,
-          amountApplied: Number(expense.shareAmount.toFixed(2)),
-        };
-      });
+      return {
+        expenseParticipantId: payment?.expenseParticipantId,
+        amountApplied: Number(expense.shareAmount.toFixed(2)),
+      };
+    };
+
+    const receiverAllocations = breakdown.owedToReceiver
+      .filter((expense) => expense.status !== "settled")
+      .map((expense) => buildAllocation(expense, settlement.fromUser.id));
+
+    const debtorAllocations = breakdown.owedToDebtor
+      .filter((expense) => expense.status !== "settled")
+      .map((expense) => buildAllocation(expense, settlement.toUser.id));
+
+    const allocations = [...receiverAllocations, ...debtorAllocations];
 
     if (allocations.some((allocation) => !allocation.expenseParticipantId)) {
       throw new Error("Could not identify an expense participant for this settlement");
     }
 
-    const totalAllocated = Number(
-      allocations.reduce((sum, allocation) => sum + allocation.amountApplied, 0).toFixed(2),
-    );
-
-    // The current confirmation RPC marks a participant fully paid, so do not
-    // create a partial allocation when reverse-direction netting is present.
-    if (Math.abs(totalAllocated - settlementAmount) > 0.009) {
-      throw new Error(
-        "This netted settlement needs an exact participant allocation before payment can be submitted.",
-      );
-    }
-
-    return allocations as { expenseParticipantId: string; amountApplied: number }[];
+    return allocations
+      .filter((allocation) => allocation.amountApplied > 0)
+      .map((allocation) => ({
+        expenseParticipantId: allocation.expenseParticipantId!,
+        amountApplied: allocation.amountApplied,
+      }));
   };
 
   // Helper: Cascade settlement to update all related expense payments
@@ -2284,7 +2339,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
   };
 
   const getSettlementReceiptRows = (settlement: Settlement) => {
-    const settlementPaymentId = settlement.settlementPaymentId;
+    const settlementPaymentId = settlement.settlementPaymentId || settlement.settlementReceiptPaymentId;
 
     if (
       settlementPaymentId &&
@@ -2646,6 +2701,31 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
         return;
       }
 
+      if (financialChange) {
+        const { data: participantRows, error: participantLookupError } = await supabase
+          .from('expense_participants')
+          .select('id')
+          .eq('expense_id', id);
+
+        if (participantLookupError) throw participantLookupError;
+
+        const participantIds = (participantRows || []).map((participant) => participant.id);
+        if (participantIds.length > 0) {
+          const { data: linkedAllocations, error: allocationLookupError } = await supabase
+            .from('settlement_payment_expenses')
+            .select('settlement_payment_id, settlement_payments(status)')
+            .in('expense_participant_id', participantIds);
+
+          if (allocationLookupError) throw allocationLookupError;
+
+          if ((linkedAllocations || []).length > 0) {
+            throw new Error(
+              'This expense is part of a completed settlement. Its amount or participants cannot be changed. Please create an adjustment expense instead.',
+            );
+          }
+        }
+      }
+
       // Handle receipt upload if there's a new file
       let receiptUrl = updatedExpense.existingReceiptUrl; // Start with existing URL
       
@@ -2748,6 +2828,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
             expense_id: id,
             user_id: memberId,
             amount_owed: amountOwed,
+            amount_settled: memberId === payerId ? amountOwed : 0,
             is_paid: memberId === payerId,
             paid_at: memberId === payerId ? new Date().toISOString() : null
           };
@@ -2812,8 +2893,10 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
     } catch (error) {
       console.error('Error updating expense:', error);
       toast({
-        title: "Error",
-        description: "Failed to update expense. Please try again.",
+        title: "Expense update blocked",
+        description: error instanceof Error
+          ? error.message
+          : "Failed to update expense. Please try again.",
         variant: "destructive",
       });
     }
@@ -3672,12 +3755,14 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
         {/* Settle Tab */}
         {subTab === "settle" && (
           <div className="px-3 sm:px-4 py-3 sm:py-4 space-y-4">
-            {/* Header */}
             <div className="mb-2">
-              <h2 className="text-lg font-semibold text-foreground">Settlement Summary</h2>
+              <h2 className="text-lg font-semibold text-foreground">Current Outstanding</h2>
               <p className="text-sm text-muted-foreground mt-0.5">
-                Net balances between group members for this trip
+                These are your current balances based on unpaid expenses. Settle to create a new payment.
               </p>
+              <Badge variant="outline" className="mt-2 text-xs">
+                {filteredSettlements.length} {filteredSettlements.length === 1 ? "balance" : "balances"}
+              </Badge>
             </div>
 
             {/* Filter Controls - Full-Width 2-Column Grid */}
@@ -3714,7 +3799,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
               </Select>
             </div>
 
-            {/* Settlements */}
+            {/* Current outstanding balances */}
             <div className="space-y-2 sm:space-y-3">
                 {filteredSettlements.length > 0 ? (
                   filteredSettlements.map((settlement) => (
@@ -3740,13 +3825,70 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
                   ))
                 ) : (
                   <Card className="p-6 text-center border-border/50">
-                    {expenses.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">No expenses yet. Add expenses to see settlements here</p>
-                    ) : (
-                      <p className="text-sm font-semibold text-green-600">All settled!</p>
-                    )}
+                    <p className="text-sm font-medium text-foreground">No outstanding balances</p>
+                    <p className="text-xs text-muted-foreground mt-1">All current expenses are settled.</p>
                   </Card>
                 )}
+            </div>
+
+            <div className="pt-3 border-t border-border/50">
+              <div className="mb-2">
+                <h2 className="text-lg font-semibold text-foreground">Settlement History</h2>
+                <p className="text-sm text-muted-foreground mt-0.5">
+                  Past settlement payments. Each settlement is a separate transaction.
+                </p>
+                <Badge variant="outline" className="mt-2 text-xs">
+                  {historicalSettlementCards.length} {historicalSettlementCards.length === 1 ? "settlement" : "settlements"}
+                </Badge>
+              </div>
+
+              {historicalSettlementCards.length > 0 ? (
+                <div className="space-y-2">
+                  {historicalSettlementCards.map((settlement) => {
+                    const payment = historicalSettlementPayments.find((item) => item.id === settlement.settlementPaymentId);
+                    return (
+                      <Card key={settlement.id} className="p-3 border-border/50">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center overflow-hidden shrink-0">
+                            {settlement.fromUser.imageUrl ? (
+                              <img src={settlement.fromUser.imageUrl} alt={settlement.fromUser.name} className="h-full w-full object-cover" />
+                            ) : <span className="text-xs font-medium">{settlement.fromUser.name.charAt(0)}</span>}
+                          </div>
+                          <span className="text-sm font-medium truncate">{settlement.fromUser.name}</span>
+                          <ArrowLeftRight className="h-4 w-4 text-muted-foreground shrink-0" />
+                          <span className="text-sm font-medium truncate">{settlement.toUser.name}</span>
+                          <span className="ml-auto text-base font-semibold shrink-0">
+                            {summaryDisplayCurrency} {formatTwoDecimalAmount(settlement.amount)}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between gap-2 mt-2 pl-10">
+                          <span className="text-xs text-muted-foreground flex items-center gap-1">
+                            <Clock className="h-3 w-3" />
+                            {payment?.created_at ? new Date(payment.created_at).toLocaleString("en-MY", {
+                              day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit",
+                            }) : "Date unavailable"}
+                          </span>
+                          <StatusBadge status={settlement.status} size="sm" />
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="w-full h-9 mt-2 text-xs"
+                          onClick={() => handleSettlementCardClick(settlement)}
+                        >
+                          <FileText className="h-3.5 w-3.5 mr-1.5" />
+                          View Details
+                        </Button>
+                      </Card>
+                    );
+                  })}
+                </div>
+              ) : (
+                <Card className="p-6 text-center border-border/50">
+                  <p className="text-sm font-medium text-foreground">No settlement history yet</p>
+                  <p className="text-xs text-muted-foreground mt-1">Your completed and submitted settlements will appear here.</p>
+                </Card>
+              )}
             </div>
           </div>
         )}
@@ -3963,13 +4105,23 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
         const breakdown = getContributingExpenses(selectedSettlementForBreakdown);
         // Explicit ID guard: without it, a legacy settlement (no payment id)
         // matches an empty details object via undefined === undefined.
-        const settlementPaymentId = selectedSettlementForBreakdown.settlementPaymentId;
+        const settlementPaymentId = selectedSettlementForBreakdown.settlementPaymentId
+          || selectedSettlementForBreakdown.settlementReceiptPaymentId;
         const isNewSettlement = !!settlementPaymentId
           && selectedSettlementPaymentDetails?.payment?.id === settlementPaymentId;
-        const paymentStatus = isNewSettlement ? selectedSettlementPaymentDetails?.payment?.status : undefined;
+        const isHistoricalSettlement = isNewSettlement
+          && selectedSettlementForBreakdown.id.startsWith("historical-settlement-");
+        const paymentStatus = isNewSettlement
+          ? selectedSettlementForBreakdown.settlementPaymentNeedsReset
+            ? "pending"
+            : selectedSettlementPaymentDetails?.payment?.status
+          : undefined;
         const displayStatus = isNewSettlement
           ? (paymentStatus === "awaiting_confirmation" ? "awaiting" : paymentStatus)
           : selectedSettlementForBreakdown.status;
+        const detailsBreakdown = isHistoricalSettlement
+          ? getHistoricalSettlementBreakdown(selectedSettlementPaymentDetails)
+          : breakdown;
         return (
           <SettlementBreakdownModal
             open={breakdownModalOpen}
@@ -3983,15 +4135,15 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
             }}
             fromUser={selectedSettlementForBreakdown.fromUser}
             toUser={selectedSettlementForBreakdown.toUser}
-            totalAmount={Math.abs(Number((breakdown.grossOwed - breakdown.grossOffset).toFixed(2)))}
+            totalAmount={Math.abs(Number((detailsBreakdown.grossOwed - detailsBreakdown.grossOffset).toFixed(2)))}
             status={displayStatus as Settlement["status"]}
             paymentStatus={paymentStatus}
             paymentCurrency={isNewSettlement ? selectedSettlementPaymentDetails?.payment?.currency : undefined}
             paymentReceiptUrl={isNewSettlement ? selectedSettlementPaymentDetails?.receipt?.receipt_url : undefined}
-            contributingExpenses={breakdown.owedToReceiver}
-            reverseExpenses={breakdown.owedToDebtor}
-            grossOwed={breakdown.grossOwed}
-            grossOffset={breakdown.grossOffset}
+            contributingExpenses={detailsBreakdown.owedToReceiver}
+            reverseExpenses={detailsBreakdown.owedToDebtor}
+            grossOwed={detailsBreakdown.grossOwed}
+            grossOffset={detailsBreakdown.grossOffset}
             currentUserId={currentUserId || "1"}
             onUploadProof={() => {
               handleMarkPaid(selectedSettlementForBreakdown);
@@ -4033,6 +4185,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
           totalAmount={selectedSettlementForBreakdown.amount}
           receipts={getSettlementReceiptRows(selectedSettlementForBreakdown)}
           paymentStatus={selectedSettlementPaymentDetails?.payment?.status}
+          currentUserId={currentUserId}
           onBack={receiptsOpenedFromCard ? undefined : handleBackFromSettlementReceipts}
           onMarkAllPaid={() => {
             setSettlementToConfirm(selectedSettlementForBreakdown);

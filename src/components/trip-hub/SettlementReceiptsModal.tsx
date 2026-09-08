@@ -31,6 +31,7 @@ interface SettlementReceiptsModalProps {
   totalAmount: number;
   receipts: ReceiptData[];
   paymentStatus?: string;
+  currentUserId?: string | null;
   onMarkAllPaid: () => void;
   onBack?: () => void;
   expenseCategories: ExpenseCategory[];
@@ -44,6 +45,7 @@ export function SettlementReceiptsModal({
   totalAmount,
   receipts,
   paymentStatus,
+  currentUserId,
   onMarkAllPaid,
   onBack,
   expenseCategories,
@@ -362,7 +364,9 @@ export function SettlementReceiptsModal({
           </div>
 
           {/* Action Buttons */}
-          {receipts.length > 0 && (!paymentStatus || paymentStatus === "pending" || paymentStatus === "awaiting_confirmation") && (
+          {receipts.length > 0
+            && currentUserId === toUser.id
+            && (!paymentStatus || paymentStatus === "pending" || paymentStatus === "awaiting_confirmation") && (
             <Button 
               className="w-full h-11 text-sm bg-foreground text-background hover:bg-foreground/90"
               onClick={handleConfirmPayment}

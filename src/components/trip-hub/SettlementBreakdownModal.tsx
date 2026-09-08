@@ -22,6 +22,8 @@ export interface SettlementExpense {
   category: string;
   paidBy: string;
   originalCurrency?: CurrencyCode;
+  // Amount from a settlement payment applied to this expense; a secondary detail only, never replaces shareAmount.
+  amountApplied?: number;
 }
 
 interface SettlementBreakdownModalProps {
@@ -237,14 +239,16 @@ export function SettlementBreakdownModal({
                 key={item.expenseId}
                 type="button"
                 onClick={() => onViewExpense?.(item.expenseId)}
-                className="w-full flex items-center justify-between gap-2 py-1.5 px-2 text-left text-xs sm:text-sm hover:bg-muted/60 rounded-md transition-all cursor-pointer group/item active:scale-[0.99]"
+                className="w-full flex flex-col gap-0.5 py-1.5 px-2 text-left text-xs sm:text-sm hover:bg-muted/60 rounded-md transition-all cursor-pointer group/item active:scale-[0.99]"
               >
-                <span className="text-foreground underline underline-offset-[3px] decoration-border group-hover/item:decoration-foreground font-normal truncate">
-                  {item.title} · {formatDate(item.date)}
-                </span>
-                <span className="text-foreground font-normal shrink-0 text-right ml-auto">
-                  {formatDisplayAmount(getDisplayAmount(item.shareAmount), primaryCurrency)}
-                </span>
+                <div className="w-full flex items-center justify-between gap-2">
+                  <span className="text-foreground underline underline-offset-[3px] decoration-border group-hover/item:decoration-foreground font-normal truncate">
+                    {item.title} · {formatDate(item.date)}
+                  </span>
+                  <span className="text-foreground font-normal shrink-0 text-right ml-auto">
+                    {formatDisplayAmount(getDisplayAmount(item.shareAmount), primaryCurrency)}
+                  </span>
+                </div>
               </button>
             ))
           ) : (

@@ -141,10 +141,11 @@ export default function Expenses() {
     // to the expense's own total to prevent duplicate-row overcounting.
     const owedByExpense: Record<string, number> = {};
     owed.forEach((row: any) => {
-      if (row.is_paid) return;
+      const outstanding = Math.max(0, Number(row.amount_owed || 0) - Number(row.amount_settled || 0));
+      if (outstanding <= 0) return;
       const exp = expenseMap[row.expense_id];
       if (!exp) return;
-      const amountHome = toHome(Number(row.amount_owed) || 0, exp.currency);
+      const amountHome = toHome(outstanding, exp.currency);
       owedByExpense[row.expense_id] = (owedByExpense[row.expense_id] || 0) + amountHome;
     });
 
@@ -157,10 +158,11 @@ export default function Expenses() {
 
     const creditedByExpense: Record<string, number> = {};
     credited.forEach((row: any) => {
-      if (row.is_paid) return;
+      const outstanding = Math.max(0, Number(row.amount_owed || 0) - Number(row.amount_settled || 0));
+      if (outstanding <= 0) return;
       const exp = expenseMap[row.expense_id];
       if (!exp) return;
-      const amountHome = toHome(Number(row.amount_owed) || 0, exp.currency);
+      const amountHome = toHome(outstanding, exp.currency);
       creditedByExpense[row.expense_id] = (creditedByExpense[row.expense_id] || 0) + amountHome;
     });
 
