@@ -1085,7 +1085,7 @@ export default function CreateTrip() {
 
             {/* Trip Preview Card */}
             <Card className="overflow-hidden border-border/50">
-              {/* Cover image or gradient header */}
+              {/* Cover image with a default fallback */}
               {draft.galleryImages[0] ? (
                 <div className="h-32 w-full relative">
                   <img
@@ -1111,7 +1111,12 @@ export default function CreateTrip() {
                   </button>
                 </div>
               ) : (
-                <div className="h-24 bg-gradient-to-br from-primary/20 via-primary/10 to-accent relative">
+                <div className="h-32 w-full relative">
+                  <img
+                    src="/default-trip-photo.jpeg"
+                    alt="Default trip cover"
+                    className="object-cover w-full h-full"
+                  />
                   <div className="absolute top-3 left-3">
                     <span className={cn(
                       "px-2 py-1 text-xs font-medium rounded-full",

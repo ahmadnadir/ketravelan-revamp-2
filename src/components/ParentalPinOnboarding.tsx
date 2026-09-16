@@ -313,13 +313,12 @@ export default function ParentalPinOnboarding({
   }, []);
 
   const PinBoxes = () => (
-    <div className="mt-6 flex justify-center gap-4">
+    <div className="mt-5 flex justify-center gap-2.5 sm:gap-4">
       {Array.from({ length: 4 }).map((_, index) => (
         <div
           key={index}
           className={`
-            h-16
-            w-16
+            h-14 w-14 sm:h-16 sm:w-16
             rounded-2xl
             border-2
             transition-all
@@ -414,19 +413,19 @@ export default function ParentalPinOnboarding({
       </header>
 
       {/* Content */}
-      <main className="flex-1 flex flex-col justify-between px-6 overflow-hidden pb-72">
+      <main className="flex-1 min-h-0 overflow-y-auto px-4 sm:px-6 pb-8 sm:pb-72">
 
         <div>
 
           {/* Shield */}
-          <div className="mt-10 flex justify-center">
-            <div className="h-20 w-20 rounded-full bg-black text-white flex items-center justify-center shadow-lg">
+          <div className="mt-6 sm:mt-10 flex justify-center">
+            <div className="h-16 w-16 sm:h-20 sm:w-20 rounded-full bg-black text-white flex items-center justify-center shadow-lg">
               <Shield className="h-9 w-9" />
             </div>
           </div>
 
           {/* Title */}
-          <div className="mt-8 text-center">
+          <div className="mt-5 sm:mt-8 text-center">
 
             <p className="text-xs font-semibold tracking-[0.25em] uppercase text-neutral-500">Parental Control</p>
 
@@ -477,8 +476,8 @@ export default function ParentalPinOnboarding({
             }}
             disabled={isSaving}
             className="
-              mt-6
-              h-14
+              mt-5
+              h-12 sm:h-14
               rounded-2xl
               bg-black
               hover:bg-black/90
@@ -526,9 +525,9 @@ export default function ParentalPinOnboarding({
         </div>
 
         {/* Keypad */}
-        <div className="mt-4 pb-8 flex-shrink-0">
+        <div className="mt-3 pb-4 sm:mt-4 sm:pb-8 flex-shrink-0">
 
-          <div className="grid grid-cols-3 gap-y-4 gap-x-4 justify-items-center">
+          <div className="grid grid-cols-3 gap-y-1 sm:gap-y-4 gap-x-4 justify-items-center">
 
             <KeypadButton value="1" />
             <KeypadButton value="2" />
@@ -554,8 +553,7 @@ export default function ParentalPinOnboarding({
               }}
               disabled={isSaving}
               className="
-                h-12
-                w-12
+                h-11 w-11 sm:h-12 sm:w-12
                 rounded-full
                 flex
                 items-center
@@ -575,16 +573,20 @@ export default function ParentalPinOnboarding({
       </main>
 
       {showSafetyFooter && (
-        <footer className="fixed bottom-0 left-0 right-0 border-t border-neutral-200 bg-white px-6 py-4 pb-[calc(env(safe-area-inset-bottom,0px)+1rem)] sm:static sm:bottom-auto sm:left-auto sm:right-auto sm:px-6 sm:py-6 sm:pb-6">
+        <footer
+          className="fixed left-0 right-0 border-t border-neutral-200 bg-white px-4 py-3 pb-[calc(env(safe-area-inset-bottom,0px)+0.75rem)] sm:static sm:px-6 sm:py-6 sm:pb-6"
+          style={{
+            bottom: keepBottomNavVisible
+              ? "calc(var(--tabbar-height) + env(safe-area-inset-bottom, 0px))"
+              : "0px",
+          }}
+        >
           <div className="mx-auto flex max-w-4xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-start gap-3">
               <Shield className="h-5 w-5 text-neutral-500 mt-0.5" />
 
               <div>
-                <p className="text-sm font-medium">Your child's safety comes first</p>
-                <p className="mt-1 text-xs leading-5 text-neutral-500">
-                  This PIN is required whenever someone wants to change parental control settings or manage your child's social features in Ketravelan.
-                </p>
+                <p className="text-sm font-medium">Your child's safety comes first. Thank you for keeping them protected.</p>
               </div>
             </div>
           </div>

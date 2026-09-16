@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { ArrowRight, QrCode, FileText, Upload, CheckCircle2 } from "lucide-react";
+import { ArrowRight, Bell, CheckCircle2, FileText, Upload } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/shared/StatusBadge";
@@ -15,7 +15,6 @@ interface SettlementCardProps {
   receiptAvailable?: boolean;
   showReminder?: boolean;
   onCardClick?: () => void;
-  onViewPayment?: () => void;
   onViewDetails?: () => void;
   onViewReceipt?: () => void;
   onSendReminder?: () => void;
@@ -31,19 +30,28 @@ export function SettlementCard({
   formatAmount,
   status,
   currentUserId,
-  receiptAvailable,
-  showReminder,
   onCardClick,
-  onViewPayment,
   onViewDetails,
   onViewReceipt,
   onSendReminder,
   onMarkPaid,
   onUploadReceipt,
 }: SettlementCardProps) {
-  // Determine user's role in this settlement
-  const isUserPayer = currentUserId === fromUser.id;  // I owe someone
-  const isUserReceiver = currentUserId === toUser.id; // Someone owes me
+  const isUserPayer = currentUserId === fromUser.id;
+  const primaryAction = isUserPayer
+    ? status === "settled"
+      ? { label: "View Receipt", icon: FileText, handler: onViewReceipt }
+      : status === "awaiting"
+        ? { label: "Notify to Approve", icon: Bell, handler: onSendReminder }
+        : { label: "Pay Now", icon: Upload, handler: onUploadReceipt }
+    : status === "settled"
+      ? { label: "View Receipt", icon: FileText, handler: onViewReceipt }
+      : status === "awaiting"
+        ? { label: "Confirm Payment", icon: CheckCircle2, handler: onMarkPaid }
+        : { label: "Remind", icon: Bell, handler: onSendReminder };
+
+  const PrimaryIcon = primaryAction.icon;
+
   return (
     <Card 
       className={`p-3 border-border/50 transition-all ${onCardClick ? "cursor-pointer hover:border-primary/50 hover:shadow-md active:scale-[0.98]" : ""}`}
@@ -108,115 +116,25 @@ export function SettlementCard({
         <StatusBadge status={status} size="md" className="text-[13px] sm:text-xs px-3.5 sm:px-3 py-1.5 sm:py-1" />
       </div>
 
-      {/* Actions - Role-based at bottom */}
+      {/* Actions - one consistent secondary/primary layout for every state */}
       <div className="flex flex-col gap-1.5 pt-2 border-t border-border/50">
-        {/* If I OWE someone and PENDING: Show View QR and Upload Receipt */}
-        {isUserPayer && (status === "pending" || status === "rejected") && (
-          <>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              className="w-full h-10 text-sm"
-              onClick={(e) => { e.stopPropagation(); onViewPayment?.(); }}
-            >
-              <QrCode className="h-4 w-4 mr-2" />
-              View QR
-            </Button>
-            <Button 
-              size="sm" 
-              className="w-full h-10 text-sm bg-foreground text-background hover:bg-foreground/90"
-              onClick={(e) => { e.stopPropagation(); onUploadReceipt?.(); }}
-            >
-              <Upload className="h-4 w-4 mr-2" />
-              Upload Receipt
-            </Button>
-          </>
-        )}
-        
-        {/* If I OWE someone and AWAITING: Show View Details */}
-        {isUserPayer && status === "awaiting" && (
-          <Button 
-            variant="outline" 
-            size="sm" 
-            className="w-full h-10 text-sm"
-            onClick={(e) => { e.stopPropagation(); onViewReceipt?.(); }}
-          >
-            <FileText className="h-4 w-4 mr-2" />
-            View Receipt
-          </Button>
-        )}
-        
-        {/* Settled payments show the settlement-level receipt directly */}
-        {status === "settled" && (
-          <>
-            <Button
-              variant="outline"
-              size="sm"
-              className="w-full h-10 text-sm"
-              onClick={(e) => { e.stopPropagation(); onViewDetails?.(); }}
-            >
-              <FileText className="h-4 w-4 mr-2" />
-              View Details
-            </Button>
-            <Button
-              size="sm"
-              className="w-full h-10 text-sm bg-foreground text-background hover:bg-foreground/90"
-              onClick={(e) => { e.stopPropagation(); onViewReceipt?.(); }}
-            >
-              <FileText className="h-4 w-4 mr-2" />
-              View Receipt
-            </Button>
-          </>
-        )}
-        
-        {/* If someone owes ME and AWAITING: Show View Details + Confirm Payment */}
-        {isUserReceiver && status === "awaiting" && (
-          <Button 
-            variant="outline"
-            size="sm" 
-            className="w-full h-10 text-sm"
-            onClick={(e) => { e.stopPropagation(); onViewDetails?.(); }}
-          >
-            <FileText className="h-4 w-4 mr-2" />
-            View Details
-          </Button>
-        )}
-        {isUserReceiver && status === "awaiting" && (
-          <Button 
-            size="sm" 
-            className="w-full h-10 text-sm bg-foreground text-background hover:bg-foreground/90"
-            onClick={(e) => { e.stopPropagation(); onMarkPaid?.(); }}
-          >
-            <CheckCircle2 className="h-4 w-4 mr-2" />
-            Confirm Payment
-          </Button>
-        )}
-        
-        {/* If someone owes ME and PENDING: Show View Details */}
-        {isUserReceiver && status === "pending" && (
-          <Button 
-            variant="outline" 
-            size="sm" 
-            className="w-full h-10 text-sm"
-            onClick={(e) => { e.stopPropagation(); onViewDetails?.(); }}
-          >
-            <FileText className="h-4 w-4 mr-2" />
-            View Details
-          </Button>
-        )}
-        
-        
-        {/* Mark as Paid - Only when someone owes ME and pending */}
-        {status === "pending" && isUserReceiver && (
-          <Button 
-            size="sm" 
-            className="w-full h-10 text-sm bg-foreground text-background hover:bg-foreground/90"
-            onClick={(e) => { e.stopPropagation(); onMarkPaid?.(); }}
-          >
-            <CheckCircle2 className="h-4 w-4 mr-2" />
-            Mark as Paid
-          </Button>
-        )}
+        <Button
+          variant="outline"
+          size="sm"
+          className="w-full h-10 text-sm"
+          onClick={(e) => { e.stopPropagation(); onViewDetails?.(); }}
+        >
+          <FileText className="h-4 w-4 mr-2" />
+          View Details
+        </Button>
+        <Button
+          size="sm"
+          className="w-full h-10 text-sm bg-foreground text-background hover:bg-foreground/90"
+          onClick={(e) => { e.stopPropagation(); primaryAction.handler?.(); }}
+        >
+          <PrimaryIcon className="h-4 w-4 mr-2" />
+          {primaryAction.label}
+        </Button>
       </div>
     </Card>
   );

@@ -338,6 +338,32 @@ export async function createSettlementPayment(params: {
   return data;
 }
 
+export async function recordManualSettlement(params: {
+  tripId: string;
+  payerId: string;
+  recipientId: string;
+  amount: number;
+  currency: string;
+  idempotencyKey: string;
+  allocations: SettlementPaymentAllocationInput[];
+}) {
+  const { data, error } = await supabase.rpc('record_manual_settlement', {
+    p_trip_id: params.tripId,
+    p_payer_id: params.payerId,
+    p_recipient_id: params.recipientId,
+    p_amount: params.amount,
+    p_currency: params.currency,
+    p_idempotency_key: params.idempotencyKey,
+    p_allocations: params.allocations.map((allocation) => ({
+      expense_participant_id: allocation.expenseParticipantId,
+      amount_applied: allocation.amountApplied,
+    })),
+  });
+
+  if (error) throw error;
+  return data;
+}
+
 export async function fetchSettlementPayment(settlementPaymentId: string) {
   const { data, error } = await supabase
     .from('settlement_payments')
@@ -410,6 +436,7 @@ export async function fetchSettlementPaymentReceipt(settlementPaymentId: string)
     .select('*')
     .eq('settlement_payment_id', settlementPaymentId)
     .order('created_at', { ascending: false })
+    .limit(1)
     .maybeSingle();
 
   if (error) throw error;
@@ -459,6 +486,15 @@ export async function rejectSettlementPaymentReceipt(settlementPaymentId: string
 
 export async function confirmSettlementPayment(settlementPaymentId: string) {
   const { data, error } = await supabase.rpc('confirm_settlement_payment', {
+    p_settlement_payment_id: settlementPaymentId,
+  });
+
+  if (error) throw error;
+  return data;
+}
+
+export async function confirmRejectedSettlementPayment(settlementPaymentId: string) {
+  const { data, error } = await supabase.rpc('confirm_rejected_settlement_payment', {
     p_settlement_payment_id: settlementPaymentId,
   });
 

@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { X, Upload, Receipt, Users, UserCheck, Pencil, Info, Calendar as CalendarIcon, Wallet, Check, Plus } from "lucide-react";
+import { X, Loader2, Upload, Receipt, Users, UserCheck, Pencil, Info, Calendar as CalendarIcon, Wallet, Check, Plus } from "lucide-react";
 import { ExpenseCategory, getExpenseCategoryCode } from "@/lib/expenseCategories";
 import { 
   CurrencyCode, 
@@ -173,8 +173,8 @@ export interface ExpenseData {
 interface AddExpenseModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onAddExpense: (expense: NewExpense) => void;
-  onEditExpense?: (id: string, expense: NewExpense) => void;
+  onAddExpense: (expense: NewExpense) => void | Promise<void>;
+  onEditExpense?: (id: string, expense: NewExpense) => void | Promise<void>;
   editingExpense?: ExpenseData | null;
   currentUser?: string;
   members: Array<{ id: string; name: string; imageUrl?: string; avatar?: string }>;
@@ -270,6 +270,7 @@ export function AddExpenseModal({
     available: false 
   });
   const [isLoadingConversion, setIsLoadingConversion] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const isEditMode = !!editingExpense;
   
@@ -423,7 +424,11 @@ export function AddExpenseModal({
     setSplitType(nextType);
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+
+    try {
     if (!title.trim() || !amount || !category) return;
 
     const customSplitAmounts: CustomSplitAmount[] = splitType === "custom" 
@@ -455,13 +460,16 @@ export function AddExpenseModal({
     };
 
     if (isEditMode && onEditExpense && editingExpense) {
-      onEditExpense(editingExpense.id, expense);
+      await onEditExpense(editingExpense.id, expense);
     } else {
-      onAddExpense(expense);
+      await onAddExpense(expense);
     }
-    
-    resetForm();
-    onOpenChange(false);
+
+      resetForm();
+      onOpenChange(false);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   // Calculate totals for validation
@@ -1125,9 +1133,11 @@ export function AddExpenseModal({
               variant="outline"
               className={cn("h-9 flex-1 rounded-xl text-sm font-medium", buttonFocusReset)}
               onClick={() => {
+                if (isSubmitting) return;
                 resetForm();
                 onOpenChange(false);
               }}
+              disabled={isSubmitting}
             >
               Cancel
             </Button>
@@ -1135,9 +1145,14 @@ export function AddExpenseModal({
               type="button"
               className={cn("h-9 flex-1 rounded-xl text-sm font-medium", buttonFocusReset)}
               onClick={handleSubmit}
-              disabled={!isValid}
+              disabled={!isValid || isSubmitting}
             >
-              {isEditMode ? "Save Changes" : "Add Expense"}
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  {isEditMode ? "Saving..." : "Uploading..."}
+                </>
+              ) : isEditMode ? "Save Changes" : "Add Expense"}
             </Button>
           </div>
         </div>

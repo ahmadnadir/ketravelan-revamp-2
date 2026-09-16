@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArrowRight, ArrowLeft, Download, ZoomIn, ZoomOut, CheckCircle2, ChevronDown, ChevronUp, Receipt, X } from "lucide-react";
+import { AlertCircle, ArrowRight, ArrowLeft, Download, ZoomIn, ZoomOut, CheckCircle2, ChevronDown, ChevronUp, Receipt, X } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -19,7 +19,7 @@ interface ReceiptData {
   payerNote?: string;
   uploadedAt?: string;
   category: string;
-  status?: "pending" | "approved" | "rejected";
+  status?: "pending" | "approved" | "rejected" | string;
   rejectionReason?: string;
 }
 
@@ -221,17 +221,37 @@ export function SettlementReceiptsModal({
                         </div>
                       </div>
                       <div className="mt-2">
-                          <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                          <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                            receipt.status === "rejected"
+                              ? "bg-destructive/10 text-destructive"
+                              : receipt.status === "approved"
+                                ? "bg-stat-green/10 text-stat-green"
+                                : "bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                          }`}>
                           {(receipt.status || "pending").replace(/_/g, " ")}
                         </span>
-                          {receipt.rejectionReason && (
-                            <p className="text-xs text-destructive mt-1 line-clamp-2">
-                              {receipt.rejectionReason}
-                            </p>
-                          )}
                       </div>
                     </div>
                   </button>
+
+                  {receipt.rejectionReason && (
+                    <div className="px-3 pb-3">
+                      <div
+                        role="alert"
+                        className="flex w-full items-start gap-2 rounded-lg border border-destructive/25 bg-destructive/5 px-2.5 py-2"
+                      >
+                        <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" aria-hidden="true" />
+                        <div className="min-w-0">
+                          <p className="text-[11px] font-semibold uppercase tracking-wide text-destructive">
+                            Why it was rejected
+                          </p>
+                          <p className="mt-0.5 break-words text-xs leading-relaxed text-destructive/90">
+                            {receipt.rejectionReason}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Expanded Receipt View */}
                   {isExpanded && (

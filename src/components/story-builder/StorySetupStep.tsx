@@ -196,7 +196,7 @@ export function StorySetupStep({ draft, onComplete }: StorySetupStepProps) {
   };
 
   return (
-    <div className="p-4 space-y-6 pb-40">
+    <div className="p-4 space-y-6 pb-28 lg:pb-0">
       {/* Header */}
       <div className="text-center space-y-1">
         <h2 className="text-2xl font-bold text-foreground">Story Setup</h2>
@@ -479,8 +479,8 @@ export function StorySetupStep({ draft, onComplete }: StorySetupStepProps) {
         )}
       </div>
 
-      {/* Continue Button - Fixed at bottom */}
-      <div className="fixed bottom-above-nav left-0 right-0 p-4 bg-background border-t border-border/50">
+      {/* Continue Button - pinned to the bottom of the viewport */}
+      <div className="fixed inset-x-0 bottom-[calc(var(--tabbar-height)+env(safe-area-inset-bottom))] z-40 border-t border-border/50 bg-background/95 p-4 pb-4 backdrop-blur-sm lg:sticky lg:bottom-0 lg:mt-6 lg:border-t lg:bg-background/95 lg:p-4 lg:pb-4 lg:backdrop-blur-sm">
         <div className="container max-w-3xl mx-auto">
           <Button
             onClick={handleContinue}

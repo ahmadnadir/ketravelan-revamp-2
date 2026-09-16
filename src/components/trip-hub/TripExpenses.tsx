@@ -1,14 +1,13 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { Plus, DollarSign, TrendingUp, TrendingDown, Wallet, QrCode, SlidersHorizontal, Settings, ArrowLeftRight, Loader2, Clock, FileText } from "lucide-react";
+import { Plus, DollarSign, TrendingUp, TrendingDown, Wallet, QrCode, SlidersHorizontal, Settings, ArrowLeftRight, Loader2 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { SegmentedControl } from "@/components/shared/SegmentedControl";
 import { ScrollableTabBar } from "@/components/shared/ScrollableTabBar";
 import { StatCard } from "@/components/shared/StatCard";
 import { ExpenseCard } from "@/components/shared/ExpenseCard";
 import { SettlementCard } from "@/components/shared/SettlementCard";
-import { StatusBadge } from "@/components/shared/StatusBadge";
 import { ViewQRModal } from "@/components/trip-hub/ViewQRModal";
 import { SendReminderModal } from "@/components/trip-hub/SendReminderModal";
 import { YourQRSection } from "@/components/trip-hub/YourQRSection";
@@ -38,7 +37,7 @@ import { Badge } from "@/components/ui/badge";
 import { mockExpenses as initialMockExpenses, mockMembers } from "@/data/mockData";
 import { toast } from "@/hooks/use-toast";
 import { ExpenseCategory, fetchExpenseCategories, getExpenseCategoryCode } from "@/lib/expenseCategories";
-import { fetchTripExpenses, createExpense, deleteExpense, calculateTripBalances, getWhoOwesWho, fetchTripPaymentMethods, fetchSettlementPaymentsForTrip, fetchSettlementPayment, fetchSettlementPaymentAllocations, fetchSettlementPaymentReceipt, addExpensePayments, markParticipantsAsPaid, uploadPaymentQR, upsertPaymentMethod, uploadReceipt, uploadExpenseReceipt, createSettlementPayment, submitSettlementPaymentReceipt, confirmSettlementPayment, rejectSettlementPaymentReceipt } from "@/lib/expenses";
+import { fetchTripExpenses, createExpense, deleteExpense, calculateTripBalances, getWhoOwesWho, fetchTripPaymentMethods, fetchSettlementPaymentsForTrip, fetchSettlementPayment, fetchSettlementPaymentAllocations, fetchSettlementPaymentReceipt, addExpensePayments, markParticipantsAsPaid, uploadPaymentQR, upsertPaymentMethod, uploadReceipt, uploadExpenseReceipt, createSettlementPayment, recordManualSettlement, submitSettlementPaymentReceipt, confirmSettlementPayment, confirmRejectedSettlementPayment, rejectSettlementPaymentReceipt } from "@/lib/expenses";
 import { getTripCurrencySettings, updateTripCurrencySettings, isTripNotificationEnabled } from "@/lib/trips";
 import { supabase } from "@/lib/supabase";
 import { sendSettlementReminder } from "@/lib/settlementReminders";
@@ -118,6 +117,7 @@ interface Settlement {
   settlementReceiptPaymentId?: string;
   settlementPaymentStatus?: string;
   settlementPaymentNeedsReset?: boolean;
+  receiptSubmittedAt?: string;
 }
 
 const isAwaitingConfirmation = (
@@ -880,7 +880,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
   );
 
   // Generate current outstanding settlements from expenses and unpaid shares.
-  const currentOutstandingSettlements = useMemo(() => {
+  const expenseSettlementCards = useMemo(() => {
     // Helper to compute a settlement for a given from/to pair
     const getFallbackMember = (userId: string) => {
       const payerMatch = expenses.find(expense => expense.payer?.id === userId)?.payer;
@@ -1339,6 +1339,9 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
         },
         settlementPaymentId: payment.id,
         settlementPaymentStatus: payment.status,
+        ...((latestReceipt?.created_at || payment.created_at)
+          ? { receiptSubmittedAt: latestReceipt?.created_at || payment.created_at }
+          : {}),
         ...(latestReceipt?.receipt_url ? { receiptUrl: latestReceipt.receipt_url } : {}),
       };
     };
@@ -1362,10 +1365,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
     })).map(applyPersistedPayment);
   }, [debts, members, expenses, paymentMethods, settlementPayments, settlementStatuses, currentUserId]);
 
-  // Keep the existing Settlement tab rendering on current outstanding data for now.
-  const settlements = currentOutstandingSettlements;
-
-  const historicalSettlementCards = useMemo<Settlement[]>(() => {
+  const persistedSettlementCards = useMemo<Settlement[]>(() => {
     const getMember = (userId: string) => {
       const member = members.find((item) => item.id === userId);
       return {
@@ -1389,10 +1389,19 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
           status,
           settlementPaymentId: payment.id,
           settlementPaymentStatus: payment.status,
+          ...((receipts[0]?.created_at || payment.created_at)
+            ? { receiptSubmittedAt: receipts[0]?.created_at || payment.created_at }
+            : {}),
           ...(receipts[0]?.receipt_url ? { receiptUrl: receipts[0].receipt_url } : {}),
         } as Settlement;
       });
   }, [historicalSettlementPayments, members, currentUserId]);
+
+  // Every settlement transaction is rendered in the same list, regardless of status.
+  const settlements = useMemo(
+    () => [...expenseSettlementCards, ...persistedSettlementCards],
+    [expenseSettlementCards, persistedSettlementCards],
+  );
 
   // Get current user's name from members array
   const currentUserName = useMemo(() => {
@@ -1777,7 +1786,9 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
             title: expense.title,
             date: expense.date,
             shareAmount,
+            originalShareAmount: calculateUserShareOriginal(expense, settlement.fromUser.id),
             status,
+            originalCurrency: normalizeCurrencyCode(expense.originalCurrency || expense.homeCurrency),
             category: expense.category_code || getExpenseCategoryCode(expense.category) || "other",
             paidBy: expense.paidBy,
           });
@@ -1805,7 +1816,9 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
             title: expense.title,
             date: expense.date,
             shareAmount,
+            originalShareAmount: calculateUserShareOriginal(expense, settlement.toUser.id),
             status,
+            originalCurrency: normalizeCurrencyCode(expense.originalCurrency || expense.homeCurrency),
             category: expense.category_code || getExpenseCategoryCode(expense.category) || "other",
             paidBy: expense.paidBy,
           });
@@ -1853,6 +1866,9 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
   };
 
   const getSettlementDisplayAmount = (settlement: Settlement): number => {
+    if (settlement.id.startsWith("historical-settlement-")) {
+      return settlement.amount;
+    }
     const breakdown = getContributingExpenses(settlement);
     return Math.abs(Number((breakdown.grossOwed - breakdown.grossOffset).toFixed(2)));
   };
@@ -2019,6 +2035,34 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
       }));
   };
 
+  const getManualSettlementAllocations = (settlement: Settlement) => {
+    const breakdown = getContributingExpenses(settlement);
+    const netAmount = Math.max(0, Number((breakdown.grossOwed - breakdown.grossOffset).toFixed(2)));
+
+    const buildAllocations = (items: SettlementExpense[], owingUserId: string) => items
+      .filter((expense) => expense.status !== "settled")
+      .map((expense) => {
+        const sourceExpense = expenses.find((item) => item.id === expense.expenseId);
+        const payment = sourceExpense?.payments?.find((item) => item.memberId === owingUserId);
+        return {
+          expenseParticipantId: payment?.expenseParticipantId,
+          amountApplied: Number(expense.shareAmount.toFixed(2)),
+        };
+      })
+      .filter((allocation): allocation is { expenseParticipantId: string; amountApplied: number } =>
+        !!allocation.expenseParticipantId && allocation.amountApplied > 0,
+      );
+
+    // Keep both sides of the net settlement so the settled detail can show
+    // the same bilateral breakdown after the participant rows are marked paid.
+    const allocations = [
+      ...buildAllocations(breakdown.owedToReceiver, settlement.fromUser.id),
+      ...buildAllocations(breakdown.owedToDebtor, settlement.toUser.id),
+    ];
+
+    return netAmount > 0 ? allocations : [];
+  };
+
   // Helper: Cascade settlement to update all related expense payments
   const cascadeSettlementToExpenses = (settlement: Settlement) => {
     const expenseUpdates = getExpensePaymentsForSettlement(settlement);
@@ -2159,7 +2203,11 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
         }
 
         try {
-          await confirmSettlementPayment(newSettlementPaymentId);
+          if (settlementPaymentStatus === "rejected" || settlementToConfirm.settlementPaymentStatus === "rejected") {
+            await confirmRejectedSettlementPayment(newSettlementPaymentId);
+          } else {
+            await confirmSettlementPayment(newSettlementPaymentId);
+          }
           setSettlementPaymentId(newSettlementPaymentId);
           setSettlementPaymentStatus("settled");
           await loadExpenses();
@@ -2182,6 +2230,22 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
         const expenseUpdates = getExpensePaymentsForSettlement(settlementToConfirm);
         const uniqueIds = [...new Set(expenseUpdates.map(u => u.expenseId))];
 
+        // Persist the settled transaction while allocations are still outstanding.
+        // The RPC validates against expense_participants.is_paid = false.
+        const manualAllocations = getManualSettlementAllocations(settlementToConfirm);
+        const manualAmount = getSettlementDisplayAmount(settlementToConfirm);
+        if (currentUserId && manualAllocations.length > 0 && manualAmount > 0) {
+          await recordManualSettlement({
+            tripId,
+            payerId: settlementToConfirm.fromUser.id,
+            recipientId: currentUserId,
+            amount: manualAmount,
+            currency: homeCurrency,
+            idempotencyKey: crypto.randomUUID(),
+            allocations: manualAllocations,
+          });
+        }
+
         // Mark each participant as paid for their related expenses
         const expenseIdsByMember = expenseUpdates.reduce((acc, update) => {
           if (!acc[update.memberId]) acc[update.memberId] = [];
@@ -2200,7 +2264,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
             console.warn('Failed to send payment marked notification', e);
           }
         }
-        
+
         // Update local state for immediate feedback
         cascadeSettlementToExpenses(settlementToConfirm);
         
@@ -2417,9 +2481,13 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
   // Handler for "Mark as Paid" - directly opens unified confirmation modal
   const handleMarkPaid = (settlement: Settlement) => {
     logSettlementPendingDetails(settlement);
+    setSelectedSettlementPaymentDetails(null);
     setSettlementToConfirm(settlement);
     setSettlementPaymentId(settlement.settlementPaymentId || null);
     setSettlementPaymentStatus(settlement.settlementPaymentStatus || null);
+    if (settlement.settlementPaymentId) {
+      void loadSettlementPaymentDetails(settlement);
+    }
     setConfirmModalOrigin(null);
     setSettlementConfirmModalOpen(true);
   };
@@ -3756,12 +3824,12 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
         {subTab === "settle" && (
           <div className="px-3 sm:px-4 py-3 sm:py-4 space-y-4">
             <div className="mb-2">
-              <h2 className="text-lg font-semibold text-foreground">Current Outstanding</h2>
+              <h2 className="text-lg font-semibold text-foreground">Settlement</h2>
               <p className="text-sm text-muted-foreground mt-0.5">
-                These are your current balances based on unpaid expenses. Settle to create a new payment.
+                View all settlements and their current payment status.
               </p>
               <Badge variant="outline" className="mt-2 text-xs">
-                {filteredSettlements.length} {filteredSettlements.length === 1 ? "balance" : "balances"}
+                {filteredSettlements.length} {filteredSettlements.length === 1 ? "settlement" : "settlements"}
               </Badge>
             </div>
 
@@ -3799,7 +3867,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
               </Select>
             </div>
 
-            {/* Current outstanding balances */}
+            {/* Unified settlement transactions */}
             <div className="space-y-2 sm:space-y-3">
                 {filteredSettlements.length > 0 ? (
                   filteredSettlements.map((settlement) => (
@@ -3815,7 +3883,6 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
                       currency={summaryDisplayCurrency}
                       showReminder={canShowReminder(settlement)}
                       onCardClick={() => handleSettlementCardClick(settlement)}
-                      onViewPayment={() => handleViewQR(settlement)}
                       onViewDetails={() => handleSettlementCardClick(settlement)}
                       onViewReceipt={() => handleViewSettlementReceiptFromCard(settlement)}
                       onSendReminder={() => handleSendReminder(settlement)}
@@ -3825,70 +3892,10 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
                   ))
                 ) : (
                   <Card className="p-6 text-center border-border/50">
-                    <p className="text-sm font-medium text-foreground">No outstanding balances</p>
-                    <p className="text-xs text-muted-foreground mt-1">All current expenses are settled.</p>
+                    <p className="text-sm font-medium text-foreground">No settlements yet</p>
+                    <p className="text-xs text-muted-foreground mt-1">Settlement transactions will appear here.</p>
                   </Card>
                 )}
-            </div>
-
-            <div className="pt-3 border-t border-border/50">
-              <div className="mb-2">
-                <h2 className="text-lg font-semibold text-foreground">Settlement History</h2>
-                <p className="text-sm text-muted-foreground mt-0.5">
-                  Past settlement payments. Each settlement is a separate transaction.
-                </p>
-                <Badge variant="outline" className="mt-2 text-xs">
-                  {historicalSettlementCards.length} {historicalSettlementCards.length === 1 ? "settlement" : "settlements"}
-                </Badge>
-              </div>
-
-              {historicalSettlementCards.length > 0 ? (
-                <div className="space-y-2">
-                  {historicalSettlementCards.map((settlement) => {
-                    const payment = historicalSettlementPayments.find((item) => item.id === settlement.settlementPaymentId);
-                    return (
-                      <Card key={settlement.id} className="p-3 border-border/50">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center overflow-hidden shrink-0">
-                            {settlement.fromUser.imageUrl ? (
-                              <img src={settlement.fromUser.imageUrl} alt={settlement.fromUser.name} className="h-full w-full object-cover" />
-                            ) : <span className="text-xs font-medium">{settlement.fromUser.name.charAt(0)}</span>}
-                          </div>
-                          <span className="text-sm font-medium truncate">{settlement.fromUser.name}</span>
-                          <ArrowLeftRight className="h-4 w-4 text-muted-foreground shrink-0" />
-                          <span className="text-sm font-medium truncate">{settlement.toUser.name}</span>
-                          <span className="ml-auto text-base font-semibold shrink-0">
-                            {summaryDisplayCurrency} {formatTwoDecimalAmount(settlement.amount)}
-                          </span>
-                        </div>
-                        <div className="flex items-center justify-between gap-2 mt-2 pl-10">
-                          <span className="text-xs text-muted-foreground flex items-center gap-1">
-                            <Clock className="h-3 w-3" />
-                            {payment?.created_at ? new Date(payment.created_at).toLocaleString("en-MY", {
-                              day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit",
-                            }) : "Date unavailable"}
-                          </span>
-                          <StatusBadge status={settlement.status} size="sm" />
-                        </div>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="w-full h-9 mt-2 text-xs"
-                          onClick={() => handleSettlementCardClick(settlement)}
-                        >
-                          <FileText className="h-3.5 w-3.5 mr-1.5" />
-                          View Details
-                        </Button>
-                      </Card>
-                    );
-                  })}
-                </div>
-              ) : (
-                <Card className="p-6 text-center border-border/50">
-                  <p className="text-sm font-medium text-foreground">No settlement history yet</p>
-                  <p className="text-xs text-muted-foreground mt-1">Your completed and submitted settlements will appear here.</p>
-                </Card>
-              )}
             </div>
           </div>
         )}
@@ -4216,6 +4223,11 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
             grossOwed={breakdown.grossOwed}
             grossOffset={breakdown.grossOffset}
             receiptUrl={settlementPaymentReceipt?.receipt_url || settlementToConfirm.receiptUrl}
+            receiptSubmittedAt={
+              selectedSettlementPaymentDetails?.receipt?.created_at
+              || selectedSettlementPaymentDetails?.payment?.created_at
+              || settlementToConfirm.receiptSubmittedAt
+            }
             onViewReceipt={() => {
               setViewingReceipt({ 
                 title: "Payment Receipt", 

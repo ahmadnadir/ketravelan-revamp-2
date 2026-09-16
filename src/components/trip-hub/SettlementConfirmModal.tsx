@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { ArrowLeft, ArrowRight, ChevronDown, RefreshCw, Trash2, Upload, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, CheckCircle2, ChevronDown, Receipt, RefreshCw, Trash2, Upload, X } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -38,6 +38,7 @@ interface SettlementConfirmModalProps {
   grossOffset: number;
   // Receipt (optional)
   receiptUrl?: string;
+  receiptSubmittedAt?: string;
   onViewReceipt?: () => void;
   onUploadReceipt?: (file: File) => void;
   onRemoveReceipt?: () => void;
@@ -69,6 +70,7 @@ export function SettlementConfirmModal({
   grossOwed,
   grossOffset,
   receiptUrl,
+  receiptSubmittedAt,
   onViewReceipt,
   onUploadReceipt,
   onRemoveReceipt,
@@ -82,11 +84,13 @@ export function SettlementConfirmModal({
   onToggleViewMode,
 }: SettlementConfirmModalProps) {
   const [breakdownOpen, setBreakdownOpen] = useState(false);
+  const [receiptExpanded, setReceiptExpanded] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Only the debtor (person who owes) can upload/replace/remove their own payment proof;
   // the receiver can only view what was uploaded to them.
   const isViewerOwing = currentUserId === fromUser.id;
+  const isReceiptVerification = !isViewerOwing && !!receiptUrl;
   const canConfirmSettlement = !isViewerOwing;
 
   // Determine which currency to display
@@ -145,6 +149,14 @@ export function SettlementConfirmModal({
     }
   };
 
+  const receiptDate = receiptSubmittedAt
+    ? new Date(receiptSubmittedAt).toLocaleDateString("en-GB", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      })
+    : "Date unavailable";
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md w-[calc(100%-2rem)] sm:w-full rounded-2xl p-0 flex flex-col overflow-hidden [&>button]:hidden">
@@ -163,7 +175,12 @@ export function SettlementConfirmModal({
               <div className="w-8" />
             )}
             <DialogTitle className="text-xl sm:text-lg font-semibold text-center flex-1">
-              Confirm Settlement
+              <span>{isReceiptVerification ? "Payment Receipts to Verify" : "Confirm Settlement"}</span>
+              {isReceiptVerification && (
+                <span className="block text-2xl font-bold text-foreground mt-1">
+                  {formatCurrencySpaced(primaryAmount, primaryCurrency)}
+                </span>
+              )}
             </DialogTitle>
             <button 
               onClick={() => onOpenChange(false)}
@@ -240,71 +257,111 @@ export function SettlementConfirmModal({
 
         <div className="flex-1 overflow-y-auto overscroll-contain p-4 space-y-4">
           {/* Section 1: Net Amount (Primary Focus) */}
-          <div className="text-center py-4">
-            <p className="text-4xl font-bold text-foreground transition-opacity duration-150">
-              {formatCurrencySpaced(primaryAmount, primaryCurrency)}
-            </p>
-            {needsDualDisplay && conversionAvailable && secondaryAmount !== undefined && (
-              <p className="text-sm text-muted-foreground mt-1">
-                ≈ {formatCurrencySpaced(secondaryAmount, secondaryCurrency)} (est.)
+          {!isReceiptVerification && (
+            <div className="text-center py-4">
+              <p className="text-4xl font-bold text-foreground transition-opacity duration-150">
+                {formatCurrencySpaced(primaryAmount, primaryCurrency)}
               </p>
-            )}
-            <p className="text-sm text-muted-foreground mt-1.5">
-              Net amount to be settled
-            </p>
-          </div>
+              {needsDualDisplay && conversionAvailable && secondaryAmount !== undefined && (
+                <p className="text-sm text-muted-foreground mt-1">
+                  ≈ {formatCurrencySpaced(secondaryAmount, secondaryCurrency)} (est.)
+                </p>
+              )}
+              <p className="text-sm text-muted-foreground mt-1.5">
+                Net amount to be settled
+              </p>
+            </div>
+          )}
 
           {/* Section 3: Payment Receipt (Non-Blocking) */}
-          <div className="rounded-xl bg-muted/30 border border-border/50 p-4">
+          <div className="rounded-xl bg-muted/30 border border-border/50 p-3">
             <p className="text-sm font-medium text-foreground mb-2">Payment receipt</p>
             {receiptUrl ? (
-              <div className="flex items-center gap-3">
-                <img 
-                  src={receiptUrl} 
-                  alt="Payment receipt" 
-                  className="h-16 w-16 rounded-lg object-cover border border-border/50"
-                />
-                <div className="flex items-center gap-1">
-                  <Button 
-                    variant="ghost" 
-                    size="sm" 
+              <div className="rounded-xl border border-border/60 bg-background p-3 shadow-sm">
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
                     onClick={onViewReceipt}
-                    className="text-sm"
+                    className="relative h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-border/50 bg-muted"
+                    aria-label="View payment receipt"
                   >
-                    View
-                  </Button>
-                  {isViewerOwing && (
-                    <>
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        accept="image/*"
-                        onChange={handleFileChange}
-                        className="hidden"
-                      />
+                    <img src={receiptUrl} alt="Payment receipt" className="h-full w-full object-cover" />
+                    <span className="absolute inset-0 flex items-center justify-center bg-black/30">
+                      <Receipt className="h-5 w-5 text-white" />
+                    </span>
+                  </button>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-base font-semibold text-foreground">Settlement payment</p>
+                        <p className="mt-1 text-sm text-muted-foreground">{receiptDate}</p>
+                      </div>
+                      <div className="flex shrink-0 flex-col items-end gap-1">
+                        <p className="text-base font-semibold text-foreground">
+                        {formatCurrencySpaced(primaryAmount, primaryCurrency)}
+                        </p>
+                        <button
+                          type="button"
+                          aria-label={receiptExpanded ? "Collapse payment receipt" : "Expand payment receipt"}
+                          aria-expanded={receiptExpanded}
+                          onClick={() => setReceiptExpanded((previous) => !previous)}
+                          className="rounded-md p-1 text-muted-foreground hover:bg-secondary hover:text-foreground"
+                        >
+                          <ChevronDown className={`h-4 w-4 transition-transform ${receiptExpanded ? "rotate-180" : ""}`} />
+                        </button>
+                      </div>
+                    </div>
+                    <span className="mt-3 inline-flex rounded-full bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-600">
+                      Pending
+                    </span>
+                  </div>
+                </div>
+                {isViewerOwing && (
+                  <div className="mt-3 flex items-center gap-1 border-t border-border/50 pt-2">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={handleFileChange}
+                      className="hidden"
+                    />
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="text-sm gap-1"
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" />
+                      Replace
+                    </Button>
+                    {onRemoveReceipt && (
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => fileInputRef.current?.click()}
-                        className="text-sm gap-1"
+                        onClick={onRemoveReceipt}
+                        className="text-sm text-destructive hover:text-destructive gap-1"
                       >
-                        <RefreshCw className="h-3.5 w-3.5" />
-                        Replace
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Remove
                       </Button>
-                      {onRemoveReceipt && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={onRemoveReceipt}
-                          className="text-sm text-destructive hover:text-destructive gap-1"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                          Remove
-                        </Button>
-                      )}
-                    </>
-                  )}
-                </div>
+                    )}
+                  </div>
+                )}
+                {receiptExpanded && (
+                  <div className="mt-3 border-t border-border/50 pt-3">
+                    <button
+                      type="button"
+                      onClick={onViewReceipt}
+                      className="w-full overflow-hidden rounded-xl bg-secondary/30 p-2"
+                    >
+                      <img
+                        src={receiptUrl}
+                        alt="Payment receipt"
+                        className="mx-auto max-h-64 w-auto max-w-full rounded-lg object-contain"
+                      />
+                    </button>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="flex items-center justify-between">
@@ -338,24 +395,34 @@ export function SettlementConfirmModal({
 
         {/* Footer */}
         <div className="flex-none p-4 pt-3 border-t border-border/50 space-y-2">
+          {isReceiptVerification && (
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">1 receipt submitted</span>
+              <span className="text-lg font-bold text-foreground">
+                {formatCurrencySpaced(primaryAmount, primaryCurrency)}
+              </span>
+            </div>
+          )}
           <Button 
             onClick={handleConfirm} 
             disabled={!canConfirmSettlement}
             className="w-full h-12 rounded-xl font-medium text-[15px]"
           >
             {canConfirmSettlement
-              ? `Approve & Settle ${formatCurrencySpaced(primaryAmount, primaryCurrency)}`
+              ? <><CheckCircle2 className="mr-2 h-4 w-4" />Confirm Payment Received</>
               : receiptUrl
                 ? "Awaiting confirmation"
                 : "Upload receipt to continue"}
           </Button>
-          <Button 
-            variant="outline" 
-            onClick={() => onOpenChange(false)}
-            className="w-full h-10 rounded-xl font-medium text-[15px] text-muted-foreground"
-          >
-            Cancel
-          </Button>
+          {!isReceiptVerification && (
+            <Button
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              className="w-full h-10 rounded-xl font-medium text-[15px] text-muted-foreground"
+            >
+              Cancel
+            </Button>
+          )}
         </div>
       </DialogContent>
     </Dialog>

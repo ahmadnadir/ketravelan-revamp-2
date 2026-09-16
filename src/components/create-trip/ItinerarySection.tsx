@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Ban, FileText, CalendarDays, Plus, X } from 'lucide-react';
+import { Ban, FileText, CalendarDays, Pencil, Plus, X } from 'lucide-react';
 import { OptionCard } from './OptionCard';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
@@ -32,6 +32,8 @@ export function ItinerarySection({
   endDate,
 }: ItinerarySectionProps) {
   const [newActivity, setNewActivity] = useState<Record<number, string>>({});
+  const [editingActivity, setEditingActivity] = useState<{ dayIndex: number; activityIndex: number } | null>(null);
+  const [editingActivityValue, setEditingActivityValue] = useState('');
 
   const addDay = () => {
     const nextDay = dayByDayPlan.length + 1;
@@ -72,6 +74,38 @@ export function ItinerarySection({
         : d
     );
     onDayByDayPlanChange(updated);
+  };
+
+  const startEditingActivity = (dayIndex: number, activityIndex: number) => {
+    setEditingActivity({ dayIndex, activityIndex });
+    setEditingActivityValue(dayByDayPlan[dayIndex]?.activities[activityIndex] || '');
+  };
+
+  const cancelEditingActivity = () => {
+    setEditingActivity(null);
+    setEditingActivityValue('');
+  };
+
+  const saveEditingActivity = () => {
+    if (!editingActivity) return;
+    const value = editingActivityValue.trim();
+    if (!value) {
+      cancelEditingActivity();
+      return;
+    }
+
+    const updated = dayByDayPlan.map((day, dayIndex) => (
+      dayIndex === editingActivity.dayIndex
+        ? {
+            ...day,
+            activities: day.activities.map((activity, activityIndex) => (
+              activityIndex === editingActivity.activityIndex ? value : activity
+            )),
+          }
+        : day
+    ));
+    onDayByDayPlanChange(updated);
+    cancelEditingActivity();
   };
 
   // Auto-initialize days if dates are set
@@ -151,10 +185,48 @@ export function ItinerarySection({
                       key={actIndex}
                       className="flex items-center gap-2 text-sm text-foreground pl-2 py-1 bg-secondary/50 rounded-lg group"
                     >
-                      <span className="flex-1">{activity}</span>
+                      {editingActivity?.dayIndex === dayIndex && editingActivity.activityIndex === actIndex ? (
+                        <Input
+                          value={editingActivityValue}
+                          onChange={(e) => setEditingActivityValue(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              saveEditingActivity();
+                            }
+                            if (e.key === 'Escape') {
+                              e.preventDefault();
+                              cancelEditingActivity();
+                            }
+                          }}
+                          onBlur={saveEditingActivity}
+                          autoFocus
+                          className="h-7 flex-1 rounded-md bg-background px-2 text-sm"
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => startEditingActivity(dayIndex, actIndex)}
+                          className="flex-1 text-left hover:underline"
+                          aria-label={`Edit activity: ${activity}`}
+                        >
+                          {activity}
+                        </button>
+                      )}
+                      {editingActivity?.dayIndex !== dayIndex || editingActivity.activityIndex !== actIndex ? (
+                        <button
+                          type="button"
+                          onClick={() => startEditingActivity(dayIndex, actIndex)}
+                          className="p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                          aria-label={`Edit activity: ${activity}`}
+                        >
+                          <Pencil className="h-3 w-3 text-muted-foreground" />
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         onClick={() => removeActivity(dayIndex, actIndex)}
+                        disabled={editingActivity?.dayIndex === dayIndex && editingActivity.activityIndex === actIndex}
                         className="p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
                       >
                         <X className="h-3 w-3 text-muted-foreground" />

@@ -18,6 +18,7 @@ export interface SettlementExpense {
   title: string;
   date: string;
   shareAmount: number;
+  originalShareAmount?: number;
   status: "pending" | "settled" | "awaiting" | "rejected" | "cancelled";
   category: string;
   paidBy: string;
@@ -203,8 +204,17 @@ export function SettlementBreakdownModal({
     items: SettlementExpense[],
     expanded: boolean,
     onToggle: () => void,
-  ) => (
-    <>
+  ) => {
+    const itemTotal = items.reduce((sum, item) => sum + (item.amountApplied ?? item.shareAmount), 0);
+    const getSettlementDisplayAmount = (item: SettlementExpense) => {
+      const recordedAmount = item.amountApplied ?? item.shareAmount;
+      if (item.amountApplied !== undefined) return recordedAmount;
+      if (itemTotal <= 0 || amount <= 0) return getDisplayAmount(recordedAmount);
+      return amount * (recordedAmount / itemTotal);
+    };
+
+    return (
+      <>
       <button
         type="button"
         onClick={onToggle}
@@ -246,7 +256,7 @@ export function SettlementBreakdownModal({
                     {item.title} · {formatDate(item.date)}
                   </span>
                   <span className="text-foreground font-normal shrink-0 text-right ml-auto">
-                    {formatDisplayAmount(getDisplayAmount(item.shareAmount), primaryCurrency)}
+                    {formatDisplayAmount(getSettlementDisplayAmount(item), primaryCurrency)}
                   </span>
                 </div>
               </button>
@@ -256,8 +266,9 @@ export function SettlementBreakdownModal({
           )}
         </div>
       )}
-    </>
-  );
+      </>
+    );
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -387,7 +398,7 @@ export function SettlementBreakdownModal({
         <div className="flex-none p-4 pt-3 border-t border-border/50">
           <div className="flex flex-col gap-2">
             {/* Primary Action */}
-            {(status === "pending" || (status === "rejected" && isViewerOwing)) && (
+            {(status === "pending" || status === "rejected") && (
               isViewerOwing ? (
                 <Button
                   className="w-full h-11 text-[15px] sm:text-sm bg-foreground text-background hover:bg-foreground/90"
@@ -396,7 +407,7 @@ export function SettlementBreakdownModal({
                   }}
                 >
                   <Upload className="h-4 w-4 mr-2" />
-                  Pay {netAmountLabel}
+                  Pay Now
                 </Button>
               ) : isViewerReceiving ? (
                 <Button
@@ -437,8 +448,21 @@ export function SettlementBreakdownModal({
               </Button>
             )}
 
+            {status === "awaiting" && isViewerOwing && (
+              <Button
+                variant="outline"
+                className="w-full h-10 text-[15px] sm:text-sm"
+                onClick={() => {
+                  onSendReminder?.();
+                }}
+              >
+                <Bell className="h-4 w-4 mr-2" />
+                Notify to Approve
+              </Button>
+            )}
+
             {/* View Receipt: settlement-level receipt remains visible after submit/settle */}
-            {(status === "awaiting" || status === "settled" || status === "rejected") && paymentReceiptUrl && (
+            {(status === "awaiting" || status === "settled" || status === "rejected") && (paymentReceiptUrl || status === "settled") && (
               <Button
                 variant="outline"
                 className="w-full h-10 text-[15px] sm:text-sm"
@@ -453,7 +477,7 @@ export function SettlementBreakdownModal({
 
             {/* Secondary Actions */}
             <div className="grid grid-cols-1 gap-2">
-              {isViewerReceiving && status === "pending" && (
+              {isViewerReceiving && (status === "pending" || status === "rejected") && (
                 <Button
                   variant="outline"
                   className="w-full h-10 text-[15px] sm:text-sm"
