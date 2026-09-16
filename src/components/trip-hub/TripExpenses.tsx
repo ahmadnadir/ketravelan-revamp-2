@@ -4364,6 +4364,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
         onOpenChange={setSettingsSheetOpen}
         homeCurrency={homeCurrency}
         tripTravelCurrencies={tripTravelCurrencies}
+        usedCurrencyCodes={[...new Set(expenses.map((expense) => normalizeCurrencyCode(expense.originalCurrency || expense.homeCurrency || homeCurrency) || homeCurrency))]}
         onSaveCurrencies={async (nextHomeCurrency, nextTravelCurrencies) => {
           const previousHomeCurrency = homeCurrency;
           const previousTravelCurrencies = tripTravelCurrencies;

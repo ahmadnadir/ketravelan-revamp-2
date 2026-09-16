@@ -1,169 +1,48 @@
-export type CurrencyCode =
-  | "MYR"
-  | "USD"
-  | "EUR"
-  | "IDR"
-  | "BND"
-  | "SAR"
-  | "SGD"
-  | "THB"
-  | "VND"
-  | "PHP"
-  | "CNY"
-  | "HKD"
-  | "GBP"
-  | "AUD"
-  | "CAD"
-  | "JPY"
-  | "KRW"
-  | "KZT"
-  | "KGS"
-  | "EGP";
+import {
+  getActiveCurrencies,
+  getCurrencies,
+  getCachedCurrency,
+  getCachedCurrencies,
+  type Currency,
+} from "@/lib/currencyService";
 
-export interface CurrencyInfo {
-  code: CurrencyCode;
-  symbol: string;
-  name: string;
-  flag: string;
-}
+export type CurrencyCode = string;
+export type CurrencyInfo = Pick<Currency, "code" | "symbol" | "name" | "flag_emoji"> & { flag: string };
 
-export const currencies: CurrencyInfo[] = [
-  { code: "MYR", symbol: "RM", name: "Malaysian Ringgit", flag: "🇲🇾" },
-  { code: "USD", symbol: "$", name: "US Dollar", flag: "🇺🇸" },
-  { code: "EUR", symbol: "€", name: "Euro", flag: "🇪🇺" },
-  { code: "IDR", symbol: "Rp", name: "Indonesian Rupiah", flag: "🇮🇩" },
-  { code: "BND", symbol: "B$", name: "Brunei Dollar", flag: "🇧🇳" },
-  { code: "SAR", symbol: "﷼", name: "Saudi Riyal", flag: "🇸🇦" },
-  { code: "SGD", symbol: "S$", name: "Singapore Dollar", flag: "🇸🇬" },
-  { code: "THB", symbol: "฿", name: "Thai Baht", flag: "🇹🇭" },
-  { code: "VND", symbol: "₫", name: "Vietnamese Dong", flag: "🇻🇳" },
-  { code: "PHP", symbol: "₱", name: "Philippine Peso", flag: "🇵🇭" },
-  { code: "CNY", symbol: "¥", name: "Chinese Yuan", flag: "🇨🇳" },
-  { code: "HKD", symbol: "HK$", name: "Hong Kong Dollar", flag: "🇭🇰" },
-  { code: "GBP", symbol: "£", name: "British Pound", flag: "🇬🇧" },
-  { code: "AUD", symbol: "A$", name: "Australian Dollar", flag: "🇦🇺" },
-  { code: "CAD", symbol: "C$", name: "Canadian Dollar", flag: "🇨🇦" },
-  { code: "JPY", symbol: "¥", name: "Japanese Yen", flag: "🇯🇵" },
-  { code: "KRW", symbol: "₩", name: "South Korean Won", flag: "🇰🇷" },
-  { code: "KZT", symbol: "₸", name: "Kazakhstani Tenge", flag: "🇰🇿" },
-  { code: "KGS", symbol: "сом", name: "Kyrgyzstani Som", flag: "🇰🇬" },
-  { code: "EGP", symbol: "E£", name: "Egyptian Pound", flag: "🇪🇬" },
-];
+// Kept as a compatibility view for legacy consumers. Values are populated from
+// the Supabase currency cache; no currency metadata is defined in the frontend.
+export const conversionRatesToMYR: Record<string, number> = new Proxy({}, {
+  get(_target, property: string) {
+    if (property === "MYR") return 1;
+    return getCachedCurrency(property)?.fallback_rate_to_myr || undefined;
+  },
+});
 
-// Get currency info by code
 export function getCurrencyInfo(code: CurrencyCode): CurrencyInfo | undefined {
-  return currencies.find((c) => c.code === code);
+  const currency = getCachedCurrency(code);
+  if (!currency) return undefined;
+  return {
+    code: currency.code,
+    symbol: currency.symbol,
+    name: currency.name,
+    flag_emoji: currency.flag_emoji || "",
+    flag: currency.flag_emoji || "",
+  };
 }
 
-// Travel currencies only (for expense entry)
-export const travelCurrencies = currencies.filter(c => c.code !== "MYR");
-
-// Approximate conversion rates TO MYR (base currency)
-// Last updated: April 6, 2026 - Fetched live from Frankfurter API
-export const conversionRatesToMYR: Record<CurrencyCode, number> = {
-  MYR: 1,
-  USD: 4.04,
-  EUR: 4.66,
-  IDR: 0.000237,
-  BND: 3.17,
-  SAR: 1.09,
-  SGD: 3.14,
-  THB: 0.123,
-  VND: 0.000183,
-  PHP: 0.0667,
-  CNY: 0.586,
-  HKD: 0.515,
-  GBP: 5.34,
-  AUD: 2.78,
-  CAD: 2.91,
-  JPY: 0.0253,
-  KRW: 0.00266,
-  KZT: 0.0089,
-  KGS: 0.048,
-  EGP: 0.084,
-};
-
-// Legacy: rates FROM MYR (for backward compatibility)
-export const conversionRates: Record<CurrencyCode, number> = (Object.keys(
-  conversionRatesToMYR
-) as CurrencyCode[]).reduce((acc, code) => {
-  acc[code] = 1 / conversionRatesToMYR[code];
-  return acc;
-}, {} as Record<CurrencyCode, number>);
-
-// --- Live rates integration (real API) ---
-// Source: exchangerate.host (free, no API key). We fetch rates with base MYR
-// and invert them to get per-currency -> MYR conversion.
-const RATES_CACHE_KEY = "currencyRatesToMYR:cache";
-const RATES_CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
-
-type RatesMap = Record<CurrencyCode, number>;
-
-function readCachedRates(): { rates: RatesMap; ts: number } | null {
-  try {
-    const raw = localStorage.getItem(RATES_CACHE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!parsed || !parsed.rates || !parsed.ts) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
+export async function getCurrencyInfoAsync(code: CurrencyCode): Promise<CurrencyInfo | undefined> {
+  const currency = await getCurrency(code);
+  return currency ? {
+    code: currency.code,
+    symbol: currency.symbol,
+    name: currency.name,
+    flag_emoji: currency.flag_emoji || "",
+    flag: currency.flag_emoji || "",
+  } : undefined;
 }
 
-function writeCachedRates(rates: RatesMap) {
-  try {
-    localStorage.setItem(
-      RATES_CACHE_KEY,
-      JSON.stringify({ rates, ts: Date.now() })
-    );
-  } catch {
-    // ignore cache write errors
-  }
-}
-
-async function resolveLiveRateToMYR(
-  currency: CurrencyCode,
-  toOtherCurrencies: Record<string, number>
-): Promise<number> {
-  if (currency === "MYR") return 1;
-
-  const fromMyR = toOtherCurrencies[currency];
-  if (typeof fromMyR === "number" && Number.isFinite(fromMyR) && fromMyR > 0) {
-    return 1 / fromMyR;
-  }
-
-  return conversionRatesToMYR[currency];
-}
-
-export async function getLiveConversionRatesToMYR(): Promise<RatesMap> {
-  const cached = readCachedRates();
-  if (cached && Date.now() - cached.ts < RATES_CACHE_TTL_MS) {
-    return cached.rates;
-  }
-
-  try {
-    // Fetch rates via same-origin proxy (/api/fx-rates) to avoid browser CORS blocks.
-    // The proxy forwards to api.frankfurter.app server-side.
-    const url = `/api/fx-rates?from=MYR`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`Failed to fetch FX rates: ${res.status}`);
-    const data = await res.json();
-    const toOtherCurrencies: Record<string, number> = data?.rates || {};
-
-    // Invert to get per-currency -> MYR conversion (e.g., USD_to_MYR = 1 / (MYR_to_USD))
-    const live: RatesMap = {} as RatesMap;
-
-    for (const currency of currencies) {
-      live[currency.code] = await resolveLiveRateToMYR(currency.code, toOtherCurrencies);
-    }
-
-    writeCachedRates(live);
-    return live;
-  } catch {
-    // Fallback to static defaults
-    return { ...conversionRatesToMYR };
-  }
+export function getCurrencySymbol(currency: CurrencyCode): string {
+  return getCachedCurrency(currency)?.symbol || currency;
 }
 
 export interface ConversionResult {
@@ -172,189 +51,145 @@ export interface ConversionResult {
   available: boolean;
 }
 
-// Convert from any currency to home currency using live rates
+type RatesMap = Record<string, number>;
+const RATES_CACHE_KEY = "currencyRatesToMYR:cache";
+const RATES_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
+
+function readCachedRates(): { rates: RatesMap; ts: number } | null {
+  try {
+    const raw = localStorage.getItem(RATES_CACHE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return parsed?.rates && parsed?.ts ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedRates(rates: RatesMap) {
+  try {
+    localStorage.setItem(RATES_CACHE_KEY, JSON.stringify({ rates, ts: Date.now() }));
+  } catch {
+    // Ignore browser storage failures.
+  }
+}
+
+async function fetchFrankfurterRate(fromCurrency: string, toCurrency: string): Promise<number | null> {
+  try {
+    const response = await fetch(`/api/fx-rates?from=${encodeURIComponent(fromCurrency)}&to=${encodeURIComponent(toCurrency)}`);
+    if (!response.ok) return null;
+    const data = await response.json();
+    const rate = Number(data?.rates?.[toCurrency]);
+    return Number.isFinite(rate) && rate > 0 ? rate : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function getLiveConversionRatesToMYR(): Promise<RatesMap> {
+  const cached = readCachedRates();
+  if (cached && Date.now() - cached.ts < RATES_CACHE_TTL_MS) return cached.rates;
+
+  const currencies = await getCurrencies();
+  const fallbackRates: RatesMap = { MYR: 1 };
+  currencies.forEach((currency) => {
+    if (currency.fallback_rate_to_myr && currency.fallback_rate_to_myr > 0) {
+      fallbackRates[currency.code] = currency.fallback_rate_to_myr;
+    }
+  });
+
+  try {
+    const response = await fetch("/api/fx-rates?from=MYR");
+    if (!response.ok) throw new Error("Frankfurter unavailable");
+    const data = await response.json();
+    const rates: RatesMap = { MYR: 1 };
+    currencies.forEach((currency) => {
+      const frankfurterRate = Number(data?.rates?.[currency.code]);
+      if (currency.is_frankfurter_supported && Number.isFinite(frankfurterRate) && frankfurterRate > 0) {
+        rates[currency.code] = 1 / frankfurterRate;
+      } else {
+        rates[currency.code] = fallbackRates[currency.code] || 1;
+      }
+    });
+    writeCachedRates(rates);
+    return rates;
+  } catch {
+    return fallbackRates;
+  }
+}
+
 export async function convertToHomeCurrency(
   amount: number,
   fromCurrency: CurrencyCode,
-  homeCurrency: CurrencyCode
+  homeCurrency: CurrencyCode,
 ): Promise<ConversionResult> {
-  if (fromCurrency === homeCurrency) {
-    return { amount, rate: 1, available: true };
+  const from = fromCurrency.toUpperCase();
+  const to = homeCurrency.toUpperCase();
+  if (from === to) return { amount, rate: 1, available: true };
+
+  const currencies = await getCurrencies();
+  const fromInfo = currencies.find((currency) => currency.code === from);
+  const toInfo = currencies.find((currency) => currency.code === to);
+  const bothSupported = Boolean(fromInfo?.is_frankfurter_supported && toInfo?.is_frankfurter_supported);
+
+  if (bothSupported) {
+    const directRate = await fetchFrankfurterRate(from, to);
+    if (directRate) {
+      return { amount: Math.round(amount * directRate * 100) / 100, rate: directRate, available: true };
+    }
   }
-  
+
   const rates = await getLiveConversionRatesToMYR();
-  const rate = rates[fromCurrency] / rates[homeCurrency];
-  const convertedAmount = amount * rate;
-  
-  return {
-    amount: Math.round(convertedAmount * 100) / 100,
-    rate,
-    available: true,
-  };
+  const fromRate = rates[from] || fromInfo?.fallback_rate_to_myr;
+  const toRate = rates[to] || toInfo?.fallback_rate_to_myr;
+  if (!fromRate || !toRate) return { amount, rate: 1, available: false };
+
+  const rate = fromRate / toRate;
+  return { amount: Math.round(amount * rate * 100) / 100, rate, available: true };
 }
 
-// Alias for backward compatibility
 export const convertToHomeCurrencyLive = convertToHomeCurrency;
 
-// Format currency with proper spacing: "RM 5,000" not "RM5,000"
 export function formatCurrencySpaced(amount: number, currency: CurrencyCode): string {
-  const currencyInfo = currencies.find((c) => c.code === currency);
-  const symbol = currencyInfo?.symbol || currency;
-  
-  if (currency === "IDR") {
-    if (amount >= 1000000) {
-      return `${symbol} ${(amount / 1000000).toFixed(1)}jt`;
-    }
-    if (amount >= 1000) {
-      return `${symbol} ${Math.round(amount / 1000)}k`;
-    }
-  }
-  
-  return `${symbol} ${amount.toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const code = currency.toUpperCase();
+  const info = getCachedCurrency(code);
+  const symbol = info?.symbol || code;
+  const decimals = info?.decimal_places ?? 2;
+  return `${symbol} ${amount.toLocaleString("en-MY", {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  })}`;
+}
+
+export function formatCurrency(amount: number, currency: CurrencyCode): string {
+  return formatCurrencySpaced(amount, currency);
 }
 
 export async function convertPrice(priceInMYR: number, toCurrency: CurrencyCode): Promise<number> {
   const rates = await getLiveConversionRatesToMYR();
-  // Convert MYR to target currency: target = MYR / (currency_to_MYR rate)
-  const toCurrencyRate = 1 / rates[toCurrency];
-  return Math.round(priceInMYR * toCurrencyRate);
-}
-
-export function formatCurrency(amount: number, currency: CurrencyCode): string {
-  const currencyInfo = currencies.find((c) => c.code === currency);
-  const symbol = currencyInfo?.symbol || currency;
-  
-  if (currency === "IDR") {
-    // Format large IDR amounts with 'k' or 'jt' (juta = million)
-    if (amount >= 1000000) {
-      return `${symbol} ${(amount / 1000000).toFixed(1)}jt`;
-    }
-    if (amount >= 1000) {
-      return `${symbol} ${Math.round(amount / 1000)}k`;
-    }
-  }
-  
-  return `${symbol} ${amount.toLocaleString()}`;
-}
-
-export function getCurrencySymbol(currency: CurrencyCode): string {
-  const currencyInfo = currencies.find((c) => c.code === currency);
-  return currencyInfo?.symbol || currency;
+  const rate = rates[toCurrency.toUpperCase()] || 1;
+  return Math.round(priceInMYR / rate);
 }
 
 export async function formatBudgetRangeWithCurrency(
   range: [number, number],
-  currency: CurrencyCode
+  currency: CurrencyCode,
 ): Promise<string> {
   const rates = await getLiveConversionRatesToMYR();
-  const formatPrice = (priceInMYR: number) => {
-    // Convert MYR -> target using live rates: target = MYR / (currency_to_MYR rate)
-    const toCurrencyRate = 1 / rates[currency];
-    const converted = Math.round(priceInMYR * toCurrencyRate);
-    if (priceInMYR >= 10000) {
-      return formatCurrency(converted, currency) + "+";
-    }
-    return formatCurrency(converted, currency);
-  };
-  return `${formatPrice(range[0])} – ${formatPrice(range[1])}`;
+  const rate = rates[currency.toUpperCase()] || 1;
+  return `${formatCurrency(range[0] / rate, currency)} – ${formatCurrency(range[1] / rate, currency)}`;
 }
 
-// Alias for backward compatibility
 export const formatBudgetRangeWithCurrencyLive = formatBudgetRangeWithCurrency;
 
-// Destination to currency mapping for auto-suggestion
-const destinationCurrencyMap: Record<string, CurrencyCode> = {
-  // Indonesia
-  'indonesia': 'IDR',
-  'bali': 'IDR',
-  'jakarta': 'IDR',
-  'lombok': 'IDR',
-  'yogyakarta': 'IDR',
-  'bandung': 'IDR',
-  'surabaya': 'IDR',
-  'brunei': 'BND',
-  'bandar seri begawan': 'BND',
-  
-  // USA
-  'united states': 'USD',
-  'usa': 'USD',
-  'america': 'USD',
-  'new york': 'USD',
-  'california': 'USD',
-  'hawaii': 'USD',
-  'los angeles': 'USD',
-  'san francisco': 'USD',
-  'las vegas': 'USD',
-  
-  // Europe (Eurozone)
-  'europe': 'EUR',
-  'france': 'EUR',
-  'paris': 'EUR',
-  'germany': 'EUR',
-  'berlin': 'EUR',
-  'spain': 'EUR',
-  'barcelona': 'EUR',
-  'madrid': 'EUR',
-  'italy': 'EUR',
-  'rome': 'EUR',
-  'milan': 'EUR',
-  'amsterdam': 'EUR',
-  'netherlands': 'EUR',
-  'belgium': 'EUR',
-  'brussels': 'EUR',
-  'portugal': 'EUR',
-  'lisbon': 'EUR',
-  'greece': 'EUR',
-  'athens': 'EUR',
-  'austria': 'EUR',
-  'vienna': 'EUR',
-  
-  // Malaysia (home country)
-  'malaysia': 'MYR',
-  'kuala lumpur': 'MYR',
-  'langkawi': 'MYR',
-  'penang': 'MYR',
-  'malacca': 'MYR',
-  'kota kinabalu': 'MYR',
+export async function getCurrency(code: string): Promise<Currency | null> {
+  const currencies = await getCurrencies();
+  return currencies.find((currency) => currency.code === code.trim().toUpperCase()) || null;
+}
 
-  // Brunei
-  'brunei darussalam': 'BND',
+export async function getActiveCurrencyList(): Promise<Currency[]> {
+  return getActiveCurrencies();
+}
 
-  // Saudi Arabia
-  'saudi arabia': 'SAR',
-  'riyadh': 'SAR',
-  'jeddah': 'SAR',
-  'mecca': 'SAR',
-  'makkah': 'SAR',
-  'medina': 'SAR',
-
-  // Kazakhstan
-  'kazakhstan': 'KZT',
-  'astana': 'KZT',
-  'almaty': 'KZT',
-
-  // Kyrgyzstan
-  'kyrgyzstan': 'KGS',
-  'bishkek': 'KGS',
-
-  // Egypt
-  'egypt': 'EGP',
-  'cairo': 'EGP',
-  'alexandria': 'EGP',
-  'giza': 'EGP',
-  'luxor': 'EGP',
-  'aswan': 'EGP',
-  'sharm el sheikh': 'EGP',
-};
-
-export function suggestCurrencyFromDestination(destination: string): CurrencyCode | null {
-  if (!destination) return null;
-  
-  const normalized = destination.toLowerCase().trim();
-  for (const [key, currency] of Object.entries(destinationCurrencyMap)) {
-    if (normalized.includes(key)) {
-      return currency;
-    }
-  }
-  return null;
+export function getCachedCurrencyList(): Currency[] {
+  return getCachedCurrencies();
 }

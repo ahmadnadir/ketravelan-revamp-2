@@ -4,7 +4,6 @@ import { X, Loader2, Upload, Receipt, Users, UserCheck, Pencil, Info, Calendar a
 import { ExpenseCategory, getExpenseCategoryCode } from "@/lib/expenseCategories";
 import { 
   CurrencyCode, 
-  travelCurrencies, 
   convertToHomeCurrencyLive, 
   formatCurrencySpaced,
   getCurrencySymbol
@@ -34,6 +33,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar";
 import { ExpensePayment } from "@/data/mockData";
 import { cn } from "@/lib/utils";
+import { getActiveCurrencies, type Currency } from "@/lib/currencyService";
 
 // Using expenseCategories from lib for consistency
 
@@ -201,17 +201,33 @@ export function AddExpenseModal({
   const homeCurrency: CurrencyCode = tripHomeCurrency || authHomeCurrency || "MYR";
   
   // Build available currencies: home currency + allowed travel currencies
+  const [currencyOptions, setCurrencyOptions] = useState<Currency[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    getActiveCurrencies().then((currencies) => {
+      if (!cancelled) setCurrencyOptions(currencies);
+    }).catch(() => {
+      if (!cancelled) setCurrencyOptions([]);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
   const availableCurrencies = useMemo(() => {
-    const homeCurrencyInfo = {
-      code: homeCurrency,
-      symbol: homeCurrency === "MYR" ? "RM" : homeCurrency,
-      name: "Home Currency",
-    };
-    const filteredTravelCurrencies = Array.isArray(allowedCurrencies)
-      ? travelCurrencies.filter(c => allowedCurrencies.includes(c.code))
-      : travelCurrencies;
-    return [homeCurrencyInfo, ...filteredTravelCurrencies.filter(c => c.code !== homeCurrency)];
-  }, [allowedCurrencies, homeCurrency]);
+    const filtered = Array.isArray(allowedCurrencies)
+      ? currencyOptions.filter((currency) => allowedCurrencies.includes(currency.code))
+      : currencyOptions.filter((currency) => currency.allow_as_travel);
+    const homeCurrencyInfo = currencyOptions.find((currency) => currency.code === homeCurrency);
+    return [
+      homeCurrencyInfo || {
+        code: homeCurrency,
+        symbol: homeCurrency,
+        name: "Home Currency",
+        flag_emoji: "",
+      },
+      ...filtered.filter((currency) => currency.code !== homeCurrency),
+    ];
+  }, [allowedCurrencies, currencyOptions, homeCurrency]);
   
   // Helper: find member ID by name
   const getMemberIdByName = useCallback((name: string) => {
