@@ -63,6 +63,7 @@ export function FloatingNavigation({
             <button
               type="button"
               onClick={onBack}
+              data-swipe-back-ignore="true"
               aria-label={backLabel}
               className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/85"
             >

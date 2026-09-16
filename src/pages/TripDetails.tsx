@@ -1319,7 +1319,7 @@ export default function TripDetails() {
         <div className="flex flex-col items-center justify-center h-[60vh]">
           <h2 className="text-lg font-semibold mb-2">Trip not found</h2>
           <p className="text-muted-foreground mb-4">We couldn't find the trip details. It may have been removed or is unavailable.</p>
-          <Button variant="outline" onClick={handleBackNavigation}>{backLabel}</Button>
+          <Button variant="outline" onClick={handleBackNavigation} data-swipe-back-ignore="true">{backLabel}</Button>
         </div>
       </AppLayout>
     );
@@ -1727,6 +1727,7 @@ export default function TripDetails() {
                     <button
                       type="button"
                       onClick={handleBackNavigation}
+                      data-swipe-back-ignore="true"
                       className="absolute top-3 left-3 z-20 h-10 w-10 rounded-full border border-white/40 bg-black/30 backdrop-blur-md shadow-lg flex items-center justify-center"
                       aria-label={backLabel}
                     >
@@ -1751,6 +1752,7 @@ export default function TripDetails() {
                   <button
                     type="button"
                     onClick={handleBackNavigation}
+                    data-swipe-back-ignore="true"
                     className="absolute top-3 left-3 h-9 w-9 rounded-full bg-card/80 backdrop-blur-sm flex items-center justify-center sm:top-4 sm:left-4 sm:h-10 sm:w-10"
                     aria-label={backLabel}
                   >
@@ -2301,6 +2303,7 @@ export default function TripDetails() {
               <button
                 type="button"
                 onClick={handleBackNavigation}
+                data-swipe-back-ignore="true"
                 aria-label={backLabel}
                 className={cn(
                   "flex h-9 w-9 items-center justify-center rounded-full transition-colors",

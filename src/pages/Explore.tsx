@@ -21,7 +21,6 @@ import { useAuth } from "@/contexts/AuthContext";
 import { TripFilterDrawer, type FilterState } from "@/components/explore/TripFilterDrawer";
 import { AppliedFiltersBar } from "@/components/explore/AppliedFiltersBar";
 import { isDefaultBudgetRange, formatBudgetRange, BudgetRangeSelector } from "@/components/explore/BudgetTierSelector";
-import { useSimulatedLoading } from "@/hooks/useSimulatedLoading";
 import { convertPrice, getCurrencySymbol, getCurrencyInfo, type CurrencyCode } from "@/lib/currencyUtils";
 import { searchLocations, type LocationResult } from "@/lib/locationApi";
 import { getTripImageUrl } from "@/lib/tripImage";
@@ -39,7 +38,6 @@ const buildDefaultFilters = (): FilterState => ({
 type DesktopPanel = "where" | "when" | "budget" | "styles" | null;
 
 export default function Explore() {
-  const isLoading = useSimulatedLoading(600);
   const { homeCurrency } = useAuth();
   const defaultCurrency = homeCurrency || "MYR";
   const [searchParams, setSearchParams] = useSearchParams();
@@ -130,13 +128,12 @@ export default function Explore() {
   }, [appliedFilters]);
 
   // Fetch trips with React Query
-  const { data: trips = [], error, isFetching, refetch } = useTrips(queryFilters, {
+  const { data: trips = [], error, isPending, isFetching, refetch } = useTrips(queryFilters, {
     refetchOnMount: false,
     staleTime: 1000 * 60 * 2,
   });
 
-  const isTripsLoading = isLoading || isFetching;
-  const showInitialSkeleton = isTripsLoading && trips.length === 0;
+  const showInitialSkeleton = isPending && trips.length === 0;
   const shouldShowRefetchProgress = isFetching && trips.length > 0;
 
   useEffect(() => {
@@ -192,7 +189,7 @@ export default function Explore() {
   }, []);
 
   const triggerSwipeRefresh = useCallback(async () => {
-    if (isFetching || isLoading) return;
+    if (isFetching || isPending) return;
 
     try {
       await refetch();
@@ -200,7 +197,7 @@ export default function Explore() {
       console.error("Failed to refresh trips via swipe", refreshError);
       toast.error("Failed to refresh trips");
     }
-  }, [isFetching, isLoading, refetch]);
+  }, [isFetching, isPending, refetch]);
 
   const handleSwipeStart = useCallback((event: React.TouchEvent<HTMLDivElement>) => {
     if (event.touches.length !== 1) {
@@ -762,7 +759,7 @@ export default function Explore() {
         </div>
 
         {/* Results Header */}
-        {!isLoading && !isFetching && (
+        {!showInitialSkeleton && !isFetching && (
           <div className="flex items-center justify-between text-xs sm:text-sm">
             <span className="text-muted-foreground">
               Found {displayedTrips.length} {tab} trip{displayedTrips.length !== 1 ? "s" : ""}
