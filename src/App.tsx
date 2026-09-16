@@ -618,7 +618,7 @@ function SocialAccessBlockedState() {
 function SocialFeatureAccessGate({ children }: { children: React.ReactElement }) {
   const { profile } = useAuth();
   const isMinor = isMinorProfile(profile);
-  const socialLevel = getEffectiveSocialFeaturesLevel(isMinor);
+  const socialLevel = getEffectiveSocialFeaturesLevel(isMinor, profile?.social_features_level);
   const path = useLocation().pathname;
   const isSocialPath =
     path.startsWith("/chat") ||

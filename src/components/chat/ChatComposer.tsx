@@ -75,6 +75,12 @@ export function ChatComposer({ onSend, placeholder = "Type a message...", onTypi
   };
 
   const handleInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      void handleSend();
+      return;
+    }
+
     if (e.key !== "Backspace" && e.key !== "Delete") return;
 
     // Recalculate after the key mutates textarea value.
@@ -438,7 +444,7 @@ export function ChatComposer({ onSend, placeholder = "Type a message...", onTypi
                 onInput={(e) => resizeTextarea(e.currentTarget)}
                 onBlur={handleInputBlur}
                 rows={1}
-                className="flex-1 rounded-2xl bg-white text-black border border-[#d9d9d9] min-h-[36px] max-h-[140px] text-sm px-3 py-[7px] leading-5 resize-none placeholder:text-gray-400 shadow-[0_1px_3px_rgba(0,0,0,0.14)] focus-visible:ring-2 focus-visible:ring-black/10 focus-visible:ring-offset-0"
+                className="flex-1 rounded-2xl bg-white text-black border border-[#d9d9d9] min-h-[36px] max-h-[140px] text-sm px-3 py-[7px] leading-5 resize-none placeholder:text-gray-400 shadow-[0_1px_3px_rgba(0,0,0,0.14)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/10 focus-visible:ring-offset-0"
                 style={{
                   fontSize: '16px', // Prevent iOS zoom on focus
                   height: `${MIN_TEXTAREA_HEIGHT}px`,

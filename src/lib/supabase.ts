@@ -80,6 +80,8 @@ export type Database = {
           email_notifications: boolean;
           push_notifications: boolean;
           onboarding_completed: boolean;
+          social_features_pin_hash: string | null;
+          social_features_level: 'disabled' | 'full' | null;
           created_at: string;
           updated_at: string;
         };
@@ -99,6 +101,8 @@ export type Database = {
           email_notifications?: boolean;
           push_notifications?: boolean;
           onboarding_completed?: boolean;
+          social_features_pin_hash?: string | null;
+          social_features_level?: 'disabled' | 'full' | null;
         };
         Update: {
           username?: string | null;
@@ -113,6 +117,8 @@ export type Database = {
           email_notifications?: boolean;
           push_notifications?: boolean;
           onboarding_completed?: boolean;
+          social_features_pin_hash?: string | null;
+          social_features_level?: 'disabled' | 'full' | null;
         };
       };
     };

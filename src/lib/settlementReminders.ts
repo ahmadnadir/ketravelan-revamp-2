@@ -8,6 +8,7 @@ export interface SendSettlementReminderParams {
   currency: string;
   message: string;
   channels?: string[];
+  mode?: "payment" | "approval";
 }
 
 export interface SettlementReminderResponse {

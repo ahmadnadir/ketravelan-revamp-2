@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { AlertCircle, ArrowRight, ArrowLeft, Download, ZoomIn, ZoomOut, CheckCircle2, ChevronDown, ChevronUp, Receipt, X } from "lucide-react";
+import { AlertCircle, ArrowRight, ArrowLeft, Bell, Download, ZoomIn, ZoomOut, CheckCircle2, ChevronDown, ChevronUp, Receipt, X } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -33,6 +33,8 @@ interface SettlementReceiptsModalProps {
   paymentStatus?: string;
   currentUserId?: string | null;
   onMarkAllPaid: () => void;
+  onConfirmPayment?: () => void;
+  onNotifyToApprove?: () => void;
   onBack?: () => void;
   expenseCategories: ExpenseCategory[];
 }
@@ -47,6 +49,8 @@ export function SettlementReceiptsModal({
   paymentStatus,
   currentUserId,
   onMarkAllPaid,
+  onConfirmPayment,
+  onNotifyToApprove,
   onBack,
   expenseCategories,
 }: SettlementReceiptsModalProps) {
@@ -87,9 +91,17 @@ export function SettlementReceiptsModal({
   };
 
   const handleConfirmPayment = () => {
-    onMarkAllPaid();
+    (onConfirmPayment || onMarkAllPaid)();
     onOpenChange(false);
   };
+
+  const paymentDisplayStatus = paymentStatus === "awaiting_confirmation"
+    ? "awaiting"
+    : paymentStatus === "settled"
+      ? "settled"
+      : paymentStatus === "rejected"
+        ? "rejected"
+        : undefined;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -100,7 +112,7 @@ export function SettlementReceiptsModal({
           {onBack && (
             <button 
               onClick={onBack}
-              className="absolute top-4 left-4 z-10 h-8 w-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
+              className="absolute top-6 left-4 z-10 h-8 w-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
             >
               <ArrowLeft className="h-4 w-4" />
             </button>
@@ -150,9 +162,8 @@ export function SettlementReceiptsModal({
 
           {/* Title and Amount */}
           <DialogTitle className="text-center mt-3">
-            <span className="text-muted-foreground text-sm font-normal">Payment Receipts to Verify</span>
             <span className="block text-2xl font-bold text-foreground mt-0.5">
-              RM {totalAmount.toLocaleString()}
+              RM {totalAmount.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </span>
           </DialogTitle>
         </DialogHeader>
@@ -164,6 +175,16 @@ export function SettlementReceiptsModal({
               const isExpanded = expandedReceipt === receipt.expenseId;
               const categoryCode = getExpenseCategoryCode(receipt.category) || "other";
               const categoryData = expenseCategories.find((item) => item.code === categoryCode);
+              const displayStatus = paymentDisplayStatus || receipt.status || "pending";
+              const displayStatusLabel = displayStatus === "awaiting"
+                ? "Awaiting Confirmation"
+                : displayStatus === "settled"
+                  ? "Settled"
+                  : displayStatus === "rejected"
+                    ? "Rejected"
+                    : displayStatus === "approved"
+                      ? "Approved"
+                      : "Pending";
               
               return (
                 <Card key={receipt.expenseId} className="overflow-hidden border-border/50">
@@ -222,13 +243,15 @@ export function SettlementReceiptsModal({
                       </div>
                       <div className="mt-2">
                           <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                            receipt.status === "rejected"
+                            displayStatus === "rejected"
                               ? "bg-destructive/10 text-destructive"
-                              : receipt.status === "approved"
+                              : displayStatus === "approved" || displayStatus === "settled"
                                 ? "bg-stat-green/10 text-stat-green"
+                                : displayStatus === "awaiting"
+                                  ? "bg-blue-500/10 text-blue-600"
                                 : "bg-amber-500/10 text-amber-600 dark:text-amber-400"
                           }`}>
-                          {(receipt.status || "pending").replace(/_/g, " ")}
+                          {displayStatusLabel}
                         </span>
                       </div>
                     </div>
@@ -380,7 +403,7 @@ export function SettlementReceiptsModal({
           {/* Summary */}
           <div className="flex items-center justify-between text-sm">
             <span className="text-muted-foreground">{receipts.length} receipt{receipts.length !== 1 ? 's' : ''} submitted</span>
-            <span className="font-bold text-foreground text-lg">RM {totalAmount.toLocaleString()}</span>
+            <span className="font-bold text-foreground text-lg">RM {totalAmount.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
           </div>
 
           {/* Action Buttons */}
@@ -393,6 +416,17 @@ export function SettlementReceiptsModal({
             >
               <CheckCircle2 className="h-4 w-4 mr-2" />
               Confirm Payment Received
+            </Button>
+          )}
+          {currentUserId === fromUser.id
+            && paymentStatus === "awaiting_confirmation"
+            && onNotifyToApprove && (
+            <Button
+              className="w-full h-11 text-sm bg-black text-white hover:bg-black/90 dark:bg-black dark:text-white dark:hover:bg-black/90"
+              onClick={onNotifyToApprove}
+            >
+              <Bell className="h-4 w-4 mr-2" />
+              Notify to Approve
             </Button>
           )}
         </div>

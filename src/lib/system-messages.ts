@@ -44,7 +44,7 @@ export async function sendSystemMessage({
     } else if (action === "note_edited" && details) {
       content = `${senderName} edited ${details} note`;
     } else if (action === "travel_currency_added" && details) {
-      content = `${senderName} added travel currency: ${details}`;
+      content = `${senderName} added travel ${details.includes(",") || details.includes(" and ") ? "currencies" : "currency"}: ${details}`;
     }
 
     if (!content) return;

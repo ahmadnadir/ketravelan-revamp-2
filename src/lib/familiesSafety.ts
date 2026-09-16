@@ -5,7 +5,6 @@ const getSupabaseClient = async () => {
   return supabase;
 };
 
-const SOCIAL_LEVEL_KEY = "ketravelan-social-features-level";
 const SAFETY_ACK_DAY_KEY = "ketravelan-safety-reminder-day";
 
 const MINOR_AGE_YEARS = 18;
@@ -91,26 +90,12 @@ export const isMinorProfile = (profileLike?: { date_of_birth?: string | null } |
   return typeof age === "number" && age >= 0 && age < MINOR_AGE_YEARS;
 };
 
-export const getStoredSocialFeaturesLevel = (): SocialFeaturesLevel | null => {
-  const storage = safeStorage();
-  if (!storage) return null;
-  const raw = storage.getItem(SOCIAL_LEVEL_KEY);
-  if (raw === "disabled" || raw === "full") return raw;
-  // Migrate legacy setting to the safer available option.
-  if (raw === "known_contacts") return "disabled";
-  return null;
-};
-
-export const getEffectiveSocialFeaturesLevel = (isMinor: boolean): SocialFeaturesLevel => {
-  const stored = getStoredSocialFeaturesLevel();
-  if (stored) return stored;
+export const getEffectiveSocialFeaturesLevel = (
+  isMinor: boolean,
+  profileLevel?: SocialFeaturesLevel | null,
+): SocialFeaturesLevel => {
+  if (profileLevel === "disabled" || profileLevel === "full") return profileLevel;
   return isMinor ? DEFAULT_CHILD_LEVEL : "full";
-};
-
-export const setStoredSocialFeaturesLevel = (level: SocialFeaturesLevel) => {
-  const storage = safeStorage();
-  if (!storage) return;
-  storage.setItem(SOCIAL_LEVEL_KEY, level);
 };
 
 const getTodayKey = () => {
@@ -133,7 +118,7 @@ export const acknowledgeSafetyReminderToday = () => {
   storage.setItem(SAFETY_ACK_DAY_KEY, getTodayKey());
 };
 
-async function fetchCurrentUserDob() {
+async function fetchCurrentUserSafetyProfile() {
   const supabase = await getSupabaseClient();
   const { data: authData } = await supabase.auth.getUser();
   const userId = authData.user?.id;
@@ -141,11 +126,11 @@ async function fetchCurrentUserDob() {
 
   const { data } = await supabase
     .from("profiles")
-    .select("date_of_birth")
+    .select("date_of_birth, social_features_level")
     .eq("id", userId)
     .maybeSingle();
 
-  return data?.date_of_birth || null;
+  return data;
 }
 
 export async function isKnownContactForCurrentUser(otherUserId: string) {
@@ -199,11 +184,11 @@ export async function isKnownContactForCurrentUser(otherUserId: string) {
 
 export async function ensureCurrentUserCanStartDirectChat(otherUserId: string) {
   if (!otherUserId) return;
-  const dob = await fetchCurrentUserDob();
-  const isMinor = isMinorProfile({ date_of_birth: dob });
+  const profile = await fetchCurrentUserSafetyProfile();
+  const isMinor = isMinorProfile(profile);
   if (!isMinor) return;
 
-  const level = getEffectiveSocialFeaturesLevel(true);
+  const level = getEffectiveSocialFeaturesLevel(true, profile?.social_features_level);
   if (level === "disabled") {
     throw new FamiliesPolicyError(
       "SOCIAL_DISABLED",
@@ -213,11 +198,11 @@ export async function ensureCurrentUserCanStartDirectChat(otherUserId: string) {
 }
 
 export async function enforceCurrentUserSocialWritePolicy(freeformText: string) {
-  const dob = await fetchCurrentUserDob();
-  const isMinor = isMinorProfile({ date_of_birth: dob });
+  const profile = await fetchCurrentUserSafetyProfile();
+  const isMinor = isMinorProfile(profile);
   if (!isMinor) return;
 
-  const level = getEffectiveSocialFeaturesLevel(true);
+  const level = getEffectiveSocialFeaturesLevel(true, profile?.social_features_level);
   if (level === "disabled") {
     throw new FamiliesPolicyError(
       "SOCIAL_DISABLED",

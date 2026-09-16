@@ -115,6 +115,8 @@ interface Profile {
   tiktok?: string | null;
   linkedin?: string | null;
   onboarding_completed: boolean;
+  social_features_pin_hash?: string | null;
+  social_features_level?: 'disabled' | 'full' | null;
   onboarding_goal?: string | null;
   is_deleted?: boolean | null;
   deleted_at?: string | null;

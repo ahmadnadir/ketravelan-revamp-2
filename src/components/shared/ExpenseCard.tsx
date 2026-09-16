@@ -228,7 +228,8 @@ export function ExpenseCard({
                 {displayCurrency} {formatAmount(displayAmount)}
               </p>
               <p className="text-[13px] sm:text-[15px] text-muted-foreground mt-1">
-                Paid by {paidBy} · {formatDisplayDate(date)}
+                Paid by {paidBy} <br/>
+                {formatDisplayDate(date)}
               </p>
             </div>
             {(canToggleCurrency || canManage) && (

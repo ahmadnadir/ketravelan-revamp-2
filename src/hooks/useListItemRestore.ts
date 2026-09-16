@@ -51,12 +51,10 @@ export function useListItemRestore({ scope, ready, selectorForItemId }: UseListI
     if (!pendingRestore || pendingRestore.scope !== scope) return;
 
     let frameId = 0;
-    let timeoutId = 0;
     const startedAt = Date.now();
 
     const cleanup = () => {
       window.cancelAnimationFrame(frameId);
-      window.clearTimeout(timeoutId);
     };
 
     const tryRestore = () => {
@@ -77,7 +75,6 @@ export function useListItemRestore({ scope, ready, selectorForItemId }: UseListI
       }
 
       frameId = window.requestAnimationFrame(tryRestore);
-      timeoutId = window.setTimeout(tryRestore, 120);
     };
 
     frameId = window.requestAnimationFrame(tryRestore);

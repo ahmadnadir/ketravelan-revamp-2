@@ -3,7 +3,7 @@ import { format, parse, isValid } from "date-fns";
 /**
  * Standard date format used across the app: "April 4th 2026"
  */
-export const STANDARD_DATE_FORMAT = "MMMM do yyyy";
+export const STANDARD_DATE_FORMAT = "d MMM yyyy";
 
 /**
  * Format a date to the standard display format (e.g., "April 4th 2026")

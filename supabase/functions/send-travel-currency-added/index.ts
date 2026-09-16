@@ -50,7 +50,8 @@ function buildCorsHeaders(req: Request): Record<string, string> {
 
 interface TravelCurrencyAddedRequest {
   tripId: string;
-  currencyCode: string;
+  currencyCode?: string;
+  currencyCodes?: string[];
 }
 
 serve(async (req: Request) => {
@@ -81,7 +82,10 @@ serve(async (req: Request) => {
     }
 
     const body = await req.json() as TravelCurrencyAddedRequest;
-    if (!body?.tripId || !body?.currencyCode) {
+    const currencyCodes = (Array.isArray(body?.currencyCodes) ? body.currencyCodes : [body?.currencyCode])
+      .filter((code): code is string => typeof code === "string" && code.trim().length > 0)
+      .map((code) => code.toUpperCase().trim());
+    if (!body?.tripId || currencyCodes.length === 0) {
       return json({ error: "Missing tripId or currencyCode" }, 400);
     }
 
@@ -120,19 +124,23 @@ serve(async (req: Request) => {
       .maybeSingle();
 
     const actorName = profile?.full_name || profile?.username || "Someone";
-    const currencyCode = body.currencyCode.toUpperCase().trim();
+    const currencySummary = currencyCodes.length === 1
+      ? currencyCodes[0]
+      : currencyCodes.length === 2
+        ? `${currencyCodes[0]} and ${currencyCodes[1]}`
+        : `${currencyCodes.slice(0, -1).join(", ")} and ${currencyCodes[currencyCodes.length - 1]}`;
     const actionUrl = `/trip/${trip.slug || trip.id}/hub?tab=expenses`;
 
     await sendSystemPush({
       userIds: recipientIds,
       type: "travel_currency_added",
       title: "Travel currency added",
-      body: `${actorName} added ${currencyCode} to the trip.`,
+      body: `${actorName} added ${currencySummary} to the trip.`,
       actionUrl,
       priority: "normal",
       metadata: {
         trip_id: trip.id,
-        currency_code: currencyCode,
+        currency_codes: currencyCodes,
         added_by: actorId,
       },
     });

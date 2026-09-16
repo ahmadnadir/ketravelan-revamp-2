@@ -417,7 +417,7 @@ export default function DiscussionDetail() {
   useEffect(() => {
     const updateSocialFeaturesStatus = () => {
       const isMinor = isMinorProfile(profile);
-      const level = getEffectiveSocialFeaturesLevel(isMinor);
+      const level = getEffectiveSocialFeaturesLevel(isMinor, profile?.social_features_level);
       setIsMinorAccount(isMinor);
       setSocialFeaturesLevel(level);
     };

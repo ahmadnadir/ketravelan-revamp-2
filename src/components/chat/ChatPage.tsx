@@ -549,6 +549,18 @@ export function ChatPage({
     if (!container) return;
 
     const onScroll = () => {
+      // iOS can report a small positive scroll position while rubber-band
+      // overscrolling at the top. Hide the floating chip before the first
+      // inline separator becomes visible again.
+      if (container.scrollTop <= 4) {
+        if (scrollDateTimeoutRef.current) {
+          clearTimeout(scrollDateTimeoutRef.current);
+          scrollDateTimeoutRef.current = null;
+        }
+        setScrollDateLabel("");
+        return;
+      }
+
       const separators = container.querySelectorAll<HTMLElement>('[data-date-label]');
       if (!separators.length) return;
 
@@ -557,15 +569,25 @@ export function ChatPage({
 
       separators.forEach((el) => {
         const elTop = el.getBoundingClientRect().top;
-        if (elTop <= containerTop + 56) {
+        // Do not duplicate an inline separator while it is still visible.
+        // The floating chip becomes active only after the separator has left
+        // the scroll viewport above the header.
+        if (elTop < containerTop - 4) {
           activeLabel = el.dataset.dateLabel || "";
         }
       });
 
-      // If no separator has scrolled past yet, show the first one
-      if (!activeLabel) {
-        activeLabel = (separators[0] as HTMLElement)?.dataset?.dateLabel || "";
-      }
+      // If the active date separator is still visible in the viewport, the
+      // inline chip is already doing the job. Keep only one separator visible.
+      const duplicateVisible = Array.from(separators).some((el) => {
+        const label = el.dataset.dateLabel || "";
+        const elTop = el.getBoundingClientRect().top;
+        // Account for the sticky chip's own height and WebView rubber-band
+        // offsets. If the matching inline marker is anywhere in that zone,
+        // let the permanent timeline marker be the only visible date.
+        return label === activeLabel && elTop >= containerTop - 12 && elTop <= containerTop + 72;
+      });
+      if (duplicateVisible) activeLabel = "";
 
       setScrollDateLabel(activeLabel);
 
@@ -587,13 +609,15 @@ export function ChatPage({
       if (menuOpenedByTouchRef.current) return;
       setActionMenu(null);
     };
+    const closeMenuOnScroll = () => setActionMenu(null);
+    const closeMenuOnResize = () => setActionMenu(null);
     window.addEventListener('click', closeMenu);
-    window.addEventListener('scroll', () => setActionMenu(null), true);
-    window.addEventListener('resize', () => setActionMenu(null));
+    window.addEventListener('scroll', closeMenuOnScroll, true);
+    window.addEventListener('resize', closeMenuOnResize);
     return () => {
       window.removeEventListener('click', closeMenu);
-      window.removeEventListener('scroll', () => setActionMenu(null), true);
-      window.removeEventListener('resize', () => setActionMenu(null));
+      window.removeEventListener('scroll', closeMenuOnScroll, true);
+      window.removeEventListener('resize', closeMenuOnResize);
     };
   }, []);
 
@@ -1698,13 +1722,16 @@ export function ChatPage({
         </div>
       )}
 
-      {renderedMessages.map((msg, index) => {
-        const previous = index > 0 ? renderedMessages[index - 1] : null;
+      {(() => {
+        let lastRenderedCalendarDay: string | null = null;
+
+        return renderedMessages.map((msg, index) => {
         const currentDate = parseMessageDate(msg.created_at);
-        const previousDate = parseMessageDate(previous?.created_at);
         const currentDayKey = currentDate ? getLocalDayKey(currentDate) : "";
-        const previousDayKey = previousDate ? getLocalDayKey(previousDate) : "";
-        const showDateSeparator = index === 0 || currentDayKey !== previousDayKey;
+        const showDateSeparator = Boolean(
+          currentDayKey && (index === 0 || currentDayKey !== lastRenderedCalendarDay),
+        );
+        if (currentDayKey) lastRenderedCalendarDay = currentDayKey;
         const dateSeparatorLabel = msg.created_at ? formatDateSeparatorLabel(String(msg.created_at)) : "";
         const isOwn = msg.sender_id === currentUserId;
         const isSystem = msg.type === 'system';
@@ -1898,7 +1925,8 @@ export function ChatPage({
             </div>
           </div>
         );
-      })}
+        });
+      })()}
 
       {actionMenu && actionMessage && (
         <div

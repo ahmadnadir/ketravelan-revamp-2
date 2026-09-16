@@ -82,6 +82,7 @@ function buildSettlementReminderEmail(opts: {
   tripUrl: string;
   logoUrl: string;
 }) {
+  const mode: "payment" | "approval" = opts.mode;
   const brand = "Ketravelan";
   const recipientNameEsc = escapeHtml(opts.recipientName);
   const payerNameEsc = escapeHtml(opts.payerName);
@@ -92,6 +93,11 @@ function buildSettlementReminderEmail(opts: {
   const tripUrlEsc = escapeHtml(opts.tripUrl);
   const logoUrlEsc = escapeHtml(opts.logoUrl);
 
+    const isApprovalRequest = opts.mode === "approval";
+    const title = isApprovalRequest ? "Payment Approval Request" : "Payment Reminder";
+    const intro = isApprovalRequest
+      ? `<strong>${payerNameEsc}</strong> asked you to approve a payment for <strong>${tripNameEsc}</strong>.`
+      : `<strong>${payerNameEsc}</strong> sent you a payment reminder for <strong>${tripNameEsc}</strong>.`;
   return [
     "<!doctype html>",
     '<html lang="en">',
@@ -114,10 +120,10 @@ function buildSettlementReminderEmail(opts: {
     '<tr><td style="height:1px;background:#e5e7eb;margin:0 28px" aria-hidden="true"></td></tr>',
     '<tr><td style="padding:28px">',
     '<h1 style="font-size:22px;font-weight:700;margin:0 0 8px;color:#020617;text-align:center">Payment Reminder</h1>',
-    '<div style="font-size:15px;line-height:1.65;color:#475569;margin-bottom:24px;text-align:center">',
+      `<h1 style="font-size:22px;font-weight:700;margin:0 0 8px;color:#020617;text-align:center">${title}</h1>`,
     `Hi <strong>${recipientNameEsc}</strong>,<br><br>`,
     `<strong>${payerNameEsc}</strong> sent you a payment reminder for <strong>${tripNameEsc}</strong>.`,
-    "</div>",
+      intro,
     '<div style="background:#f8fafc;border-radius:8px;padding:16px;margin:16px 0;border:1px solid #e2e8f0;text-align:center">',
     '<div style="font-size:14px;color:#64748b;margin-bottom:4px">Amount Due:</div>',
     `<div style="font-size:28px;font-weight:700;color:#0f172a">${currencyEsc} ${amountEsc}</div>`,
@@ -149,6 +155,7 @@ interface SettlementReminderRequest {
   currency?: string;
   message: string;
   channels?: string[];
+  mode?: "payment" | "approval";
 }
 
 serve(async (req: Request) => {
@@ -175,6 +182,7 @@ serve(async (req: Request) => {
       ? body.channels
       : ["notification", "chat", "email"];
 
+    const mode = body?.mode === "approval" ? "approval" : "payment";
     if (!tripId || !payerId || !recipientId || !message || !Number.isFinite(amount)) {
       return new Response(JSON.stringify({ error: "Missing required fields" }), {
         status: 400,
@@ -220,7 +228,7 @@ serve(async (req: Request) => {
           user_id: recipientId,
           type: "expense",
           title: "Payment reminder",
-          message,
+            title: mode === "approval" ? "Payment approval requested" : "Payment reminder",
           action_url: tripUrl,
           metadata: {
             trip_id: tripId,
@@ -312,12 +320,13 @@ serve(async (req: Request) => {
           message,
           tripUrl,
           logoUrl,
+          mode,
         });
 
         try {
           await sendResendRawEmail({
             to: recipientEmail,
-            subject: `Payment reminder - ${tripName}`,
+            subject: `${mode === "approval" ? "Payment approval requested" : "Payment reminder"} - ${tripName}`,
             html: htmlEmail,
           });
           results.email = { status: "sent" };
@@ -337,6 +346,7 @@ serve(async (req: Request) => {
         currency,
         message,
         channels,
+        mode,
       });
 
     return new Response(JSON.stringify({ ok: true, results }), {

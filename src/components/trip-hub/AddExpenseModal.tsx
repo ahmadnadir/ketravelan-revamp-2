@@ -450,7 +450,7 @@ export function AddExpenseModal({
     const customSplitAmounts: CustomSplitAmount[] = splitType === "custom" 
       ? splitWith.map((memberId) => ({
           memberId,
-          amount: parseFloat(customAmounts[memberId] || "0"),
+          amount: parseAmountInput(customAmounts[memberId] || "0"),
         }))
       : [];
 
@@ -490,7 +490,7 @@ export function AddExpenseModal({
 
   // Calculate totals for validation
   const totalCustomAmount = splitWith.reduce((sum, memberId) => {
-    return sum + (parseFloat(customAmounts[memberId] || "0") || 0);
+    return sum + parseAmountInput(customAmounts[memberId] || "0");
   }, 0);
   
   const totalAmount = parseAmountInput(amount);
@@ -916,14 +916,17 @@ export function AddExpenseModal({
 
                   {splitWith.includes(currentMember.id) && (
                     splitType === "custom" ? (
-                      <div className="flex h-8 w-[105px] shrink-0 items-center gap-1 rounded-lg border border-border bg-background px-2" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex h-9 w-[112px] shrink-0 items-center gap-1 rounded-xl border border-border/80 bg-background px-2 shadow-sm transition-colors focus-within:border-foreground/50 focus-within:ring-2 focus-within:ring-foreground/10" onClick={(e) => e.stopPropagation()}>
                         <span className="text-xs text-muted-foreground">{getCurrencySymbol(currency)}</span>
                         <Input
-                          type="number"
+                          type="text"
+                          inputMode="decimal"
                           placeholder="0.00"
                           value={customAmounts[currentMember.id] || ""}
-                          onChange={(e) => handleCustomAmountChange(currentMember.id, e.target.value)}
-                          className="h-full w-full min-w-0 border-0 p-0 text-right text-xs tabular-nums shadow-none outline-none ring-0 focus:outline-none focus:ring-0"
+                          onChange={(e) => handleCustomAmountChange(currentMember.id, sanitizeAmountInput(e.target.value))}
+                          onFocus={() => handleCustomAmountChange(currentMember.id, (customAmounts[currentMember.id] || "").replace(/,/g, ""))}
+                          onBlur={() => handleCustomAmountChange(currentMember.id, formatAmountInput(customAmounts[currentMember.id] || "") || customAmounts[currentMember.id] || "")}
+                          className="h-full w-full min-w-0 appearance-none border-0 p-0 text-right text-xs tabular-nums shadow-none outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:ring-0"
                           min="0"
                           step="0.01"
                         />
@@ -994,14 +997,17 @@ export function AddExpenseModal({
 
                         {isSelected && (
                           splitType === "custom" ? (
-                            <div className="flex h-8 w-[105px] shrink-0 items-center gap-1 rounded-lg border border-border bg-background px-2" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex h-9 w-[112px] shrink-0 items-center gap-1 rounded-xl border border-border/80 bg-background px-2 shadow-sm transition-colors focus-within:border-foreground/50 focus-within:ring-2 focus-within:ring-foreground/10" onClick={(e) => e.stopPropagation()}>
                               <span className="text-xs text-muted-foreground">{getCurrencySymbol(currency)}</span>
                               <Input
-                                type="number"
+                                type="text"
+                                inputMode="decimal"
                                 placeholder="0.00"
                                 value={customAmounts[member.id] || ""}
-                                onChange={(e) => handleCustomAmountChange(member.id, e.target.value)}
-                                className="h-full w-full min-w-0 border-0 p-0 text-right text-xs tabular-nums shadow-none outline-none ring-0 focus:outline-none focus:ring-0"
+                                onChange={(e) => handleCustomAmountChange(member.id, sanitizeAmountInput(e.target.value))}
+                                onFocus={() => handleCustomAmountChange(member.id, (customAmounts[member.id] || "").replace(/,/g, ""))}
+                                onBlur={() => handleCustomAmountChange(member.id, formatAmountInput(customAmounts[member.id] || "") || customAmounts[member.id] || "")}
+                                className="h-full w-full min-w-0 appearance-none border-0 p-0 text-right text-xs tabular-nums shadow-none outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:ring-0"
                                 min="0"
                                 step="0.01"
                               />

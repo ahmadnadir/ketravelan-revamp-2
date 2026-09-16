@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 import { ArrowLeft, ArrowRight, CheckCircle2, ChevronDown, Receipt, RefreshCw, Trash2, Upload, X } from "lucide-react";
 import {
   Dialog,
@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import { CurrencyLensToggle } from "@/components/shared/CurrencyLensToggle";
 import { CurrencyCode, formatCurrencySpaced } from "@/lib/currencyUtils";
 import { CurrencyViewMode } from "@/hooks/useCurrencyViewPreference";
+import { toast } from "@/hooks/use-toast";
 
 interface BreakdownExpense {
   title: string;
@@ -39,11 +40,13 @@ interface SettlementConfirmModalProps {
   // Receipt (optional)
   receiptUrl?: string;
   receiptSubmittedAt?: string;
-  onViewReceipt?: () => void;
-  onUploadReceipt?: (file: File) => void;
+  paymentStatus?: string | null;
+  onViewReceipt?: (receiptUrl?: string) => void;
+  onUploadReceipt?: (file: File) => Promise<void>;
   onRemoveReceipt?: () => void;
   // Actions
   onConfirm: () => void;
+  onSubmitWithoutReceipt?: () => Promise<void>;
   // Back navigation (for secondary modal flow)
   onBack?: () => void;
   // Multi-currency support
@@ -71,10 +74,12 @@ export function SettlementConfirmModal({
   grossOffset,
   receiptUrl,
   receiptSubmittedAt,
+  paymentStatus,
   onViewReceipt,
   onUploadReceipt,
   onRemoveReceipt,
   onConfirm,
+  onSubmitWithoutReceipt,
   onBack,
   originalCurrency,
   homeCurrency = "MYR",
@@ -85,13 +90,32 @@ export function SettlementConfirmModal({
 }: SettlementConfirmModalProps) {
   const [breakdownOpen, setBreakdownOpen] = useState(false);
   const [receiptExpanded, setReceiptExpanded] = useState(false);
+  const [selectedReceiptFile, setSelectedReceiptFile] = useState<File | null>(null);
+  const [selectedReceiptPreview, setSelectedReceiptPreview] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!open) {
+      setSelectedReceiptFile(null);
+      setSelectedReceiptPreview(null);
+      setReceiptExpanded(false);
+      setIsSubmitting(false);
+    }
+  }, [open]);
 
   // Only the debtor (person who owes) can upload/replace/remove their own payment proof;
   // the receiver can only view what was uploaded to them.
   const isViewerOwing = currentUserId === fromUser.id;
   const isReceiptVerification = !isViewerOwing && !!receiptUrl;
-  const canConfirmSettlement = !isViewerOwing;
+  const canSubmitSettlement = !isViewerOwing || !!onUploadReceipt || !!onSubmitWithoutReceipt;
+  const receiptStatusLabel = paymentStatus === "awaiting_confirmation"
+    ? "Awaiting Confirmation"
+    : paymentStatus === "settled"
+      ? "Settled"
+      : paymentStatus === "rejected"
+        ? "Rejected"
+        : "Pending";
 
   // Determine which currency to display
   const needsDualDisplay = originalCurrency && originalCurrency !== homeCurrency;
@@ -133,15 +157,39 @@ export function SettlementConfirmModal({
     ? grossOffset * conversionRate 
     : grossOffset;
 
-  const handleConfirm = () => {
-    onConfirm();
-    onOpenChange(false);
+  const handleConfirm = async () => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      if (isViewerOwing) {
+        if (selectedReceiptFile && onUploadReceipt) {
+          await onUploadReceipt(selectedReceiptFile);
+        } else if (onSubmitWithoutReceipt) {
+          await onSubmitWithoutReceipt();
+        } else {
+          throw new Error("Payment submission is unavailable.");
+        }
+      } else {
+        onConfirm();
+      }
+      onOpenChange(false);
+    } catch (error) {
+      toast({
+        title: "Payment submission failed",
+        description: error instanceof Error ? error.message : "Could not submit this payment.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file && onUploadReceipt) {
-      onUploadReceipt(file);
+    if (file) {
+      if (selectedReceiptPreview) URL.revokeObjectURL(selectedReceiptPreview);
+      setSelectedReceiptFile(file);
+      setSelectedReceiptPreview(URL.createObjectURL(file));
     }
     // Reset input so same file can be selected again
     if (fileInputRef.current) {
@@ -149,7 +197,25 @@ export function SettlementConfirmModal({
     }
   };
 
-  const receiptDate = receiptSubmittedAt
+  const handleRemoveReceipt = () => {
+    if (selectedReceiptPreview) {
+      URL.revokeObjectURL(selectedReceiptPreview);
+      setSelectedReceiptPreview(null);
+      setSelectedReceiptFile(null);
+      return;
+    }
+    onRemoveReceipt?.();
+  };
+
+  const displayedReceiptUrl = selectedReceiptPreview || receiptUrl;
+
+  const receiptDate = selectedReceiptFile
+    ? new Date().toLocaleDateString("en-GB", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      })
+    : receiptSubmittedAt
     ? new Date(receiptSubmittedAt).toLocaleDateString("en-GB", {
         day: "numeric",
         month: "short",
@@ -276,16 +342,16 @@ export function SettlementConfirmModal({
           {/* Section 3: Payment Receipt (Non-Blocking) */}
           <div className="rounded-xl bg-muted/30 border border-border/50 p-3">
             <p className="text-sm font-medium text-foreground mb-2">Payment receipt</p>
-            {receiptUrl ? (
+            {displayedReceiptUrl ? (
               <div className="rounded-xl border border-border/60 bg-background p-3 shadow-sm">
                 <div className="flex items-center gap-3">
                   <button
                     type="button"
-                    onClick={onViewReceipt}
+                    onClick={() => onViewReceipt?.(displayedReceiptUrl)}
                     className="relative h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-border/50 bg-muted"
                     aria-label="View payment receipt"
                   >
-                    <img src={receiptUrl} alt="Payment receipt" className="h-full w-full object-cover" />
+                    <img src={displayedReceiptUrl} alt="Payment receipt" className="h-full w-full object-cover" />
                     <span className="absolute inset-0 flex items-center justify-center bg-black/30">
                       <Receipt className="h-5 w-5 text-white" />
                     </span>
@@ -311,8 +377,14 @@ export function SettlementConfirmModal({
                         </button>
                       </div>
                     </div>
-                    <span className="mt-3 inline-flex rounded-full bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-600">
-                      Pending
+                    <span className={cn(
+                      "mt-3 inline-flex rounded-full px-2.5 py-1 text-xs font-medium",
+                      receiptStatusLabel === "Awaiting Confirmation" && "bg-blue-500/10 text-blue-600",
+                      receiptStatusLabel === "Settled" && "bg-stat-green/10 text-stat-green",
+                      receiptStatusLabel === "Rejected" && "bg-destructive/10 text-destructive",
+                      receiptStatusLabel === "Pending" && "bg-amber-500/10 text-amber-600",
+                    )}>
+                      {receiptStatusLabel}
                     </span>
                   </div>
                 </div>
@@ -338,7 +410,7 @@ export function SettlementConfirmModal({
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={onRemoveReceipt}
+                          onClick={handleRemoveReceipt}
                         className="text-sm text-destructive hover:text-destructive gap-1"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
@@ -351,11 +423,11 @@ export function SettlementConfirmModal({
                   <div className="mt-3 border-t border-border/50 pt-3">
                     <button
                       type="button"
-                      onClick={onViewReceipt}
+                      onClick={() => onViewReceipt?.(displayedReceiptUrl)}
                       className="w-full overflow-hidden rounded-xl bg-secondary/30 p-2"
                     >
                       <img
-                        src={receiptUrl}
+                        src={displayedReceiptUrl}
                         alt="Payment receipt"
                         className="mx-auto max-h-64 w-auto max-w-full rounded-lg object-contain"
                       />
@@ -405,14 +477,14 @@ export function SettlementConfirmModal({
           )}
           <Button 
             onClick={handleConfirm} 
-            disabled={!canConfirmSettlement}
+            disabled={!canSubmitSettlement || isSubmitting}
             className="w-full h-12 rounded-xl font-medium text-[15px]"
           >
-            {canConfirmSettlement
+            {isSubmitting
+              ? "Submitting..."
+              : !isViewerOwing
               ? <><CheckCircle2 className="mr-2 h-4 w-4" />Confirm Payment Received</>
-              : receiptUrl
-                ? "Awaiting confirmation"
-                : "Upload receipt to continue"}
+              : "Submit Payment"}
           </Button>
           {!isReceiptVerification && (
             <Button

@@ -18,6 +18,7 @@ interface SettlementCardProps {
   onViewDetails?: () => void;
   onViewReceipt?: () => void;
   onSendReminder?: () => void;
+  onNotifyToApprove?: () => void;
   onMarkPaid?: () => void;
   onUploadReceipt?: () => void;
 }
@@ -34,6 +35,7 @@ export function SettlementCard({
   onViewDetails,
   onViewReceipt,
   onSendReminder,
+  onNotifyToApprove,
   onMarkPaid,
   onUploadReceipt,
 }: SettlementCardProps) {
@@ -42,7 +44,7 @@ export function SettlementCard({
     ? status === "settled"
       ? { label: "View Receipt", icon: FileText, handler: onViewReceipt }
       : status === "awaiting"
-        ? { label: "Notify to Approve", icon: Bell, handler: onSendReminder }
+        ? { label: "Notify to Approve", icon: Bell, handler: onNotifyToApprove }
         : { label: "Pay Now", icon: Upload, handler: onUploadReceipt }
     : status === "settled"
       ? { label: "View Receipt", icon: FileText, handler: onViewReceipt }
@@ -129,7 +131,7 @@ export function SettlementCard({
         </Button>
         <Button
           size="sm"
-          className="w-full h-10 text-sm bg-foreground text-background hover:bg-foreground/90"
+          className="w-full h-10 text-sm bg-black text-white hover:bg-black/90 dark:bg-black dark:text-white dark:hover:bg-black/90"
           onClick={(e) => { e.stopPropagation(); primaryAction.handler?.(); }}
         >
           <PrimaryIcon className="h-4 w-4 mr-2" />

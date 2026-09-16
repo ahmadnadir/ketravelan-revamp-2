@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { StatusBadge } from "@/components/shared/StatusBadge";
 import { CurrencyLensToggle } from "@/components/shared/CurrencyLensToggle";
 import { CurrencyCode, formatCurrencySpaced } from "@/lib/currencyUtils";
 import { CurrencyViewMode } from "@/hooks/useCurrencyViewPreference";
@@ -44,10 +45,12 @@ interface SettlementBreakdownModalProps {
   currentUserId: string;
   onUploadProof?: () => void;
   onMarkAllPaid?: () => void;
+  onConfirmPayment?: () => void;
   onReject?: (reason: string) => void;
   onSendReminder?: () => void;
   onViewQR?: () => void;
   onViewReceipts?: () => void;
+  onNotifyToApprove?: () => void;
   // Navigate to the existing expense detail screen for a tapped item
   onViewExpense?: (expenseId: string) => void;
   // Multi-currency props
@@ -77,8 +80,10 @@ export function SettlementBreakdownModal({
   currentUserId,
   onUploadProof,
   onMarkAllPaid,
+  onConfirmPayment,
   onReject,
   onSendReminder,
+  onNotifyToApprove,
   onViewQR,
   onViewReceipts,
   onViewExpense,
@@ -195,6 +200,14 @@ export function SettlementBreakdownModal({
   const netSubtitle = isViewerReceiving
     ? `${firstName(fromUser.name)} owes you`
     : `You owe ${firstName(toUser.name)}`;
+
+  const paymentDisplayStatus: "pending" | "awaiting" | "settled" | "rejected" | "cancelled" =
+    paymentStatus === "awaiting_confirmation" ? "awaiting" :
+    paymentStatus === "pending" ? "pending" :
+    paymentStatus === "settled" ? "settled" :
+    paymentStatus === "rejected" ? "rejected" :
+    paymentStatus === "cancelled" ? "cancelled" :
+    status;
 
   const renderDirectionRow = (
     label: string,
@@ -330,15 +343,14 @@ export function SettlementBreakdownModal({
 
           {/* Net Outstanding */}
           <div className="text-center mt-4">
-            <p className="text-[12px] text-muted-foreground mb-0.5">Net outstanding</p>
             <p className="text-2xl font-semibold text-foreground">{netAmountLabel}</p>
-            <p className="text-[12px] text-muted-foreground mt-0.5">{netSubtitle}</p>
-            {paymentStatus && (
-              <p className="text-[12px] text-muted-foreground mt-2">
-                Payment status: {paymentStatus.replace(/_/g, " ")}
-                {paymentCurrency ? ` · ${paymentCurrency}` : ""}
-                {paymentReceiptUrl ? " · Receipt available" : ""}
-              </p>
+            {status !== "settled" && (
+              <p className="text-[12px] text-muted-foreground mt-0.5">{netSubtitle}</p>
+            )}
+            {paymentDisplayStatus && (
+              <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
+                <StatusBadge status={paymentDisplayStatus} size="sm" />
+              </div>
             )}
           </div>
         </DialogHeader>
@@ -397,86 +409,28 @@ export function SettlementBreakdownModal({
         {/* Sticky Footer Actions */}
         <div className="flex-none p-4 pt-3 border-t border-border/50">
           <div className="flex flex-col gap-2">
-            {/* Primary Action */}
-            {(status === "pending" || status === "rejected") && (
-              isViewerOwing ? (
-                <Button
-                  className="w-full h-11 text-[15px] sm:text-sm bg-foreground text-background hover:bg-foreground/90"
-                  onClick={() => {
-                    onUploadProof?.();
-                  }}
-                >
-                  <Upload className="h-4 w-4 mr-2" />
-                  Pay Now
-                </Button>
-              ) : isViewerReceiving ? (
-                <Button
-                  className="w-full h-11 text-[15px] sm:text-sm bg-foreground text-background hover:bg-foreground/90"
-                  onClick={() => {
-                    onMarkAllPaid?.();
-                  }}
-                >
-                  <CheckCircle2 className="h-4 w-4 mr-2" />
-                  Mark as Paid
-                </Button>
-              ) : null
-            )}
-
-            {/* Awaiting: match the settlement card's Confirm Payment action */}
-            {status === "awaiting" && isViewerReceiving && (
-              <Button
-                className="w-full h-11 text-[15px] sm:text-sm bg-foreground text-background hover:bg-foreground/90"
-                onClick={() => {
-                  onMarkAllPaid?.();
-                }}
-              >
-                <CheckCircle2 className="h-4 w-4 mr-2" />
-                Confirm Payment
-              </Button>
-            )}
-
-            {status === "awaiting" && isViewerReceiving && onReject && (
-              <Button
-                variant="outline"
-                className="w-full h-10 text-[15px] sm:text-sm text-destructive border-destructive/40"
-                onClick={() => {
-                  const reason = window.prompt("Reason for rejecting this receipt:");
-                  if (reason?.trim()) onReject(reason.trim());
-                }}
-              >
-                Reject receipt
-              </Button>
-            )}
-
-            {status === "awaiting" && isViewerOwing && (
-              <Button
-                variant="outline"
-                className="w-full h-10 text-[15px] sm:text-sm"
-                onClick={() => {
-                  onSendReminder?.();
-                }}
-              >
-                <Bell className="h-4 w-4 mr-2" />
-                Notify to Approve
-              </Button>
-            )}
-
-            {/* View Receipt: settlement-level receipt remains visible after submit/settle */}
-            {(status === "awaiting" || status === "settled" || status === "rejected") && (paymentReceiptUrl || status === "settled") && (
-              <Button
-                variant="outline"
-                className="w-full h-10 text-[15px] sm:text-sm"
-                onClick={() => {
-                  onViewReceipts?.();
-                }}
-              >
-                <Receipt className="h-4 w-4 mr-2" />
-                View Receipt
-              </Button>
-            )}
-
-            {/* Secondary Actions */}
+            {/* Secondary actions stay above the primary action. */}
             <div className="grid grid-cols-1 gap-2">
+              {status === "awaiting" && isViewerReceiving && onReject && (
+                <Button
+                  variant="outline"
+                  className="w-full h-10 text-[15px] sm:text-sm text-destructive border-destructive/40"
+                  onClick={() => {
+                    const reason = window.prompt("Reason for rejecting this receipt:");
+                    if (reason?.trim()) onReject(reason.trim());
+                  }}
+                >
+                  Reject receipt
+                </Button>
+              )}
+
+              {(status === "awaiting" || status === "rejected") && paymentReceiptUrl && (
+                <Button variant="outline" className="w-full h-10 text-[15px] sm:text-sm" onClick={() => onViewReceipts?.()}>
+                  <Receipt className="h-4 w-4 mr-2" />
+                  View Receipt
+                </Button>
+              )}
+
               {isViewerReceiving && (status === "pending" || status === "rejected") && (
                 <Button
                   variant="outline"
@@ -503,6 +457,42 @@ export function SettlementBreakdownModal({
                 </Button>
               )}
             </div>
+
+            {/* Primary action is always the final footer button. */}
+            {(status === "pending" || status === "rejected") && isViewerOwing && (
+              <Button className="w-full h-11 text-[15px] sm:text-sm bg-black text-white hover:bg-black/90 dark:bg-black dark:text-white dark:hover:bg-black/90" onClick={() => onUploadProof?.()}>
+                <Upload className="h-4 w-4 mr-2" />
+                Pay Now
+              </Button>
+            )}
+
+            {(status === "pending" || status === "rejected") && isViewerReceiving && (
+              <Button className="w-full h-11 text-[15px] sm:text-sm bg-black text-white hover:bg-black/90 dark:bg-black dark:text-white dark:hover:bg-black/90" onClick={() => onMarkAllPaid?.()}>
+                <CheckCircle2 className="h-4 w-4 mr-2" />
+                {status === "rejected" ? "Mark as Paid" : "Mark as Paid"}
+              </Button>
+            )}
+
+            {status === "awaiting" && isViewerReceiving && (
+              <Button className="w-full h-11 text-[15px] sm:text-sm bg-black text-white hover:bg-black/90 dark:bg-black dark:text-white dark:hover:bg-black/90" onClick={() => onConfirmPayment?.()}>
+                <CheckCircle2 className="h-4 w-4 mr-2" />
+                Confirm Payment
+              </Button>
+            )}
+
+            {status === "awaiting" && isViewerOwing && (
+              <Button className="w-full h-11 text-[15px] sm:text-sm bg-black text-white hover:bg-black/90 dark:bg-black dark:text-white dark:hover:bg-black/90" onClick={() => onNotifyToApprove?.()}>
+                <Bell className="h-4 w-4 mr-2" />
+                Notify to Approve
+              </Button>
+            )}
+
+            {status === "settled" && (
+              <Button className="w-full h-11 text-[15px] sm:text-sm bg-black text-white hover:bg-black/90 dark:bg-black dark:text-white dark:hover:bg-black/90" onClick={() => onViewReceipts?.()}>
+                <Receipt className="h-4 w-4 mr-2" />
+                View Receipt
+              </Button>
+            )}
           </div>
         </div>
       </DialogContent>

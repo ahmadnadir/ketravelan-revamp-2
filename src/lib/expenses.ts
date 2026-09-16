@@ -388,6 +388,10 @@ export async function fetchSettlementPaymentsForTrip(tripId: string) {
         reviewed_at,
         rejection_reason,
         created_at
+      ),
+      settlement_payment_expenses(
+        expense_participant_id,
+        amount_applied
       )
     `)
     .eq('trip_id', tripId)
@@ -474,6 +478,15 @@ export async function submitSettlementPaymentReceipt(
   return data;
 }
 
+export async function submitSettlementPaymentWithoutReceipt(settlementPaymentId: string) {
+  const { data, error } = await supabase.rpc('submit_settlement_payment_without_receipt', {
+    p_settlement_payment_id: settlementPaymentId,
+  });
+
+  if (error) throw error;
+  return data;
+}
+
 export async function rejectSettlementPaymentReceipt(settlementPaymentId: string, reason: string) {
   const { data, error } = await supabase.rpc('reject_settlement_payment_receipt', {
     p_settlement_payment_id: settlementPaymentId,
@@ -486,6 +499,15 @@ export async function rejectSettlementPaymentReceipt(settlementPaymentId: string
 
 export async function confirmSettlementPayment(settlementPaymentId: string) {
   const { data, error } = await supabase.rpc('confirm_settlement_payment', {
+    p_settlement_payment_id: settlementPaymentId,
+  });
+
+  if (error) throw error;
+  return data;
+}
+
+export async function confirmSettlementPaymentWithoutReceipt(settlementPaymentId: string) {
+  const { data, error } = await supabase.rpc('confirm_settlement_payment_without_receipt', {
     p_settlement_payment_id: settlementPaymentId,
   });
 

@@ -53,9 +53,7 @@ import { supabase } from "@/lib/supabase";
 import { Capacitor } from "@capacitor/core";
 import {
   getEffectiveSocialFeaturesLevel,
-  getStoredSocialFeaturesLevel,
   isMinorProfile,
-  setStoredSocialFeaturesLevel,
   type SocialFeaturesLevel,
 } from "@/lib/familiesSafety";
 
@@ -102,7 +100,7 @@ export default function Settings() {
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
   const [showLinkConflictDialog, setShowLinkConflictDialog] = useState(false);
   const [linkConflictProvider, setLinkConflictProvider] = useState<"Google" | "Apple">("Apple");
-  const [socialFeaturesLevel, setSocialFeaturesLevel] = useState<SocialFeaturesLevel>(() => getStoredSocialFeaturesLevel() || "full");
+  const [socialFeaturesLevel, setSocialFeaturesLevel] = useState<SocialFeaturesLevel>("full");
   const [showSocialPinDialog, setShowSocialPinDialog] = useState(false);
   const [socialPinInput, setSocialPinInput] = useState("");
   const [pendingSocialFeaturesLevel, setPendingSocialFeaturesLevel] = useState<SocialFeaturesLevel | null>(null);
@@ -130,10 +128,24 @@ export default function Settings() {
     if (isCreatingPinForSocialSetting || isVerifyingPinForSocialSetting) {
       setShowSocialPinDialog(false);
       if (pendingSocialFeaturesLevel) {
-        setSocialFeaturesLevel(pendingSocialFeaturesLevel);
-        setStoredSocialFeaturesLevel(pendingSocialFeaturesLevel);
-        setPendingSocialFeaturesLevel(null);
-        toast.success("Family safety setting updated");
+        const level = pendingSocialFeaturesLevel;
+        void (async () => {
+          try {
+            if (!user?.id) throw new Error("Unable to identify the current user");
+            const { error } = await supabase
+              .from("profiles")
+              .update({ social_features_level: level })
+              .eq("id", user.id);
+            if (error) throw error;
+            await refreshProfile();
+            setSocialFeaturesLevel(level);
+            setPendingSocialFeaturesLevel(null);
+            toast.success("Family safety setting updated");
+          } catch (err) {
+            const message = err instanceof Error ? err.message : "Failed to update family safety setting";
+            toast.error(message);
+          }
+        })();
       }
       return;
     }
@@ -245,8 +257,8 @@ export default function Settings() {
   }, [user?.id]);
 
   useEffect(() => {
-    setSocialFeaturesLevel(getEffectiveSocialFeaturesLevel(isMinorAccount));
-  }, [isMinorAccount]);
+    setSocialFeaturesLevel(getEffectiveSocialFeaturesLevel(isMinorAccount, profile?.social_features_level));
+  }, [isMinorAccount, profile?.social_features_level]);
 
   // Handle preference changes
   const handlePreferenceChange = async (key: "email_notifications" | "push_notifications" | "trip_reminders" | "is_public" | "show_trips_publicly", value: boolean) => {
@@ -504,7 +516,12 @@ export default function Settings() {
     try {
       setIsSavingSocialLevel(true);
 
-      const updatePayload: { social_features_pin_hash?: string } = {};
+      const updatePayload: {
+        social_features_pin_hash?: string;
+        social_features_level: SocialFeaturesLevel;
+      } = {
+        social_features_level: pendingSocialFeaturesLevel,
+      };
       if (socialPinMode === "create") {
         updatePayload.social_features_pin_hash = computedHash;
       }
@@ -522,7 +539,6 @@ export default function Settings() {
       }
 
       setSocialFeaturesLevel(pendingSocialFeaturesLevel);
-      setStoredSocialFeaturesLevel(pendingSocialFeaturesLevel);
       setShowSocialPinDialog(false);
       setSocialPinInput("");
       setPendingSocialFeaturesLevel(null);

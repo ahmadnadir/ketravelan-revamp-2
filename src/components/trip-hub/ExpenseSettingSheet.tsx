@@ -26,6 +26,14 @@ const currencyLabel = (currency: Currency) => (
   </span>
 );
 
+const currencyTriggerLabel = (currency: Currency) => (
+  <span className="flex min-w-0 items-center gap-2 overflow-hidden">
+    <span className="shrink-0 text-lg leading-none" aria-hidden="true">{currency.flag_emoji}</span>
+    <span className="shrink-0 font-medium">{currency.symbol} {currency.code}</span>
+    <span className="min-w-0 truncate text-muted-foreground">- {currency.name}</span>
+  </span>
+);
+
 export function ExpenseSettingsSheet({ open, onOpenChange, homeCurrency, tripTravelCurrencies, usedCurrencyCodes = [], onSaveCurrencies }: ExpenseSettingsSheetProps) {
   const [currencies, setCurrencies] = useState<Currency[]>([]);
   const [isLoadingCurrencies, setIsLoadingCurrencies] = useState(false);
@@ -103,7 +111,10 @@ export function ExpenseSettingsSheet({ open, onOpenChange, homeCurrency, tripTra
             <SheetHeader className="shrink-0 border-b border-border/60 px-5 pb-4 pt-4 sm:px-7">
               <div className="flex items-center gap-3 pr-8">
                 <button type="button" onClick={() => { setPickerOpen(false); setSearch(""); }} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full hover:bg-secondary" aria-label="Back to trip currencies"><ArrowLeft className="h-5 w-5" /></button>
-                <div className="min-w-0"><SheetTitle className="text-lg">Add travel currencies</SheetTitle><SheetDescription>{draftTravelCurrencies.length} selected</SheetDescription></div>
+                <div className="flex min-w-0 flex-col items-start text-left">
+                  <SheetTitle className="text-lg">Add travel currencies</SheetTitle>
+                  <SheetDescription className="mt-0.5 text-left">{draftTravelCurrencies.length} selected</SheetDescription>
+                </div>
               </div>
             </SheetHeader>
             <div className="shrink-0 bg-background px-5 pb-4 pt-4 sm:px-7">
@@ -118,11 +129,20 @@ export function ExpenseSettingsSheet({ open, onOpenChange, homeCurrency, tripTra
                 </button>;
               })}</div>}
             </div>
+            <div className="shrink-0 border-t border-border/60 bg-background px-5 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:px-7">
+              <Button
+                type="button"
+                onClick={() => { setPickerOpen(false); setSearch(""); }}
+                className="h-11 w-full rounded-xl"
+              >
+                Add currency
+              </Button>
+            </div>
           </>
         ) : (
           <>
             <SheetHeader className="shrink-0 border-b border-border/60 px-5 pb-4 pt-4 sm:px-7">
-              <div className="flex items-start gap-3 pr-8"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-secondary text-foreground" aria-hidden="true">                    <svg
+              <div className="flex items-center gap-3 pr-8"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-secondary text-foreground" aria-hidden="true">                    <svg
                       width="16"
                       height="16"
                       viewBox="0 0 24 24"
@@ -158,10 +178,10 @@ export function ExpenseSettingsSheet({ open, onOpenChange, homeCurrency, tripTra
                         strokeLinecap="round"
                         strokeLinejoin="round"
                       />
-                    </svg></span><div className="min-w-0 flex-1"><div className="flex items-center gap-2"><SheetTitle className="text-lg sm:text-xl">Trip currencies</SheetTitle><Popover><PopoverTrigger asChild><button type="button" className="rounded-full p-1 text-muted-foreground hover:bg-secondary" aria-label="How currencies work"><Info className="h-4 w-4" /></button></PopoverTrigger><PopoverContent align="start" className="w-[min(320px,calc(100vw-2rem))] rounded-xl text-sm"><p className="font-semibold">How currencies work</p><p className="mt-2 text-muted-foreground">Travel currencies are the currencies you spend in on this trip. Pick them when adding an expense.</p><p className="mt-2 text-muted-foreground">Your home currency is used for trip totals and settlements.</p><p className="mt-2 text-muted-foreground">Ketravelan converts everything automatically, so everyone settles up in one currency.</p></PopoverContent></Popover></div><SheetDescription className="mt-1 leading-5">Choose what you spend in and how trip totals are shown.</SheetDescription></div></div>
+                    </svg></span><div className="min-w-0 flex-1"><div className="flex items-center gap-2"><SheetTitle className="text-lg sm:text-xl">Trip currencies</SheetTitle><Popover><PopoverTrigger asChild><button type="button" className="rounded-full p-1 text-muted-foreground hover:bg-secondary" aria-label="How currencies work"><Info className="h-4 w-4" /></button></PopoverTrigger><PopoverContent align="start" className="w-[min(320px,calc(100vw-2rem))] rounded-xl text-sm"><p className="font-semibold">How currencies work</p><p className="mt-2 text-muted-foreground">Travel currencies are the currencies you spend in on this trip. Pick them when adding an expense.</p><p className="mt-2 text-muted-foreground">Your home currency is used for trip totals and settlements.</p><p className="mt-2 text-muted-foreground">Ketravelan converts everything automatically, so everyone settles up in one currency.</p></PopoverContent></Popover></div></div></div>
             </SheetHeader>
-            <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-2 pt-2 sm:px-7">
-              <section className="space-y-3"><div className="flex items-center gap-2"><Home className="h-4 w-4 text-muted-foreground" /><div><Label className="text-sm font-semibold">Home currency</Label><p className="text-xs text-muted-foreground">Trip totals and settlements use this currency.</p></div></div><Select value={draftHomeCurrency} onValueChange={setDraftHomeCurrency} disabled={isLoadingCurrencies}><SelectTrigger className="h-12 rounded-xl"><SelectValue placeholder="Choose home currency">{homeCurrencyData ? currencyLabel(homeCurrencyData) : draftHomeCurrency}</SelectValue></SelectTrigger><SelectContent className="max-h-[min(50vh,360px)] rounded-xl">{currencies.filter((currency) => currency.allow_as_home).map((currency) => <SelectItem key={currency.code} value={currency.code} className="rounded-lg py-2.5">{currencyLabel(currency)}</SelectItem>)}</SelectContent></Select></section>
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-2 sm:px-7">
+              <section className="space-y-3"><div className="flex items-center gap-2"><Home className="h-4 w-4 text-muted-foreground" /><div><Label className="text-sm font-semibold">Home currency</Label></div></div><Select value={draftHomeCurrency} onValueChange={setDraftHomeCurrency} disabled={isLoadingCurrencies}><SelectTrigger className="h-12 rounded-xl"><SelectValue className="min-w-0 flex-1" placeholder="Choose home currency">{homeCurrencyData ? currencyTriggerLabel(homeCurrencyData) : draftHomeCurrency}</SelectValue></SelectTrigger><SelectContent className="max-h-[min(50vh,360px)] rounded-xl">{currencies.filter((currency) => currency.allow_as_home).map((currency) => <SelectItem key={currency.code} value={currency.code} className="rounded-lg py-2.5">{currencyLabel(currency)}</SelectItem>)}</SelectContent></Select></section>
               <section className="mt-6 space-y-3 border-t border-border/60 pt-5">
                 <div>
                   <Label className="flex items-center gap-2 text-sm font-semibold">
@@ -204,9 +224,6 @@ export function ExpenseSettingsSheet({ open, onOpenChange, homeCurrency, tripTra
                     </svg>
                     Travel currencies
                   </Label>
-                  <p className="text-xs text-muted-foreground">
-                    Currencies you spend in when adding expenses.
-                  </p>
                 </div>
 
                 <div className="flex flex-wrap gap-2">

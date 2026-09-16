@@ -19,6 +19,7 @@ interface SendReminderModalProps {
   tripName: string;
   lastReminderSent?: Date;
   onSend: (message: string) => Promise<void> | void;
+  mode?: "payment" | "approval";
   // Back navigation (for secondary modal flow)
   onBack?: () => void;
 }
@@ -31,6 +32,7 @@ export function SendReminderModal({
   tripName,
   lastReminderSent,
   onSend,
+  mode = "payment",
   onBack,
 }: SendReminderModalProps) {
   const normalizedAmount = Number.isFinite(amount) ? amount : 0;
@@ -39,7 +41,10 @@ export function SendReminderModal({
     maximumFractionDigits: 2,
   });
   const tripLabel = /\btrip\b/i.test(tripName) ? tripName : `${tripName} trip`;
-  const defaultMessage = `Hey 👋 Just a reminder to settle RM${amountDisplay} for our ${tripLabel}. Thanks!`;
+  const isApprovalRequest = mode === "approval";
+  const defaultMessage = isApprovalRequest
+    ? `Hey 👋 Please approve my RM${amountDisplay} payment for our ${tripLabel}. Thanks!`
+    : `Hey 👋 Just a reminder to settle RM${amountDisplay} for our ${tripLabel}. Thanks!`;
   const [message, setMessage] = useState(defaultMessage);
   const [isSending, setIsSending] = useState(false);
 
@@ -55,8 +60,8 @@ export function SendReminderModal({
     try {
       await onSend(message);
       toast({
-        title: "Reminder sent",
-        description: `Payment reminder sent to ${recipientName} via notification, chat, and email`,
+        title: isApprovalRequest ? "Approval request sent" : "Reminder sent",
+        description: `${isApprovalRequest ? "Payment approval request" : "Payment reminder"} sent to ${recipientName} via notification, chat, and email`,
       });
       onOpenChange(false);
       setMessage(defaultMessage);
@@ -74,7 +79,7 @@ export function SendReminderModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md w-[calc(100%-2rem)] sm:w-full rounded-2xl p-0 flex flex-col overflow-hidden max-h-[85vh] [&>button]:hidden">
+      <DialogContent className="max-w-md h-[85vh] sm:h-auto w-[calc(100%-2rem)] sm:w-full rounded-2xl p-0 flex flex-col overflow-hidden sm:max-h-[85vh] [&>button]:hidden">
         {/* Fixed Header */}
         <DialogHeader className="flex-none p-4 pb-3 border-b border-border/50">
           <div className="flex items-center justify-between">
@@ -89,7 +94,9 @@ export function SendReminderModal({
             ) : (
               <div className="w-8" />
             )}
-            <DialogTitle className="text-lg font-semibold flex-1 text-center">Send Payment Reminder</DialogTitle>
+            <DialogTitle className="text-lg font-semibold flex-1 text-center">
+              {isApprovalRequest ? "Send Approval Request" : "Send Payment Reminder"}
+            </DialogTitle>
             <button 
               onClick={() => onOpenChange(false)}
               className="h-8 w-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
@@ -103,7 +110,7 @@ export function SendReminderModal({
         <div className="flex-1 overflow-y-auto overscroll-contain scrollbar-hide p-4 space-y-4">
           <div className="p-4 bg-secondary/50 rounded-xl">
             <p className="text-sm text-muted-foreground">
-              Remind <span className="font-medium text-foreground">{recipientName}</span> to pay{" "}
+              {isApprovalRequest ? "Ask " : "Remind "}<span className="font-medium text-foreground">{recipientName}</span>{isApprovalRequest ? " to approve your payment of " : " to pay "}
               <span className="font-medium text-foreground">RM {amountDisplay}</span>
             </p>
           </div>
@@ -124,7 +131,7 @@ export function SendReminderModal({
               <Mail className="h-3.5 w-3.5 text-muted-foreground" />
             </div>
             <p className="text-xs text-muted-foreground">
-              This will be sent via in-app notification, chat, and email.
+              {isApprovalRequest ? "This will ask the receiver to approve your payment via in-app notification, chat, and email." : "This will be sent via in-app notification, chat, and email."}
             </p>
           </div>
 
@@ -141,7 +148,7 @@ export function SendReminderModal({
         <div className="flex-none p-4 pt-3 border-t border-border/50">
           <Button className="w-full h-12 rounded-xl" onClick={handleSend} disabled={isSending}>
             <Send className="h-4 w-4 mr-2" />
-            {isSending ? "Sending..." : "Send Reminder"}
+            {isSending ? "Sending..." : isApprovalRequest ? "Send Approval Request" : "Send Reminder"}
           </Button>
         </div>
       </DialogContent>
