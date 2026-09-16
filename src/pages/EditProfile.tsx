@@ -53,7 +53,8 @@ import { useToast } from "@/hooks/use-toast";
 import { ImageCropModal } from "@/components/profile/ImageCropModal";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
-import { currencies, CurrencyCode } from "@/lib/currencyUtils";
+import { CurrencyCode } from "@/lib/currencyUtils";
+import { getActiveCurrencies, type Currency } from "@/lib/currencyService";
 import { normalizeSocialLinksRecord } from "@/lib/socialLinks";
 import { travelStyles, TravelStyleGrid } from "@/components/onboarding/TravelStyleGrid";
 import { cn } from "@/lib/utils";
@@ -114,6 +115,11 @@ export default function EditProfile() {
   const [dicebearModalOpen, setDicebearModalOpen] = useState(false);
   const [dicebearChoices, setDicebearChoices] = useState<string[]>([]);
   const [isSaving, setIsSaving] = useState(false);
+  const [currencies, setCurrencies] = useState<Currency[]>([]);
+
+  useEffect(() => {
+    getActiveCurrencies().then(setCurrencies).catch(() => setCurrencies([]));
+  }, []);
   const [isLoading, setIsLoading] = useState(true);
   const [cropModalOpen, setCropModalOpen] = useState(false);
   const [imageToCrop, setImageToCrop] = useState<string>("");

@@ -25,7 +25,7 @@ import { Switch } from "@/components/ui/switch";
 
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
-import { currencies } from "@/lib/currencyUtils";
+import { getActiveCurrencies, type Currency } from "@/lib/currencyService";
 
 import { BudgetRangeSelector, isDefaultBudgetRange } from "./BudgetTierSelector";
 import { TravelStylePills } from "./TravelStylePills";
@@ -61,11 +61,16 @@ export function TripFilterDrawer({
   matchingCount,
 }: TripFilterDrawerProps) {
   const isMobile = useIsMobile();
+  const [currencies, setCurrencies] = useState<Currency[]>([]);
 
   // Local state for editing
   const [localFilters, setLocalFilters] = useState<FilterState>(filters);
   const selectedCurrencyCode = localFilters.currency || defaultCurrency;
   const selectedCurrency = currencies.find((currency) => currency.code === selectedCurrencyCode);
+
+  useEffect(() => {
+    getActiveCurrencies().then(setCurrencies).catch(() => setCurrencies([]));
+  }, []);
   const [destinationQuery, setDestinationQuery] = useState("");
   const [showDestinationResults, setShowDestinationResults] = useState(false);
   const [destResults, setDestResults] = useState<LocationResult[]>([]);

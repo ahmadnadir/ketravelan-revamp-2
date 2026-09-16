@@ -1,0 +1,99 @@
+<h2 class="sr-only">Trip Currencies sheet without section hints, with an info popover explaining currencies and a searchable multi-select travel currency picker.</h2>
+<style>
+.sheet{width:380px;max-width:100%;margin:0 auto;background:var(--surface-2);border-radius:20px 20px 0 0;border:0.5px solid var(--border);overflow:hidden;position:relative;font-family:var(--font-sans)}
+.chip{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 12px;border-radius:999px;border:0.5px solid var(--border-strong);font-size:13px;color:var(--text-secondary);cursor:pointer}
+.chip.on{background:var(--surface-1);border:1px solid var(--text-primary);color:var(--text-primary);cursor:default}
+.chip.add{border:1px dashed var(--border-stronger);color:var(--text-primary)}
+.x{display:inline-flex;width:20px;height:20px;margin-right:-6px;align-items:center;justify-content:center;cursor:pointer;color:var(--text-secondary)}
+.row{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:0.5px solid var(--border);cursor:pointer}
+.sym{width:36px;height:36px;flex:none;border-radius:50%;background:var(--surface-1);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:500;color:var(--text-primary)}
+.cb{width:22px;height:22px;flex:none;border-radius:6px;border:1px solid var(--border-stronger);display:flex;align-items:center;justify-content:center}
+.cb.on{background:var(--fill-primary);border-color:var(--fill-primary);color:var(--on-primary)}
+.lbl{font-size:12px;color:var(--text-muted);margin:16px 0 2px}
+.tag{font-size:11px;padding:2px 8px;border-radius:999px;background:var(--surface-1);color:var(--text-secondary)}
+.cta{height:48px;border-radius:12px;background:var(--fill-primary);color:var(--on-primary);display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:500;cursor:pointer}
+.sec{display:flex;align-items:center;gap:12px;min-height:24px}
+.pop{position:absolute;left:16px;right:16px;top:64px;background:var(--surface-3);border:0.5px solid var(--border-strong);border-radius:14px;padding:14px 16px;z-index:2;display:none}
+.pop.open{display:block}
+.pop h4{margin:0;font-size:13px;font-weight:500;color:var(--text-primary)}
+.pop p{margin:2px 0 10px;font-size:13px;line-height:1.45;color:var(--text-secondary)}
+</style>
+<div style="background:var(--surface-1);border-radius:12px;padding:1.25rem 1rem 0">
+<div class="sheet" id="sh">
+ <div id="main">
+  <div style="padding:20px 20px 16px;display:flex;align-items:center;gap:12px;min-height:40px">
+   <i class="ti ti-arrows-right-left" aria-hidden="true" style="font-size:22px;width:24px;text-align:center;color:var(--text-primary)"></i>
+   <div style="flex:1;display:flex;align-items:center;gap:2px">
+    <span style="font-size:20px;font-weight:500;color:var(--text-primary)">Trip currencies</span>
+    <span id="info" role="button" aria-label="How currencies work" aria-expanded="false" onclick="togInfo(event)" style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;color:var(--text-secondary);cursor:pointer"><i class="ti ti-info-circle" aria-hidden="true" style="font-size:19px"></i></span>
+   </div>
+   <span aria-label="Close" style="width:40px;height:40px;margin-right:-10px;display:flex;align-items:center;justify-content:center;color:var(--text-secondary)"><i class="ti ti-x" aria-hidden="true" style="font-size:22px"></i></span>
+  </div>
+  <div class="pop" id="pop" onclick="event.stopPropagation()">
+   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><span style="font-size:14px;font-weight:500;color:var(--text-primary)">How currencies work</span><span role="button" aria-label="Close info" onclick="togInfo(event)" style="cursor:pointer;color:var(--text-secondary);display:flex"><i class="ti ti-x" aria-hidden="true" style="font-size:16px"></i></span></div>
+   <h4>Travel currencies</h4><p>The currencies you spend in on this trip. Pick them when adding an expense.</p>
+   <h4>Home currency</h4><p>Your trip totals and settlements are shown in this currency.</p>
+   <p style="margin:0;padding-top:8px;border-top:0.5px solid var(--border)">Ketravelan converts everything automatically, so everyone settles up in one currency.</p>
+  </div>
+  <div style="border-top:0.5px solid var(--border)"></div>
+  <div style="padding:20px">
+   <div class="sec"><i class="ti ti-home" aria-hidden="true" style="font-size:20px;width:24px;text-align:center;color:var(--text-primary)"></i><span style="font-size:15px;font-weight:500;color:var(--text-primary)">Home currency</span></div>
+   <div style="margin-top:12px;height:48px;border:0.5px solid var(--border-strong);border-radius:12px;display:flex;align-items:center;justify-content:space-between;padding:0 14px;font-size:14px;color:var(--text-primary)">RM MYR – Malaysian ringgit <i class="ti ti-chevron-down" aria-hidden="true" style="font-size:18px;color:var(--text-secondary)"></i></div>
+   <div style="margin:20px 0;border-top:0.5px solid var(--border)"></div>
+   <div class="sec"><i class="ti ti-arrows-exchange" aria-hidden="true" style="font-size:20px;width:24px;text-align:center;color:var(--text-primary)"></i><span style="font-size:15px;font-weight:500;color:var(--text-primary)">Travel currencies</span></div>
+   <div id="chips" style="margin-top:12px;display:flex;flex-wrap:wrap;gap:8px"><span class="chip on">$ USD</span><span class="chip add"><i class="ti ti-plus" aria-hidden="true" style="font-size:14px"></i>Add currency</span></div>
+   <div id="msg" style="display:none;margin-top:10px;font-size:13px;color:var(--text-warning)"></div>
+   <div id="sugg"></div>
+   <div id="sum" style="margin-top:12px;font-size:13px;color:var(--text-secondary)">1 travel currency selected · USD</div>
+  </div>
+  <div style="border-top:0.5px solid var(--border);padding:12px 20px 16px"><div class="cta">Save currencies</div></div>
+ </div>
+ <div id="pick" style="display:none">
+  <div style="padding:16px 20px 12px;display:flex;align-items:center;gap:8px">
+   <span role="button" aria-label="Back" onclick="closeP(false)" style="width:40px;height:40px;margin-left:-10px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text-primary)"><i class="ti ti-arrow-left" aria-hidden="true" style="font-size:22px"></i></span>
+   <span style="flex:1;font-size:18px;font-weight:500;color:var(--text-primary)">Add travel currencies</span>
+   <span id="cnt" class="tag">1 selected</span>
+  </div>
+  <div style="padding:0 20px">
+   <div style="position:relative"><i class="ti ti-search" aria-hidden="true" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);font-size:16px;color:var(--text-muted)"></i><input id="q" type="text" placeholder="Search currency, country or city" oninput="setQ(this.value)" style="width:100%;height:44px;padding-left:36px;box-sizing:border-box;border-radius:12px"></div>
+   <div id="strip" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px"></div>
+   <div id="list" style="padding-bottom:12px"></div>
+  </div>
+  <div style="border-top:0.5px solid var(--border);padding:12px 20px 16px"><div id="done" class="cta" role="button" onclick="closeP(true)">Done</div></div>
+ </div>
+</div>
+</div>
+<script>
+var C=[["USD","$","US dollar","united states usa america"],["EUR","€","Euro","europe france germany italy spain netherlands portugal paris"],["JPY","¥","Japanese yen","japan tokyo osaka kyoto"],["KRW","₩","South Korean won","korea seoul"],["CNY","¥","Chinese yuan","china beijing shanghai"],["HKD","HK$","Hong Kong dollar","hong kong"],["TWD","NT$","New Taiwan dollar","taiwan taipei"],["SGD","S$","Singapore dollar","singapore"],["THB","฿","Thai baht","thailand bangkok phuket"],["IDR","Rp","Indonesian rupiah","indonesia bali jakarta lombok"],["VND","₫","Vietnamese dong","vietnam hanoi"],["PHP","₱","Philippine peso","philippines manila"],["BND","B$","Brunei dollar","brunei"],["KHR","៛","Cambodian riel","cambodia"],["LAK","₭","Lao kip","laos"],["MMK","K","Myanmar kyat","myanmar"],["INR","₹","Indian rupee","india"],["LKR","Rs","Sri Lankan rupee","sri lanka"],["NPR","Rs","Nepalese rupee","nepal kathmandu everest"],["MVR","Rf","Maldivian rufiyaa","maldives"],["AUD","A$","Australian dollar","australia sydney melbourne"],["NZD","NZ$","New Zealand dollar","new zealand"],["GBP","£","British pound","united kingdom uk england london"],["CHF","Fr","Swiss franc","switzerland"],["TRY","₺","Turkish lira","turkey turkiye istanbul"],["SAR","SR","Saudi riyal","saudi arabia mecca makkah medina umrah hajj"],["AED","DH","UAE dirham","uae dubai abu dhabi"],["QAR","QR","Qatari riyal","qatar doha"],["EGP","E£","Egyptian pound","egypt cairo"],["JOD","JD","Jordanian dinar","jordan petra"],["MAD","DH","Moroccan dirham","morocco"],["KZT","₸","Kazakhstani tenge","kazakhstan almaty"],["KGS","с","Kyrgyzstani som","kyrgyzstan bishkek"],["UZS","сўм","Uzbekistani som","uzbekistan tashkent samarkand"],["CAD","C$","Canadian dollar","canada"],["ISK","kr","Icelandic krona","iceland"],["NOK","kr","Norwegian krone","norway"]];
+C.sort(function(a,b){return a[0]<b[0]?-1:1});
+var sel=["USD"],stage=[],query="",showAll=false,used={USD:2};
+function $(i){return document.getElementById(i)}
+function F(c){for(var i=0;i<C.length;i++)if(C[i][0]==c)return C[i]}
+function togInfo(e){e.stopPropagation();var o=$('pop').classList.toggle('open');$('info').setAttribute('aria-expanded',o);$('info').style.color=o?'var(--text-primary)':'var(--text-secondary)'}
+$('sh').addEventListener('click',function(){if($('pop').classList.contains('open')){$('pop').classList.remove('open');$('info').setAttribute('aria-expanded','false');$('info').style.color='var(--text-secondary)'}});
+function chip(c,fn){var x=F(c);return '<span class="chip on">'+x[1]+' '+c+'<span class="x" role="button" aria-label="Remove '+c+'" onclick="event.stopPropagation();'+fn+'(\''+c+'\')"><i class="ti ti-x" aria-hidden="true" style="font-size:13px"></i></span></span>'}
+function renderMain(){
+ $('chips').innerHTML=sel.map(function(c){return chip(c,'rm')}).join('')+'<span class="chip add" role="button" onclick="openP()"><i class="ti ti-plus" aria-hidden="true" style="font-size:14px"></i>Add currency</span>';
+ $('sugg').innerHTML=sel.indexOf('JPY')>-1?'':'<div style="margin-top:14px;padding:10px 12px;border-radius:12px;background:var(--surface-1);display:flex;align-items:center;gap:10px"><i class="ti ti-map-pin" aria-hidden="true" style="font-size:18px;color:var(--text-secondary)"></i><div style="flex:1;font-size:13px;color:var(--text-secondary)">Heading to Japan? Add <span style="color:var(--text-primary);font-weight:500">¥ JPY</span></div><button onclick="addC(\'JPY\')">Add</button></div>';
+ var n=sel.length;$('sum').innerHTML=n+' travel currenc'+(n==1?'y':'ies')+' selected · <span style="color:var(--text-primary);font-weight:500">'+sel.join(', ')+'</span>';
+}
+function rm(c){if(used[c]){var m=$('msg');m.textContent=c+' is used in '+used[c]+' expenses, so it can\'t be removed.';m.style.display='block';return}sel=sel.filter(function(x){return x!=c});$('msg').style.display='none';renderMain()}
+function addC(c){if(sel.indexOf(c)<0)sel.push(c);renderMain()}
+function openP(){stage=sel.slice();query="";showAll=false;$('q').value="";$('main').style.display='none';$('pick').style.display='block';renderP()}
+function closeP(ok){if(ok)sel=stage.slice();$('pick').style.display='none';$('main').style.display='block';$('msg').style.display='none';renderMain()}
+function tg(c){var i=stage.indexOf(c);if(i>-1){if(used[c])return;stage.splice(i,1)}else stage.push(c);renderP()}
+function setQ(v){query=v;renderP()}
+function expand(){showAll=true;renderP()}
+function row(c){var x=F(c),on=stage.indexOf(c)>-1;var r=(used[c]&&on)?'<span class="tag">In use</span>':'<span class="cb'+(on?' on':'')+'">'+(on?'<i class="ti ti-check" aria-hidden="true" style="font-size:14px"></i>':'')+'</span>';return '<div class="row" role="checkbox" aria-checked="'+on+'" onclick="tg(\''+c+'\')"><span class="sym">'+x[1]+'</span><div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:500;color:var(--text-primary)">'+c+'</div><div style="font-size:12px;color:var(--text-secondary)">'+x[2]+'</div></div>'+r+'</div>'}
+function renderP(){
+ $('strip').innerHTML=stage.map(function(c){return chip(c,'tg')}).join('');
+ var s=query.trim().toLowerCase().replace(/[<>&"']/g,''),h='';
+ if(s){var r=C.filter(function(x){return (x[0]+' '+x[1]+' '+x[2]+' '+x[3]).toLowerCase().indexOf(s)>-1});h=r.length?'<div class="lbl">Results</div>'+r.map(function(x){return row(x[0])}).join(''):'<div style="padding:28px 0;text-align:center;font-size:13px;color:var(--text-secondary)">No currency matches "'+s+'"</div>'}
+ else{var L=showAll?C:C.slice(0,6);h='<div class="lbl">Suggested for Japan</div>'+row('JPY')+'<div class="lbl">Recently used</div>'+row('SGD')+row('THB')+'<div class="lbl">All currencies</div>'+L.map(function(x){return row(x[0])}).join('')+(showAll?'':'<div role="button" onclick="expand()" style="padding:12px 0;text-align:center;font-size:13px;color:var(--text-accent);cursor:pointer">Show all '+C.length+' currencies</div>')}
+ $('list').innerHTML=h;
+ var added=stage.filter(function(c){return sel.indexOf(c)<0}).length;
+ $('done').textContent=added?'Add '+added+' currenc'+(added==1?'y':'ies'):'Done';
+ $('cnt').textContent=stage.length+' selected';
+}
+renderMain();
+</script>
