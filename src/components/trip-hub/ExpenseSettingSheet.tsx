@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Check, Home, Info, Loader2, Plus, Search, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -44,6 +44,7 @@ export function ExpenseSettingsSheet({ open, onOpenChange, homeCurrency, tripTra
   const [draftTravelCurrencies, setDraftTravelCurrencies] = useState<string[]>(tripTravelCurrencies);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -118,7 +119,7 @@ export function ExpenseSettingsSheet({ open, onOpenChange, homeCurrency, tripTra
               </div>
             </SheetHeader>
             <div className="shrink-0 bg-background px-5 pb-4 pt-4 sm:px-7">
-              <div className="relative"><Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search currency, country or city" className="h-11 rounded-xl pl-9" autoFocus /></div>
+              <div className="relative"><Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input ref={searchInputRef} value={search} onChange={(event) => setSearch(event.target.value)} onTouchStart={() => searchInputRef.current?.focus()} onPointerDown={() => searchInputRef.current?.focus()} placeholder="Search currency, country or city" className="h-11 rounded-xl pl-9" /></div>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-5 sm:px-7">
               {isLoadingCurrencies ? <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Loading currencies...</div> : currencyLoadError ? <div className="space-y-3 py-12 text-center text-sm text-muted-foreground"><p>Unable to load currencies.</p><Button type="button" variant="outline" className="rounded-full" onClick={() => { setLoadAttempted(false); setCurrencyLoadError(false); }}>Try again</Button></div> : filteredCurrencies.length === 0 ? <p className="py-12 text-center text-sm text-muted-foreground">No currencies match your search.</p> : <div className="space-y-2">{filteredCurrencies.map((currency) => {

@@ -178,7 +178,7 @@ export function BottomNav({ inline = false }: BottomNavProps) {
         <div className="h-[var(--safe-bottom)]" />
       </nav>
       <Drawer open={showCreateModal} onOpenChange={setShowCreateModal}>
-        <DrawerContent className="rounded-t-[36px] border-t border-black/10">
+        <DrawerContent data-enable-drag="true" className="rounded-t-[36px] border-t border-black/10">
           <DrawerHeader className="text-center pb-2 pt-2">
             <DrawerTitle className="text-xl font-semibold tracking-tight">Create</DrawerTitle>
             <DrawerDescription className="text-sm">Start bold. Build the trip people will talk about all year.</DrawerDescription>
