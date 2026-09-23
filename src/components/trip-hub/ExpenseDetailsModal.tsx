@@ -13,7 +13,7 @@ import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Card } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
-import { ExpenseData } from "@/components/trip-hub/AddExpenseModal";
+import { ExpenseData, NewExpense } from "@/components/trip-hub/AddExpenseModal";
 import { ExpenseCategory, getExpenseCategoryCode } from "@/lib/expenseCategories";
 import { ExpensePayment } from "@/data/mockData";
 import { toast } from "@/hooks/use-toast";
@@ -40,6 +40,9 @@ interface ExpenseDetailsModalProps {
   onUpdateProgress?: (newProgress: number) => void;
   onConfirmPaymentReceived?: (expenseId: string, memberId: string) => void;
   onSubmitPayment?: (expenseId: string, memberId: string, receiptFile?: File, payerNote?: string) => void;
+  onEditExpense?: (id: string, expense: NewExpense) => void | Promise<void>;
+  onRequestEdit?: () => void;
+  canEdit?: boolean;
   members: Array<{ id: string; name: string; imageUrl?: string; avatar?: string }>;
   // When provided, the modal is entered via drill-down navigation (e.g. from a settlement
   // breakdown) and shows a back arrow instead of the close (X) button.
@@ -69,6 +72,9 @@ export function ExpenseDetailsModal({
   onUpdateProgress,
   onConfirmPaymentReceived,
   onSubmitPayment,
+  onEditExpense,
+  onRequestEdit,
+  canEdit = false,
   members,
   pairNetAmount,
   onBack,
@@ -90,6 +96,18 @@ export function ExpenseDetailsModal({
   const [isEditingNote, setIsEditingNote] = useState(false);
   const [editNote, setEditNote] = useState("");
   const [isEditingReceipt, setIsEditingReceipt] = useState(false);
+  const [isEditingExpense, setIsEditingExpense] = useState(false);
+  const [editTitle, setEditTitle] = useState("");
+  const [editAmount, setEditAmount] = useState("");
+  const [editPayerId, setEditPayerId] = useState("");
+  const [editDate, setEditDate] = useState("");
+  const [editSplitType, setEditSplitType] = useState<"equal" | "custom">("equal");
+  const [editSplitWith, setEditSplitWith] = useState<string[]>([]);
+  const [editCustomAmounts, setEditCustomAmounts] = useState<Record<string, string>>({});
+  const [editReceiptFile, setEditReceiptFile] = useState<File | null>(null);
+  const [editReceiptPreview, setEditReceiptPreview] = useState<string | null>(null);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const editReceiptInputRef = useRef<HTMLInputElement>(null);
   
   // Payment review modal state
   const [reviewingPayment, setReviewingPayment] = useState<{
@@ -152,6 +170,7 @@ export function ExpenseDetailsModal({
       setReviewingPayment(null);
       setIsEditingNote(false);
       setIsEditingReceipt(false);
+      setIsEditingExpense(false);
     }
     onOpenChange(newOpen);
   };
@@ -160,6 +179,80 @@ export function ExpenseDetailsModal({
 
   const categoryCode = expense.category_code || getExpenseCategoryCode(expense.category) || "other";
   const category = expenseCategories.find((item) => item.code === categoryCode);
+
+  const beginExpenseEdit = () => {
+    const payerId = members.find((member) => member.name === expense.paidBy)?.id || members[0]?.id || "";
+    const nextSplitWith = expense.splitWith?.length ? expense.splitWith : members.map((member) => member.id);
+    const nextCustomAmounts: Record<string, string> = {};
+    (expense.customSplitAmounts || []).forEach((item) => {
+      nextCustomAmounts[item.memberId] = String(item.amount);
+    });
+    setEditTitle(expense.title);
+    setEditAmount(String(expense.amount));
+    setEditPayerId(payerId);
+    setEditDate(/^\d{4}-\d{2}-\d{2}$/.test(expense.date) ? expense.date : new Date(expense.date).toISOString().slice(0, 10));
+    setEditSplitType(expense.splitType || "equal");
+    setEditSplitWith(nextSplitWith);
+    setEditCustomAmounts(nextCustomAmounts);
+    setEditReceiptFile(null);
+    setEditReceiptPreview(expense.receipt_url || null);
+    setIsEditingExpense(true);
+  };
+
+  const handleEditReceiptChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setEditReceiptFile(file);
+    setEditReceiptPreview(URL.createObjectURL(file));
+    event.target.value = "";
+  };
+
+  const toggleEditMember = (memberId: string) => {
+    setEditSplitWith((current) => current.includes(memberId)
+      ? current.filter((id) => id !== memberId)
+      : [...current, memberId]);
+  };
+
+  const saveExpenseEdit = async () => {
+    if (!onEditExpense || !editTitle.trim() || !editPayerId || !editDate || editSplitWith.length === 0) return;
+    const amount = Number(editAmount);
+    if (!Number.isFinite(amount) || amount <= 0) return;
+    const payer = members.find((member) => member.id === editPayerId);
+    if (!payer) return;
+    const customSplitAmounts = editSplitType === "custom"
+      ? editSplitWith.map((memberId) => ({ memberId, amount: Number(editCustomAmounts[memberId] || 0) }))
+      : undefined;
+    if (customSplitAmounts && Math.abs(customSplitAmounts.reduce((sum, item) => sum + item.amount, 0) - amount) > 0.01) {
+      toast({ title: "Split total does not match", description: "Custom split amounts must equal the expense amount.", variant: "destructive" });
+      return;
+    }
+    setIsSavingEdit(true);
+    try {
+      await onEditExpense(expense.id, {
+        title: editTitle.trim(),
+        amount,
+        category: expense.category || categoryCode,
+        category_code: categoryCode,
+        paidBy: payer.name,
+        splitType: editSplitType,
+        splitWith: editSplitWith,
+        customSplitAmounts,
+        notes: expense.notes,
+        receiptFile: editReceiptFile || undefined,
+        existingReceiptUrl: editReceiptPreview || undefined,
+        date: editDate,
+        originalCurrency: expense.originalCurrency || expense.homeCurrency || "MYR",
+        fxRateToHome: expense.fxRateToHome,
+        convertedAmountHome: expense.convertedAmountHome,
+        homeCurrency: expense.homeCurrency,
+      });
+      setIsEditingExpense(false);
+    } catch (error) {
+      toast({ title: "Could not save changes", description: error instanceof Error ? error.message : "Please try again.", variant: "destructive" });
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
 
   // Generate gender-based default avatar using Notion style (cached to prevent blinking)
   const getDefaultAvatar = (userId: string, gender?: string) => {
@@ -475,6 +568,16 @@ export function ExpenseDetailsModal({
               <X className="h-4 w-4" />
             </button>
           )}
+          {canEdit && (onRequestEdit || onEditExpense) && !isEditingExpense && (
+            <button
+              type="button"
+              onClick={onRequestEdit || beginExpenseEdit}
+              className="absolute top-4 right-14 z-10 inline-flex h-8 items-center gap-1 rounded-full px-2.5 text-xs font-medium text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              Edit
+            </button>
+          )}
           <DialogHeader className="p-4 pb-0">
             <DialogTitle className="sr-only">{expense.title} Details</DialogTitle>
             <div className="flex items-center gap-3">
@@ -494,7 +597,7 @@ export function ExpenseDetailsModal({
                     <span className="text-xl sm:text-2xl select-none leading-none flex items-center justify-center">{category?.emoji}</span>
                   </div>
                   <div className="flex-1 min-w-0 text-left">
-                    <p className="text-sm sm:text-base font-semibold text-foreground truncate leading-tight">{expense.title}</p>
+                    <p className="text-sm sm:text-base font-semibold text-foreground truncate leading-tight">{isEditingExpense ? "Edit Expense" : expense.title}</p>
                     <p className={`text-[11px] sm:text-xs mt-0.5 truncate ${paymentProgress === 100 ? "text-stat-green" : "text-muted-foreground"}`}>
                       {paymentProgress}% settled · {formatCurrencySpaced(Number(settledAmount.toFixed(2)), displayCurrencyCode)} of {formatCurrencySpaced(Number(totalDisplayAmount.toFixed(2)), displayCurrencyCode)}
                     </p>
@@ -513,7 +616,78 @@ export function ExpenseDetailsModal({
           </DialogHeader>
         </div>
 
-        {/* Scrollable Content - ONLY this scrolls */}
+        {isEditingExpense ? (
+          <div className="flex-1 overflow-y-auto overscroll-contain scrollbar-hide">
+            <div className="p-4 space-y-4">
+              {isFullySettled && (
+                <Card className="border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                  This expense is fully settled. Changing the amount, payer, participants, or split may affect settlement records. Existing completed settlements are protected and may require an adjustment expense.
+                </Card>
+              )}
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-muted-foreground">Expense name</label>
+                <input className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm" value={editTitle} onChange={(event) => setEditTitle(event.target.value)} />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-muted-foreground">Amount</label>
+                  <input type="number" min="0.01" step="0.01" className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm" value={editAmount} onChange={(event) => setEditAmount(event.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-muted-foreground">Date</label>
+                  <input type="date" className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm" value={editDate} onChange={(event) => setEditDate(event.target.value)} />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-muted-foreground">Paid by</label>
+                <select className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm" value={editPayerId} onChange={(event) => setEditPayerId(event.target.value)}>
+                  {members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}
+                </select>
+              </div>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-medium text-muted-foreground">Split method</label>
+                  <div className="flex rounded-lg bg-secondary p-0.5">
+                    {(["equal", "custom"] as const).map((type) => (
+                      <button key={type} type="button" onClick={() => setEditSplitType(type)} className={`rounded-md px-3 py-1 text-xs capitalize ${editSplitType === type ? "bg-background text-foreground shadow-sm" : "text-muted-foreground"}`}>{type}</button>
+                    ))}
+                  </div>
+                </div>
+                <Card className="divide-y divide-border/50 overflow-hidden border-border/50 p-0">
+                  {members.map((member) => {
+                    const selected = editSplitWith.includes(member.id);
+                    const equalAmount = Number(editAmount || 0) / Math.max(editSplitWith.length, 1);
+                    return (
+                      <div key={member.id} className="flex items-center gap-3 px-3 py-2.5">
+                        <input type="checkbox" checked={selected} onChange={() => toggleEditMember(member.id)} />
+                        <span className="min-w-0 flex-1 truncate text-sm">{member.name}</span>
+                        {selected && (editSplitType === "custom" ? (
+                          <input type="number" min="0" step="0.01" className="w-28 rounded-lg border border-border bg-background px-2 py-1 text-right text-sm" value={editCustomAmounts[member.id] || ""} onChange={(event) => setEditCustomAmounts((current) => ({ ...current, [member.id]: event.target.value }))} />
+                        ) : (
+                          <span className="text-sm text-muted-foreground">{equalAmount.toFixed(2)}</span>
+                        ))}
+                      </div>
+                    );
+                  })}
+                </Card>
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-muted-foreground">Receipt</label>
+                <input ref={editReceiptInputRef} type="file" accept="image/*" onChange={handleEditReceiptChange} className="hidden" />
+                <Button type="button" variant="outline" size="sm" onClick={() => editReceiptInputRef.current?.click()} className="gap-2">
+                  <Upload className="h-3.5 w-3.5" />
+                  {editReceiptPreview ? "Replace receipt" : "Add receipt"}
+                </Button>
+                {editReceiptPreview && <img src={editReceiptPreview} alt="Receipt preview" className="max-h-32 rounded-lg border border-border object-contain" />}
+              </div>
+              <div className="flex gap-2 pt-2">
+                <Button type="button" variant="outline" className="flex-1" onClick={() => setIsEditingExpense(false)} disabled={isSavingEdit}>Cancel</Button>
+                <Button type="button" className="flex-1" onClick={saveExpenseEdit} disabled={isSavingEdit || !editTitle.trim() || !editAmount || editSplitWith.length === 0}>{isSavingEdit ? "Saving..." : "Save Changes"}</Button>
+              </div>
+            </div>
+          </div>
+        ) : (
+        /* Scrollable Content - ONLY this scrolls */
         <div className="flex-1 overflow-y-auto overscroll-contain scrollbar-hide">
           <div className="p-4 space-y-4">
             {/* Paid by */}
@@ -785,6 +959,7 @@ export function ExpenseDetailsModal({
             )}
           </div>
         </div>
+        )}
 
         {/* Payment Review Modal */}
         <PaymentReviewModal

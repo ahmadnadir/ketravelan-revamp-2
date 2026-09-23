@@ -473,31 +473,6 @@ export function NoteEditor({
     typingHistoryRef.current =
       false;
 
-    /*
-     * The textarea/mirror DOM nodes persist across notes, so a
-     * leftover scrollTop from a previous note/session otherwise
-     * clips the first line under the top edge on open. Reset it
-     * a few times since focus/resize effects can re-scroll it
-     * shortly after the initial reset.
-     */
-    const resetScroll = () => {
-      if (contentRef.current) {
-        contentRef.current.scrollTop = 0;
-      }
-
-      if (contentMirrorRef.current) {
-        contentMirrorRef.current.scrollTop = 0;
-      }
-    };
-
-    requestAnimationFrame(resetScroll);
-    const resetTimers = [50, 200, 400].map((delay) =>
-      setTimeout(resetScroll, delay)
-    );
-
-    return () => {
-      resetTimers.forEach((timer) => clearTimeout(timer));
-    };
   }, [
     note,
     open,
@@ -881,6 +856,15 @@ export function NoteEditor({
         const isNoteFocused =
           activeElement ===
           contentRef.current;
+
+        const isInitialEditorLoad =
+          isInitialMount.current &&
+          !isSearchFocused &&
+          !isNoteFocused;
+
+        if (isInitialEditorLoad) {
+          return;
+        }
 
         const nativeKeyboardHeight =
           Number.parseFloat(

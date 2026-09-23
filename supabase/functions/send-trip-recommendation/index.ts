@@ -1,11 +1,18 @@
 // deno-lint-ignore-file no-explicit-any
-declare const Deno: { env: { get(name: string): string | undefined } };
-import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+declare const Deno: {
+  env: { get(name: string): string | undefined };
+  serve(handler: (req: Request) => Response | Promise<Response>): void;
+};
+// @ts-expect-error Supabase Edge resolves npm specifiers at deploy/runtime.
+import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-const SERVICE_ROLE_KEY = Deno.env.get("SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
+const SERVICE_ROLE_KEY = Deno.env.get("SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 const SITE_URL = Deno.env.get("SITE_URL") ?? "https://ketravelan.com";
+
+if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
+  throw new Error("Missing required Supabase environment variables");
+}
 
 const SITE_ORIGIN = (() => {
   try {
@@ -21,14 +28,11 @@ const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
 });
 
 async function sendSystemPush(payload: Record<string, unknown>) {
-  try {
-    await admin.functions.invoke("send-system-push", {
-      body: payload,
-      headers: { Authorization: `Bearer ${SERVICE_ROLE_KEY}` },
-    });
-  } catch (err) {
-    console.warn("Failed to send system push", err);
-  }
+  const { error } = await admin.functions.invoke("send-system-push", {
+    body: payload,
+    headers: { Authorization: `Bearer ${SERVICE_ROLE_KEY}` },
+  });
+  if (error) throw error;
 }
 
 function buildCorsHeaders(req: Request): Record<string, string> {
@@ -64,12 +68,13 @@ interface TripRecommendationRequest {
   dryRun?: boolean;
 }
 
-interface TravelInterest {
-  id: string;
-  category: string;
+function isInternalRequest(req: Request): boolean {
+  const authorization = req.headers.get("authorization") || "";
+  return authorization.startsWith("Bearer ")
+    && authorization.slice("Bearer ".length).trim() === SERVICE_ROLE_KEY;
 }
 
-serve(async (req: Request) => {
+Deno.serve(async (req: Request) => {
   const corsHeaders = buildCorsHeaders(req);
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders });
@@ -81,60 +86,122 @@ serve(async (req: Request) => {
     });
   }
 
+  if (!isInternalRequest(req)) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json", ...corsHeaders },
+    });
+  }
+
   try {
-    const body = await req.json() as TripRecommendationRequest;
-    if (!body?.tripId) {
+    let body: TripRecommendationRequest;
+    try {
+      body = await req.json() as TripRecommendationRequest;
+    } catch {
+      return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json", ...corsHeaders },
+      });
+    }
+    const tripId = typeof body?.tripId === "string" ? body.tripId.trim() : "";
+    const requestedLimit = Number.isFinite(body?.limit) ? Math.floor(body.limit as number) : 100;
+    const limit = Math.min(Math.max(requestedLimit, 1), 100);
+
+    if (!tripId) {
       return new Response(JSON.stringify({ error: "Missing tripId" }), {
         status: 400,
         headers: { "Content-Type": "application/json", ...corsHeaders },
       });
     }
 
-    console.log("Starting trip recommendation for:", body.tripId);
-
-    // Fetch trip details
+    // The database publish trigger is the only supported caller. The public /
+    // published predicate prevents private trip data from reaching recipients.
     const { data: trip, error: tripErr } = await admin
       .from("trips")
-      .select("id, title, destination, slug, travel_styles, creator_id")
-      .eq("id", body.tripId)
+      .select("id, title, destination, slug, travel_styles, creator_id, status, visibility")
+      .eq("id", tripId)
       .maybeSingle();
 
     if (tripErr) {
-      console.error("Trip fetch error:", tripErr);
+      console.error("Trip lookup failed", { tripId });
       throw tripErr;
     }
     if (!trip) {
-      console.log("Trip not found");
-      throw new Error("Trip not found");
+      return new Response(JSON.stringify({ error: "Trip not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json", ...corsHeaders },
+      });
     }
 
-    console.log("Trip found:", trip.id);
+    if (trip.status !== "published" || trip.visibility !== "public") {
+      return new Response(JSON.stringify({ error: "Trip not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json", ...corsHeaders },
+      });
+    }
 
-    // Get all users with push notifications enabled
-    console.log("Fetching users with push notifications enabled");
-    const { data: users, error: usersErr } = await admin
+    const tripStyles = Array.isArray(trip.travel_styles)
+      ? (trip.travel_styles as unknown[]).filter((style: unknown): style is string => typeof style === "string" && style.length > 0)
+      : [];
+
+    let usersQuery = admin
       .from("profiles")
-      .select("id")
+      .select("id, travel_styles")
       .eq("push_notifications", true)
       .neq("id", trip.creator_id)
-      .limit(body.limit || 100);
+      .limit(limit);
+
+    if (tripStyles.length > 0) {
+      usersQuery = usersQuery.overlaps("travel_styles", tripStyles);
+    }
+
+    const { data: users, error: usersErr } = await usersQuery;
 
     if (usersErr) {
-      console.error("User fetch error:", usersErr);
+      console.error("Recipient lookup failed", { tripId });
       throw usersErr;
     }
 
-    console.log("Found users:", users?.length || 0);
+    const candidateIds: string[] = (users ?? []).map((candidate: { id: string }) => candidate.id);
+    const [membersResult, creatorBlockedResult, candidateBlockedResult] = await Promise.all([
+      admin
+        .from("trip_members")
+        .select("user_id")
+        .eq("trip_id", trip.id)
+        .is("left_at", null)
+        .in("user_id", candidateIds.length > 0 ? candidateIds : ["00000000-0000-0000-0000-000000000000"]),
+      admin
+        .from("blocked_users")
+        .select("blocked_user_id")
+        .eq("user_id", trip.creator_id)
+        .in("blocked_user_id", candidateIds.length > 0 ? candidateIds : ["00000000-0000-0000-0000-000000000000"]),
+      admin
+        .from("blocked_users")
+        .select("user_id")
+        .eq("blocked_user_id", trip.creator_id)
+        .in("user_id", candidateIds.length > 0 ? candidateIds : ["00000000-0000-0000-0000-000000000000"]),
+    ]);
 
-    if (!users || users.length === 0) {
-      console.log("No users found for notification");
+    if (membersResult.error || creatorBlockedResult.error || candidateBlockedResult.error) {
+      console.error("Recipient exclusion lookup failed", { tripId });
+      throw membersResult.error ?? creatorBlockedResult.error ?? candidateBlockedResult.error;
+    }
+
+    const joinedIds = new Set((membersResult.data ?? []).map((member: { user_id: string }) => member.user_id));
+    const blockedIds = new Set([
+      ...(creatorBlockedResult.data ?? []).map((block: { blocked_user_id: string }) => block.blocked_user_id),
+      ...(candidateBlockedResult.data ?? []).map((block: { user_id: string }) => block.user_id),
+    ]);
+    const userIds = candidateIds.filter((id: string) => !joinedIds.has(id) && !blockedIds.has(id)).slice(0, limit);
+
+    if (userIds.length === 0) {
+      console.log("No recommendation recipients", { tripId });
       return new Response(
         JSON.stringify({ ok: true, skipped: true, reason: "No users found" }),
         { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } }
       );
     }
 
-    const userIds = users.map(u => u.id);
     const tripIdentifier = trip.slug || trip.id;
     const actionUrl = `/explore?trip=${tripIdentifier}`;
 
@@ -155,7 +222,7 @@ serve(async (req: Request) => {
     }
 
     // Send push recommendations
-    console.log("Sending notifications to", userIds.length, "users");
+    console.log("Sending trip recommendations", { tripId, recipientCount: userIds.length });
     try {
       await sendSystemPush({
         userIds,
@@ -172,9 +239,9 @@ serve(async (req: Request) => {
         batchKey: `trip_recommendations_${new Date().toISOString().split('T')[0]}`,
         batchWindowMinutes: 1440,
       });
-      console.log("Notifications sent successfully");
+      console.log("Trip recommendations sent", { tripId, recipientCount: userIds.length });
     } catch (pushErr) {
-      console.error("Push notification error:", pushErr);
+      console.error("Trip recommendation dispatch failed", { tripId });
       throw pushErr;
     }
 

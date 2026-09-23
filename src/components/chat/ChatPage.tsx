@@ -224,6 +224,8 @@ export function ChatPage({
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const [scrollDateLabel, setScrollDateLabel] = useState("");
   const scrollDateTimeoutRef = useRef<number | null>(null);
+  const scrollDateLabelRef = useRef("");
+  const scrollDateFrameRef = useRef<number | null>(null);
   const [actionMenu, setActionMenu] = useState<{ messageId: string; x: number; y: number } | null>(null);
   const [actionMenuPosition, setActionMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const [hoveredMessageId, setHoveredMessageId] = useState<string | null>(null);
@@ -549,15 +551,25 @@ export function ChatPage({
     if (!container) return;
 
     const onScroll = () => {
+      if (scrollDateFrameRef.current !== null) return;
+      scrollDateFrameRef.current = window.requestAnimationFrame(() => {
+        scrollDateFrameRef.current = null;
+
       // iOS can report a small positive scroll position while rubber-band
-      // overscrolling at the top. Hide the floating chip before the first
-      // inline separator becomes visible again.
+      // overscrolling at the top. Keep the first date visible in the card.
       if (container.scrollTop <= 4) {
         if (scrollDateTimeoutRef.current) {
           clearTimeout(scrollDateTimeoutRef.current);
           scrollDateTimeoutRef.current = null;
         }
-        setScrollDateLabel("");
+        const firstSeparator = container.querySelector<HTMLElement>('[data-date-label]');
+        const firstLabel = firstSeparator?.dataset.dateLabel || "";
+        const floatingCard = container.querySelector<HTMLElement>('[data-floating-date-card]');
+        if (floatingCard) floatingCard.style.opacity = "1";
+        if (firstLabel && firstLabel !== scrollDateLabelRef.current) {
+          scrollDateLabelRef.current = firstLabel;
+          setScrollDateLabel(firstLabel);
+        }
         return;
       }
 
@@ -577,30 +589,35 @@ export function ChatPage({
         }
       });
 
-      // If the active date separator is still visible in the viewport, the
-      // inline chip is already doing the job. Keep only one separator visible.
-      const duplicateVisible = Array.from(separators).some((el) => {
-        const label = el.dataset.dateLabel || "";
-        const elTop = el.getBoundingClientRect().top;
-        // Account for the sticky chip's own height and WebView rubber-band
-        // offsets. If the matching inline marker is anywhere in that zone,
-        // let the permanent timeline marker be the only visible date.
-        return label === activeLabel && elTop >= containerTop - 12 && elTop <= containerTop + 72;
-      });
-      if (duplicateVisible) activeLabel = "";
+      if (activeLabel && activeLabel !== scrollDateLabelRef.current) {
+        scrollDateLabelRef.current = activeLabel;
+        setScrollDateLabel(activeLabel);
+      }
 
-      setScrollDateLabel(activeLabel);
-
+      const floatingCard = container.querySelector<HTMLElement>('[data-floating-date-card]');
+      if (floatingCard) floatingCard.style.opacity = "1";
       if (scrollDateTimeoutRef.current) clearTimeout(scrollDateTimeoutRef.current);
       scrollDateTimeoutRef.current = window.setTimeout(() => {
+        scrollDateLabelRef.current = "";
         setScrollDateLabel("");
+        const card = container.querySelector<HTMLElement>('[data-floating-date-card]');
+        if (card) card.style.opacity = "0";
+        scrollDateTimeoutRef.current = null;
       }, 1500);
+
+      });
     };
 
     container.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
     return () => {
       container.removeEventListener('scroll', onScroll);
+      if (scrollDateFrameRef.current !== null) {
+        window.cancelAnimationFrame(scrollDateFrameRef.current);
+        scrollDateFrameRef.current = null;
+      }
       if (scrollDateTimeoutRef.current) clearTimeout(scrollDateTimeoutRef.current);
+      scrollDateLabelRef.current = "";
     };
   }, [scrollContainerRef, isLoading]);
 
@@ -1698,16 +1715,19 @@ export function ChatPage({
     </div>
   ) : (
     <>
-      {/* Show sticky date only when available so it doesn't reserve extra gap */}
-      {scrollDateLabel && (
-        <div
-          className="sticky top-2 z-10 flex justify-center pointer-events-none"
+      {/* Keep one stable overlay mounted so scrolling never remounts the chip. */}
+      <div className="sticky top-2 z-10 flex h-0 justify-center pointer-events-none overflow-visible">
+        <span
+          data-floating-date-card
+          aria-hidden={!scrollDateLabel}
+          className={cn(
+            "absolute top-0 rounded-full border border-[#d6d6d6] bg-white px-3 py-0.5 text-[11px] font-medium tracking-[0.01em] text-[#111b21] shadow-[0_1px_2px_rgba(11,20,26,0.12)]",
+            scrollDateLabel ? "opacity-100" : "opacity-0"
+          )}
         >
-          <span className="rounded-full border border-[#d6d6d6] bg-white px-3 py-0.5 text-[11px] font-medium tracking-[0.01em] text-[#111b21] shadow-[0_1px_2px_rgba(11,20,26,0.12)] transition-opacity duration-300 opacity-100">
-            {scrollDateLabel}
-          </span>
-        </div>
-      )}
+          {scrollDateLabel || "\u00a0"}
+        </span>
+      </div>
 
       {hiddenMessagesCount > 0 && (
         <div className="mb-3 flex justify-center">
@@ -1752,10 +1772,15 @@ export function ChatPage({
               {showDateSeparator && dateSeparatorLabel && (
                 renderDateSeparator(dateSeparatorLabel, index === 0)
               )}
-              <div className="flex justify-center py-3">
-                <p className="text-xs sm:text-sm text-muted-foreground text-center px-4">
+              <div className="flex flex-col items-center justify-center py-3">
+                <p className="px-4 text-center text-xs text-muted-foreground sm:text-sm">
                   {formatSystemMessageContent(msg.content)}
                 </p>
+                {timeLabel && (
+                  <span className="mt-0.5 text-[9px] text-muted-foreground/50 sm:text-[10px]">
+                    {timeLabel}
+                  </span>
+                )}
               </div>
             </div>
           );

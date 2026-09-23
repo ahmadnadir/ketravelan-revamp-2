@@ -1,12 +1,15 @@
 {
   "name": "vite_react_shadcn_ts",
   "private": true,
-  "version": "2.6.2",
+  "version": "2.6.4",
+  "appBuild": "32",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "dev:host": "vite --host",
     "build": "vite build",
+    "prebuild": "npm run version:sync",
+    "version:sync": "node scripts/sync-native-version.mjs",
     "build:dev": "vite build --mode development",
     "test": "vitest run",
     "lint": "eslint .",

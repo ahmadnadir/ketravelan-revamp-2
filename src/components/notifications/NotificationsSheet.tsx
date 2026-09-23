@@ -22,24 +22,9 @@ import type { Notification } from "@/lib/notifications";
 import { syncBadgeWithUnreadCount } from "@/lib/notifications";
 import { isNativePlatform } from "@/lib/capacitor";
 
-// Persistent logging helper for debugging navigation issues
-const persistLog = (label: string, data: unknown) => {
-  const timestamp = new Date().toISOString();
-  const message = `[${timestamp}] ${label}: ${JSON.stringify(data)}`;
-  console.log(message);
-  
-  try {
-    const logs = JSON.parse(localStorage.getItem('notificationDebugLogs') || '[]');
-    logs.push(message);
-    // Keep only last 50 logs
-    if (logs.length > 50) logs.shift();
-    localStorage.setItem('notificationDebugLogs', JSON.stringify(logs));
-  } catch (e) {
-    console.error('Failed to persist log:', e);
-  }
-};
-
-// persistLog('NotificationsSheet loaded', { timestamp: new Date().toISOString() });
+// Retained as a no-op for the existing navigation flow; notification payloads
+// must not be printed or persisted in browser storage.
+const persistLog = (_label: string, _data: unknown) => {};
 
 // Add global debug function to window
 if (typeof window !== 'undefined') {
@@ -135,21 +120,21 @@ export function NotificationsSheet({ open, onOpenChange }: NotificationsSheetPro
   const { data: notifications = [], isLoading } = useNotifications({ type: filterType });
   
   // Log notifications data whenever it changes
-  useEffect(() => {
-    if (notifications.length > 0) {
-      persistLog('Notifications data received', {
-        count: notifications.length,
-        notifications: notifications.map(n => ({
-          id: n.id,
-          type: n.type,
-          title: n.title,
-          actionUrl: n.action_url,
-          hasMetadata: !!n.metadata,
-          metadata: n.metadata,
-        })),
-      });
-    }
-  }, [notifications]);
+  // useEffect(() => {
+  //   if (notifications.length > 0) {
+  //     persistLog('Notifications data received', {
+  //       count: notifications.length,
+  //       notifications: notifications.map(n => ({
+  //         id: n.id,
+  //         type: n.type,
+  //         title: n.title,
+  //         actionUrl: n.action_url,
+  //         hasMetadata: !!n.metadata,
+  //         metadata: n.metadata,
+  //       })),
+  //     });
+  //   }
+  // }, [notifications]);
   
   // Mutations
   const markAsReadMutation = useMarkNotificationAsRead();
