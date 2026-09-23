@@ -494,13 +494,6 @@ export default function CreateTrip() {
             console.warn('[handlePublish] Failed to send trip created email', e);
           }
           try {
-            await supabase.functions.invoke('send-trip-recommendation', {
-              body: { tripId: publishedTrip.id },
-            });
-          } catch (e) {
-            console.warn('[handlePublish] Failed to send trip recommendation', e);
-          }
-          try {
             await scheduleTripReminder(publishedTrip.id);
           } catch (e) {
             console.warn('[handlePublish] Failed to schedule trip reminders', e);
@@ -833,7 +826,7 @@ export default function CreateTrip() {
                       type="button"
                       onClick={() => setDatePickerField("start")}
                       className={cn(
-                        "h-12 w-full rounded-xl border-2 bg-background px-3 text-left text-sm transition-colors flex items-center gap-2",
+                        "h-12 w-full rounded-xl border border-border bg-background px-3 text-left text-sm transition-colors flex items-center gap-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/40",
                         draft.startDate
                           ? "border-primary/60 text-foreground"
                           : "border-border text-muted-foreground hover:border-primary/40"
@@ -851,7 +844,7 @@ export default function CreateTrip() {
                       type="button"
                       onClick={() => setDatePickerField("end")}
                       className={cn(
-                        "h-12 w-full rounded-xl border-2 bg-background px-3 text-left text-sm transition-colors flex items-center gap-2",
+                        "h-12 w-full rounded-xl border border-border bg-background px-3 text-left text-sm transition-colors flex items-center gap-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/40",
                         draft.endDate
                           ? "border-primary/60 text-foreground"
                           : "border-border text-muted-foreground hover:border-primary/40"
@@ -990,7 +983,7 @@ export default function CreateTrip() {
                         disabled={draft.galleryImages.length >= 5}
                         className="w-full"
                       >
-                        <Card className="aspect-square border-dashed border-2 border-border/50 hover:border-primary/30 transition-colors cursor-pointer flex items-center justify-center">
+                        <Card className="aspect-square border-dashed border border-border/50 hover:border-primary/30 transition-colors cursor-pointer flex items-center justify-center">
                           <div className="flex flex-col items-center gap-1 text-center p-2">
                             <Image className="h-5 w-5 text-muted-foreground" />
                             <p className="text-[10px] text-muted-foreground">
