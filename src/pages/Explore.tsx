@@ -36,6 +36,7 @@ const buildDefaultFilters = (): FilterState => ({
 });
 
 type DesktopPanel = "where" | "when" | "budget" | "styles" | null;
+const EMPTY_TRIPS: any[] = [];
 
 export default function Explore() {
   const { homeCurrency } = useAuth();
@@ -128,7 +129,7 @@ export default function Explore() {
   }, [appliedFilters]);
 
   // Fetch trips with React Query
-  const { data: trips = [], error, isPending, isFetching, refetch } = useTrips(queryFilters, {
+  const { data: trips = EMPTY_TRIPS, error, isPending, isFetching, refetch } = useTrips(queryFilters, {
     refetchOnMount: false,
     staleTime: 1000 * 60 * 2,
   });
