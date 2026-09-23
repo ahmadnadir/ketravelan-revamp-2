@@ -182,6 +182,7 @@ interface AddExpenseModalProps {
   allowedCurrencies?: CurrencyCode[];
   expenseCategories: ExpenseCategory[];
   expenseCategoriesLoading?: boolean;
+  showSettledEditWarning?: boolean;
 }
 
 export function AddExpenseModal({
@@ -196,6 +197,7 @@ export function AddExpenseModal({
   allowedCurrencies,
   expenseCategories,
   expenseCategoriesLoading = false,
+  showSettledEditWarning = false,
 }: AddExpenseModalProps) {
   const { homeCurrency: authHomeCurrency } = useAuth();
   const homeCurrency: CurrencyCode = tripHomeCurrency || authHomeCurrency || "MYR";
@@ -599,6 +601,11 @@ export function AddExpenseModal({
 
         {/* Scrollable Body */}
         <div className="flex-1 overflow-y-auto overscroll-contain scrollbar-hide px-5 py-3 space-y-2.5 sm:px-6">
+          {isEditMode && showSettledEditWarning && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+              This expense is fully settled. Changing the amount, payer, participants, or split may affect settlement records. Existing completed settlements are protected and may require an adjustment expense.
+            </div>
+          )}
           {/* Title */}
           <div className="space-y-1">
             <Label htmlFor="title" className="text-xs font-medium text-foreground">Expense title *</Label>

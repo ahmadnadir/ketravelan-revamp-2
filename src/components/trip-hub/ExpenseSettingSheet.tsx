@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { getActiveCurrencies, searchCurrencyList, type Currency } from "@/lib/currencyService";
+import { getActiveCurrencies, getCachedCurrencies, searchCurrencyList, type Currency } from "@/lib/currencyService";
 import type { CurrencyCode } from "@/lib/currencyUtils";
 import { cn } from "@/lib/utils";
 
@@ -35,7 +35,9 @@ const currencyTriggerLabel = (currency: Currency) => (
 );
 
 export function ExpenseSettingsSheet({ open, onOpenChange, homeCurrency, tripTravelCurrencies, usedCurrencyCodes = [], onSaveCurrencies }: ExpenseSettingsSheetProps) {
-  const [currencies, setCurrencies] = useState<Currency[]>([]);
+  const [currencies, setCurrencies] = useState<Currency[]>(() =>
+    getCachedCurrencies().filter((currency) => currency.allow_as_home || currency.allow_as_travel)
+  );
   const [isLoadingCurrencies, setIsLoadingCurrencies] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [currencyLoadError, setCurrencyLoadError] = useState(false);
@@ -53,14 +55,20 @@ export function ExpenseSettingsSheet({ open, onOpenChange, homeCurrency, tripTra
     setPickerOpen(false);
     setSearch("");
     setCurrencyLoadError(false);
-    setLoadAttempted(false);
   }, [open, homeCurrency, tripTravelCurrencies]);
 
   useEffect(() => {
     if (!open || loadAttempted) return;
     let cancelled = false;
     setLoadAttempted(true);
-    setIsLoadingCurrencies(true);
+    const cachedCurrencies = getCachedCurrencies().filter((currency) => currency.allow_as_home || currency.allow_as_travel);
+    if (cachedCurrencies.length > 0) {
+      setCurrencies(cachedCurrencies);
+      setCurrencyLoadError(false);
+      setIsLoadingCurrencies(false);
+    } else {
+      setIsLoadingCurrencies(true);
+    }
     getActiveCurrencies().then((data) => {
       if (!cancelled) {
         setCurrencies(data.filter((currency) => currency.allow_as_home || currency.allow_as_travel));

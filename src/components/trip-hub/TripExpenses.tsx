@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { Plus, DollarSign, TrendingUp, TrendingDown, Wallet, QrCode, SlidersHorizontal, Settings, ArrowLeftRight, Loader2 } from "lucide-react";
+import { Plus, DollarSign, TrendingUp, TrendingDown, Wallet, QrCode, SlidersHorizontal, Settings, ArrowLeftRight, Loader2, ChevronRight } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { SegmentedControl } from "@/components/shared/SegmentedControl";
 import { ScrollableTabBar } from "@/components/shared/ScrollableTabBar";
@@ -1736,15 +1736,6 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
   const filteredExpenses = useMemo(() => {
     let result = [...expenses];
 
-    // Only show expenses involving the current user
-    if (currentUserId) {
-      result = result.filter(e =>
-        e.payer?.id === currentUserId ||
-        e.createdBy === currentUserId ||
-        e.splitWith?.includes(currentUserId)
-      );
-    }
-    
     // Filter by payer
     if (filterPayer !== "all") {
       result = result.filter(e => e.paidBy === filterPayer);
@@ -2617,10 +2608,21 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
 
   // Card tap handlers
   const handleTotalSpendTap = () => {
-    setSubTab("breakdown");
-    setTimeout(() => {
-      categoryBreakdownRef.current?.scrollIntoView({ behavior: "smooth" });
-    }, 100);
+    setFilterPayer("all");
+    setFilterCategory("all");
+    setSubTab("expenses");
+  };
+
+  const handleCategoryTap = (categoryCode: string) => {
+    setFilterPayer("all");
+    setFilterCategory(categoryCode);
+    setSubTab("expenses");
+  };
+
+  const handleMemberTap = (memberName: string) => {
+    setFilterPayer(memberName);
+    setFilterCategory("all");
+    setSubTab("expenses");
   };
 
   const handleYouPaidTap = () => {
@@ -3754,14 +3756,21 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
                 </p>
                 <div className="space-y-2 sm:space-y-3">
                   {[...categoryBreakdown].sort((a, b) => b.amount - a.amount).map((item, index) => (
-                    <div key={item.category} className="space-y-1 sm:space-y-1.5">
+                    <button
+                      key={item.categoryCode}
+                      type="button"
+                      onClick={() => handleCategoryTap(item.categoryCode)}
+                      className="w-full space-y-1 rounded-lg text-left transition-colors hover:bg-secondary/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 sm:space-y-1.5"
+                      aria-label={`View ${item.category} expenses`}
+                    >
                       <div className="flex items-center justify-between text-xs sm:text-sm gap-2">
                         <span className="text-foreground truncate flex items-center gap-1.5">
                           <span>{item.emoji}</span>
                           {item.category}
                         </span>
-                        <span className="text-foreground shrink-0">
+                        <span className="text-foreground shrink-0 flex items-center gap-1">
                           {`${summaryDisplayCurrency} ${formatTwoDecimalAmount(item.amount)}`} ({item.percentage}%)
+                          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
                         </span>
                       </div>
                       <div className="h-1.5 sm:h-2 bg-secondary rounded-full overflow-hidden">
@@ -3773,7 +3782,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
                           }}
                         />
                       </div>
-                    </div>
+                    </button>
                   ))}
                 </div>
               </Card>
@@ -3834,7 +3843,13 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
                   memberContributions.map((member, index) => {
                     const memberColor = memberColorMap[member.userId] || MEMBER_COLORS[0];
                     return (
-                      <div key={member.name} className="space-y-1 sm:space-y-1.5 group cursor-default">
+                      <button
+                        key={member.userId}
+                        type="button"
+                        onClick={() => handleMemberTap(member.name)}
+                        className="w-full space-y-1 rounded-lg text-left transition-colors hover:bg-secondary/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 sm:space-y-1.5 group"
+                        aria-label={`View expenses paid by ${member.name}`}
+                      >
                         {/* Top row: Avatar + Name on left, Amount + % on right */}
                         <div className="flex items-center justify-between text-xs sm:text-sm gap-2">
                           <span className="text-foreground truncate flex items-center gap-1.5 sm:gap-2">
@@ -3846,8 +3861,9 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
                             </Avatar>
                             {member.name}
                           </span>
-                          <span className="text-foreground shrink-0">
+                          <span className="text-foreground shrink-0 flex items-center gap-1">
                             {`${summaryDisplayCurrency} ${formatTwoDecimalAmount(member.amount)}`} <span className="text-muted-foreground">({member.percentage}%)</span>
+                            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
                           </span>
                         </div>
                         
@@ -3862,7 +3878,7 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
                             }}
                           />
                         </div>
-                      </div>
+                      </button>
                     );
                   })
                 ) : (
@@ -4239,6 +4255,12 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
         onAddExpense={handleAddExpense}
         onEditExpense={handleEditExpense}
         editingExpense={editingExpense}
+        showSettledEditWarning={Boolean(
+          editingExpense && (
+            editingExpense.paymentProgress === 100 ||
+            (editingExpense.payments?.length > 0 && editingExpense.payments.every((payment) => payment.status === "settled"))
+          )
+        )}
         currentUser={currentUserName}
         members={members}
         homeCurrency={homeCurrency}
@@ -4335,6 +4357,12 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
         }}
         onConfirmPaymentReceived={handleConfirmPaymentSettled}
         onSubmitPayment={handleSubmitPayment}
+        onRequestEdit={canAddExpenses && viewingExpenseDetails ? () => {
+          setDetailsModalOpen(false);
+          setEditingExpense(viewingExpenseDetails);
+          setAddExpenseOpen(true);
+        } : undefined}
+        canEdit={canAddExpenses}
         members={members}
         expenseCategories={expenseCategories}
       />
