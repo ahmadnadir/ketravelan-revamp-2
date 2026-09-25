@@ -18,6 +18,8 @@ import { CommunityProvider } from "./contexts/CommunityContext";
 import { classifyRequestError } from "@/lib/requestErrors";
 import { getPendingAuthIntent, normalizeOAuthErrorMessage, persistAuthError } from "@/lib/authFlow";
 import { resolveNativeDeepLinkPath } from "@/lib/deepLinks";
+import { AdminGuard } from "./admin/components/AdminGuard";
+import { AdminLayout } from "./admin/components/AdminLayout";
 
 import { OfflineBanner } from "./components/layout/OfflineBanner";
 import { NetworkStatusProvider } from "./contexts/NetworkStatusContext";
@@ -82,6 +84,7 @@ const HelpArticleDetail = React.lazy(() => import("./pages/HelpArticleDetail"));
 const VerificationPending = React.lazy(() => import("./pages/VerificationPending"));
 const Onboarding = React.lazy(() => import("./pages/Onboarding"));
 const WelcomeOnboarding = React.lazy(() => import("./pages/WelcomeOnboarding"));
+const AdminDashboard = React.lazy(() => import("./admin/pages/AdminDashboard"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -709,6 +712,15 @@ const App = () => (
               <Route path="/help-center" element={<HelpCenter />} />
               <Route path="/help-center/:slug" element={<HelpArticleDetail />} />
               <Route path="/install" element={<Install />} />
+              <Route path="/admin" element={<ProtectedRoute><AdminGuard><AdminLayout><AdminDashboard /></AdminLayout></AdminGuard></ProtectedRoute>} />
+              <Route path="/admin/users" element={<ProtectedRoute><AdminGuard><AdminLayout><AdminDashboard /></AdminLayout></AdminGuard></ProtectedRoute>} />
+              <Route path="/admin/trips" element={<ProtectedRoute><AdminGuard><AdminLayout><AdminDashboard /></AdminLayout></AdminGuard></ProtectedRoute>} />
+              <Route path="/admin/moderation" element={<ProtectedRoute><AdminGuard><AdminLayout><AdminDashboard /></AdminLayout></AdminGuard></ProtectedRoute>} />
+              <Route path="/admin/transactions" element={<ProtectedRoute><AdminGuard><AdminLayout><AdminDashboard /></AdminLayout></AdminGuard></ProtectedRoute>} />
+              <Route path="/admin/affiliate" element={<ProtectedRoute><AdminGuard><AdminLayout><AdminDashboard /></AdminLayout></AdminGuard></ProtectedRoute>} />
+              <Route path="/admin/analytics" element={<ProtectedRoute><AdminGuard><AdminLayout><AdminDashboard /></AdminLayout></AdminGuard></ProtectedRoute>} />
+              <Route path="/admin/notifications" element={<ProtectedRoute><AdminGuard><AdminLayout><AdminDashboard /></AdminLayout></AdminGuard></ProtectedRoute>} />
+              <Route path="/admin/settings" element={<ProtectedRoute><AdminGuard><AdminLayout><AdminDashboard /></AdminLayout></AdminGuard></ProtectedRoute>} />
               {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
               <Route path="*" element={<NotFound />} />
             </Routes>
