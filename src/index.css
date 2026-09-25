@@ -179,6 +179,120 @@
     font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
   }
 
+  .note-tiptap .ProseMirror {
+    min-height: 100%;
+    padding: 0.25rem 0.75rem 0.75rem;
+    outline: none;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .note-editor-scroll-buffer {
+    min-height: 3rem;
+    pointer-events: none;
+  }
+
+  .note-editor-scroll {
+    scrollbar-width: auto;
+    scrollbar-color: rgba(100, 116, 139, 0.7) transparent;
+  }
+
+  .note-editor-scroll::-webkit-scrollbar {
+    display: block;
+    width: 8px;
+  }
+
+  .note-editor-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .note-editor-scroll::-webkit-scrollbar-thumb {
+    min-height: 2.5rem;
+    border: 2px solid transparent;
+    border-radius: 9999px;
+    background-clip: padding-box;
+    background-color: rgba(100, 116, 139, 0.7);
+  }
+
+  .note-tiptap .ProseMirror > :first-child {
+    margin-top: 0;
+  }
+
+  .note-tiptap .ProseMirror p {
+    margin: 0 0 0.25rem;
+  }
+
+  .note-tiptap .ProseMirror ul,
+  .note-tiptap .ProseMirror ol {
+    margin: 0 0 0.35rem;
+    padding-left: 1.5rem;
+  }
+
+  .note-tiptap .ProseMirror ul:not([data-type="taskList"]) {
+    list-style-type: disc;
+  }
+
+  .note-tiptap .ProseMirror ol {
+    list-style-type: decimal;
+  }
+
+  .note-tiptap .ProseMirror ul[data-type="taskList"] {
+    padding-left: 0;
+    list-style: none;
+  }
+
+  .note-tiptap .ProseMirror ul[data-type="taskList"] > li {
+    display: grid !important;
+    grid-template-columns: 1.25rem minmax(0, 1fr);
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+
+  .note-tiptap .ProseMirror ul[data-type="taskList"] > li > label {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    width: 1.25rem;
+    align-self: center;
+    margin-top: 0;
+    user-select: none;
+  }
+
+  .note-tiptap .ProseMirror ul[data-type="taskList"] > li > label input {
+    accent-color: hsl(var(--primary));
+    height: 1rem;
+    width: 1rem;
+  }
+
+  .note-tiptap .ProseMirror ul[data-type="taskList"] > li > div {
+    display: block !important;
+    min-width: 0;
+  }
+
+  .note-tiptap .ProseMirror ul[data-type="taskList"] > li > div > p {
+    margin: 0;
+  }
+
+  .note-tiptap .ProseMirror ul[data-type="taskList"] > li[data-checked="true"] > div {
+    color: hsl(var(--muted-foreground));
+    text-decoration: line-through;
+    text-decoration-thickness: 1px;
+  }
+
+  .note-tiptap .ProseMirror a {
+    color: hsl(var(--primary));
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .note-tiptap .ProseMirror p.is-editor-empty:first-child::before {
+    color: hsl(var(--muted-foreground) / 0.5);
+    content: "Start typing...";
+    float: left;
+    height: 0;
+    pointer-events: none;
+  }
+
   .app-shell {
     height: 100dvh;
     display: flex;
@@ -589,14 +703,21 @@
     max-height: 100dvh;
   }
 
-  /* Hide scrollbar on mobile */
+  /* Keep scrollbars visible on mobile for usability. Do not hide them globally. */
   @media (max-width: 767px) {
     * {
-      scrollbar-width: none; /* Firefox */
-      -ms-overflow-style: none; /* IE/Edge */
+      scrollbar-width: auto; /* Firefox */
+      -ms-overflow-style: auto; /* IE/Edge */
     }
     *::-webkit-scrollbar {
-      display: none; /* Chrome, Safari, Opera */
+      display: block; /* Chrome, Safari, Opera */
+      width: 6px;
+      height: 6px;
+    }
+
+    *::-webkit-scrollbar-thumb {
+      background: rgba(148, 163, 184, 0.6);
+      border-radius: 9999px;
     }
   }
 

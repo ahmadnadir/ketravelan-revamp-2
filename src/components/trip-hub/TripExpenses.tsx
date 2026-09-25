@@ -4357,12 +4357,12 @@ export function TripExpenses({ tripId, members: providedMembers, tripName = "Tri
         }}
         onConfirmPaymentReceived={handleConfirmPaymentSettled}
         onSubmitPayment={handleSubmitPayment}
-        onRequestEdit={canAddExpenses && viewingExpenseDetails ? () => {
+        onRequestEdit={canAddExpenses && viewingExpenseDetails?.createdBy === currentUserId ? () => {
           setDetailsModalOpen(false);
           setEditingExpense(viewingExpenseDetails);
           setAddExpenseOpen(true);
         } : undefined}
-        canEdit={canAddExpenses}
+        canEdit={canAddExpenses && viewingExpenseDetails?.createdBy === currentUserId}
         members={members}
         expenseCategories={expenseCategories}
       />

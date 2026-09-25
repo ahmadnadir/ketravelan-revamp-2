@@ -47,6 +47,7 @@ const Explore = React.lazy(() => import("./pages/Explore"));
 const MainPage = React.lazy(() => import("./pages/MainPage"));
 const TripDetails = React.lazy(() => import("./pages/TripDetails"));
 const TripHub = React.lazy(() => import("./pages/TripHub"));
+const TripNoteEditor = React.lazy(() => import("./pages/TripNoteEditor"));
 const CreateTrip = React.lazy(() => import("./pages/CreateTrip"));
 const MyTrips = React.lazy(() => import("./pages/MyTrips"));
 const Chat = React.lazy(() => import("./pages/Chat"));
@@ -661,6 +662,7 @@ const App = () => (
               <Route path="/share/trip/:id" element={<TripDetails />} />
               <Route path="/trip/:id/chat" element={<ProtectedRoute><TripChatRedirect /></ProtectedRoute>} />
               <Route path="/trip/:id/hub" element={<ProtectedRoute><TripHub /></ProtectedRoute>} />
+              <Route path="/trip/:tripId/notes/:noteId" element={<ProtectedRoute><TripNoteEditor /></ProtectedRoute>} />
               <Route path="/create" element={<ProtectedRoute><CreateTrip /></ProtectedRoute>} />
               <Route path="/create-story" element={<ProtectedRoute><SocialFeatureAccessGate><CreateStory /></SocialFeatureAccessGate></ProtectedRoute>} />
               <Route path="/my-trips" element={<ProtectedRoute><MyTrips /></ProtectedRoute>} />

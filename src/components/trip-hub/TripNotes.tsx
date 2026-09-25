@@ -20,12 +20,9 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
-import { fetchTripNotes, createTripNote, updateTripNote, deleteTripNote, TripNoteDB, NoteBlock } from "@/lib/tripNotes.db";
-import { NoteEditor } from "./NoteEditor";
+import { fetchTripNotes, createTripNote, deleteTripNote, TripNoteDB, NoteBlock } from "@/lib/tripNotes.db";
 import { useToast } from "@/hooks/use-toast";
-import { useSearchParams } from "react-router-dom";
-import { useAuth } from "@/contexts/AuthContext";
-import { sendSystemMessage } from "@/lib/system-messages";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 interface TripNotesProps {
   tripId: string;
@@ -33,7 +30,6 @@ interface TripNotesProps {
 }
 
 export function TripNotes({ tripId, conversationId }: TripNotesProps) {
-  const { profile, user } = useAuth();
   const [searchQuery, setSearchQuery] = useState("");
   const [notes, setNotes] = useState<TripNoteDB[]>([]);
   const [isCreatingNote, setIsCreatingNote] = useState(false);
@@ -46,15 +42,14 @@ export function TripNotes({ tripId, conversationId }: TripNotesProps) {
       return new Set();
     }
   });
-  const [selectedNote, setSelectedNote] = useState<TripNoteDB | null>(null);
-  const [editorOpen, setEditorOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [noteToDelete, setNoteToDelete] = useState<TripNoteDB | null>(null);
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
   const [pendingLinkUrl, setPendingLinkUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
 
   // Load notes from DB
   const loadNotes = useCallback(async () => {
@@ -84,22 +79,14 @@ export function TripNotes({ tripId, conversationId }: TripNotesProps) {
     const target = notes.find((note) => note.id === requestedNoteId);
     if (!target) return;
 
-    setSelectedNote(target);
-    setEditorOpen(true);
-  }, [requestedNoteId, notes]);
-
-  const clearRequestedNote = useCallback(() => {
-    if (!searchParams.get("note")) return;
-
-    const next = new URLSearchParams(searchParams);
-    next.delete("note");
-    setSearchParams(next, { replace: true });
-  }, [searchParams, setSearchParams]);
+    const query = conversationId ? `&conversation=${encodeURIComponent(conversationId)}` : "";
+    navigate(`/trip/${tripId}/notes/${target.id}?from=notification${query}` , { replace: true });
+  }, [conversationId, navigate, notes, requestedNoteId, tripId]);
 
   const filteredNotes = notes.filter(
     (note) => {
       const blockContent = note.blocks
-        .map((b) => b.content)
+        .map((b) => b.content.replace(/<[^>]*>/g, ""))
         .join(" ")
         .toLowerCase();
       return (
@@ -160,8 +147,8 @@ export function TripNotes({ tripId, conversationId }: TripNotesProps) {
       const newNote = await createTripNote(tripId, "Untitled", []);
 
       setNotes((prev) => prev.map((note) => (note.id === tempId ? newNote : note)));
-      setSelectedNote(newNote);
-      setEditorOpen(true);
+      const query = conversationId ? `?conversation=${encodeURIComponent(conversationId)}` : "";
+      navigate(`/trip/${tripId}/notes/${newNote.id}${query}`);
     } catch (error) {
       setNotes((prev) => prev.filter((note) => note.id !== tempId));
       console.error("Failed to create note:", error);
@@ -175,55 +162,8 @@ export function TripNotes({ tripId, conversationId }: TripNotesProps) {
   const handleOpenNote = (note: TripNoteDB) => {
     if (note.id === creatingNoteId) return;
     if (noteActionJustHappened.current) return;
-    setSelectedNote(note);
-    setEditorOpen(true);
-  };
-
-  const handleNoteEdited = (editedNote: TripNoteDB) => {
-    if (!conversationId) return;
-
-    const senderName = profile?.full_name || profile?.username || user?.email || "Someone";
-
-    sendSystemMessage({
-      conversationId,
-      action: "note_edited",
-      senderName,
-      details: editedNote.title || "Untitled",
-    }).catch((error) => {
-      console.warn("Failed to send note edited system message:", error);
-    });
-  };
-
-  const handleSaveNote = async (updatedNote: TripNoteDB, options?: { silent?: boolean }) => {
-    try {
-      await updateTripNote(updatedNote.id, {
-        title: updatedNote.title,
-        blocks: updatedNote.blocks,
-      });
-
-      // Keep list in sync without forcing a full reload/flicker during autosave.
-      setNotes((prev) =>
-        prev.map((note) =>
-          note.id === updatedNote.id
-            ? {
-                ...note,
-                title: updatedNote.title,
-                blocks: updatedNote.blocks,
-                updated_at: new Date().toISOString(),
-              }
-            : note
-        )
-      );
-
-      if (!options?.silent) {
-        toast({
-          title: "Note saved",
-        });
-      }
-    } catch (error) {
-      console.error("Failed to save note:", error);
-      toast({ title: "Failed to save note" });
-    }
+    const query = conversationId ? `?conversation=${encodeURIComponent(conversationId)}` : "";
+    navigate(`/trip/${tripId}/notes/${note.id}${query}`);
   };
 
   const handleDeleteNote = async (id: string) => {
@@ -421,23 +361,6 @@ export function TripNotes({ tripId, conversationId }: TripNotesProps) {
         )}
       </div>
 
-      {/* Note Editor */}
-      {selectedNote && (
-        <NoteEditor
-          note={selectedNote}
-          open={editorOpen}
-          onClose={() => {
-            setEditorOpen(false);
-            setSelectedNote(null);
-            clearRequestedNote();
-          }}
-          onSave={handleSaveNote}
-          onDelete={handleDeleteNote}
-          tripId={tripId}
-          onNoteEdited={handleNoteEdited}
-        />
-      )}
-
       {/* Delete Confirmation Dialog */}
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent>
@@ -500,7 +423,7 @@ interface NoteCardProps {
 function NoteCard({ note, isPinned, isPending, onClick, onDelete, onTogglePin, formatDate, onLinkClick }: NoteCardProps) {
   // Get content preview from blocks
   const contentPreview = note.blocks
-    .map((b) => b.content)
+    .map((b) => b.content.replace(/<[^>]*>/g, ""))
     .join(" ")
     .substring(0, 100)
     .trim();
