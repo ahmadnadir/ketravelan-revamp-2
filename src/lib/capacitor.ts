@@ -1,18 +1,21 @@
 import { Capacitor } from "@capacitor/core";
 
 export async function configureIOSStatusBarForLightHeader() {
-  if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== "ios") {
+  if (!Capacitor.isNativePlatform()) {
     return;
   }
 
   try {
     const { StatusBar, Style } = await import("@capacitor/status-bar");
+    const isDark = document.documentElement.classList.contains("dark");
     await StatusBar.show();
-    await StatusBar.setOverlaysWebView({ overlay: true });
-    await StatusBar.setStyle({ style: Style.Dark });
-    await StatusBar.setBackgroundColor({ color: "#ffffff" });
+    if (Capacitor.getPlatform() === "ios") {
+      await StatusBar.setOverlaysWebView({ overlay: true });
+    }
+    await StatusBar.setStyle({ style: isDark ? Style.Light : Style.Dark });
+    await StatusBar.setBackgroundColor({ color: isDark ? "#1a1a1a" : "#ffffff" });
   } catch (error) {
-    console.warn("Failed to configure iOS status bar:", error);
+    console.warn("Failed to configure native status bar:", error);
   }
 }
 
@@ -32,10 +35,7 @@ export async function initializeCapacitor() {
     }
 
     // Keep Android status bar background aligned with app shell.
-    if (Capacitor.getPlatform() === "android") {
-      const { StatusBar } = await import("@capacitor/status-bar");
-      await StatusBar.setBackgroundColor({ color: "#1a1a2e" });
-    }
+    await configureIOSStatusBarForLightHeader();
 
     // Initialize Splash Screen - will auto-hide after configured duration
     const { SplashScreen } = await import("@capacitor/splash-screen");

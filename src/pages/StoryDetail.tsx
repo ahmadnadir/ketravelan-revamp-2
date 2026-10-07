@@ -726,7 +726,7 @@ export default function StoryDetail() {
         aria-hidden={scrollY <= 120}
       >
         <div
-          className="pointer-events-auto flex items-center gap-3 rounded-[22px] border border-white/50 bg-white/70 px-3 py-2 shadow-lg backdrop-blur transition-all duration-200"
+          className="pointer-events-auto flex items-center gap-3 rounded-[22px] border border-white/50 bg-white/70 px-3 py-2 shadow-lg backdrop-blur transition-all duration-200 dark:border-white/60 dark:bg-card/95"
           style={{
             marginTop: "calc(var(--header-total-height) + 0.75rem)",
             opacity: scrollY > 120 ? 1 : 0,
@@ -737,7 +737,7 @@ export default function StoryDetail() {
             type="button"
             onClick={handleBackNavigation}
             aria-label="Back to Community"
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-secondary hover:bg-secondary/80"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-secondary text-foreground hover:bg-secondary/80 dark:bg-background dark:hover:bg-muted"
           >
             <ArrowLeft className="h-5 w-5" />
           </button>
@@ -753,6 +753,7 @@ export default function StoryDetail() {
                   onClick={handleEdit}
                   title="Edit story"
                   aria-label="Edit story"
+                  className="dark:bg-background dark:hover:bg-muted"
                 >
                   <Pencil className="h-4 w-4" />
                 </Button>
@@ -762,7 +763,7 @@ export default function StoryDetail() {
                   onClick={() => setShowDeleteDialog(true)}
                   title="Delete story"
                   aria-label="Delete story"
-                  className="text-destructive hover:text-destructive"
+                  className="text-destructive hover:text-destructive dark:bg-background dark:text-red-400 dark:hover:bg-muted dark:hover:text-red-300"
                 >
                   <Trash2 className="h-4 w-4" />
                 </Button>
@@ -782,6 +783,7 @@ export default function StoryDetail() {
               onClick={handleShare}
               title="Share story"
               aria-label="Share story"
+              className="dark:bg-background dark:hover:bg-muted"
             >
               <Share2 className="h-4 w-4" />
             </Button>

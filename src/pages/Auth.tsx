@@ -327,14 +327,14 @@ export default function Auth() {
     <div className="app-shell bg-background">
       {/* Header  lives in the protected non-scrollable zone */}
       <div className="app-shell-top">
-        <header className="h-full bg-white/90 backdrop-blur-xl border-b border-black/[0.06] safe-x">
+        <header className="h-full bg-background/95 backdrop-blur-xl border-b border-border safe-x">
           <div className="h-[var(--safe-top)]" />
           <div className="container max-w-lg mx-auto flex h-[var(--header-height)] items-center px-5">
             <Button
               variant="ghost"
               size="icon"
               onClick={() => navigate(-1)}
-              className="mr-2 h-9 w-9 rounded-xl text-muted-foreground hover:bg-black/5"
+              className="mr-2 h-9 w-9 rounded-xl text-muted-foreground hover:bg-foreground/5"
             >
               <ArrowLeft className="h-[22px] w-[22px]" />
             </Button>
@@ -352,7 +352,13 @@ export default function Auth() {
             <img
               src="/ketravelan_logo.png"
               alt="Ketravelan"
-              className="h-16 w-auto"
+              className="h-16 w-auto dark:hidden"
+            />
+            <img
+              src="/ketravelan_logo_white.png"
+              alt=""
+              aria-hidden="true"
+              className="hidden h-16 w-auto dark:block"
             />
           </div>
           <h2 className="text-2xl font-bold mb-2">

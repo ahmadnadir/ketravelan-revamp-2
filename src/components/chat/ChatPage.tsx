@@ -239,7 +239,6 @@ export function ChatPage({
   const [reportTarget, setReportTarget] = useState<{ messageId: string; reportedUserId: string } | null>(null);
   const [reportReason, setReportReason] = useState<ReportReasonValue>('spam');
   const [reportDescription, setReportDescription] = useState('');
-  const [confirmReport, setConfirmReport] = useState(false);
   const [isSubmittingAction, setIsSubmittingAction] = useState(false);
   const [jumpHighlightMessageId, setJumpHighlightMessageId] = useState<string | null>(null);
   const [swipePreview, setSwipePreview] = useState<{ messageId: string; offset: number; dragging: boolean } | null>(null);
@@ -1161,7 +1160,6 @@ export function ChatPage({
         description: reportDescription,
       });
       toast.success('Thank you. This report has been submitted.');
-      setConfirmReport(false);
       setReportTarget(null);
       setReportReason('spam');
       setReportDescription('');
@@ -1831,7 +1829,8 @@ export function ChatPage({
                       swipePreview?.messageId === String(msg.id) && !swipePreview.dragging && "transition-transform duration-150 ease-out",
                       isOwn
                         ? "bg-black text-white border-black rounded-br-sm"
-                        : "bg-white text-foreground border-border rounded-bl-sm",
+                        : "bg-card text-card-foreground border-border rounded-bl-sm",
+                      "dark:border-white/20",
                       jumpHighlightMessageId === String(msg.id) && "ring-2 ring-gray-600 ring-offset-2 ring-offset-background"
                     )}
                     style={{
@@ -2113,32 +2112,15 @@ export function ChatPage({
               </Button>
               <Button
                 type="button"
-                onClick={() => setConfirmReport(true)}
+                onClick={() => void submitReportAction()}
                 disabled={isSubmittingAction}
               >
-                Continue
+                {isSubmittingAction ? 'Submitting...' : 'Submit Report'}
               </Button>
             </div>
           </div>
         </DialogContent>
       </Dialog>
-
-      <AlertDialog open={confirmReport} onOpenChange={setConfirmReport}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Are you sure you want to report this content?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This report will be submitted to moderators for review.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isSubmittingAction}>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void submitReportAction()} disabled={isSubmittingAction}>
-              Submit Report
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
 
       <AlertDialog open={Boolean(confirmAction)} onOpenChange={(open) => !open && setConfirmAction(null)}>
         <AlertDialogContent>

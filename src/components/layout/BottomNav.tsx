@@ -87,8 +87,8 @@ export function BottomNav({ inline = false }: BottomNavProps) {
     <>
       <nav
         className={cn(
-          "z-[80] bg-white/[0.97] backdrop-blur-xl safe-x lg:hidden",
-          "border-t border-black/[0.07]",
+          "z-[80] bg-background/95 backdrop-blur-xl safe-x lg:hidden",
+          "border-t border-border",
           inline ? "relative w-full" : "fixed bottom-0 left-0 right-0 w-full"
         )}
         style={{ boxShadow: '0 -0.5px 0 rgba(0,0,0,0.08)' }}
@@ -178,7 +178,7 @@ export function BottomNav({ inline = false }: BottomNavProps) {
         <div className="h-[var(--safe-bottom)]" />
       </nav>
       <Drawer open={showCreateModal} onOpenChange={setShowCreateModal}>
-        <DrawerContent data-enable-drag="true" className="rounded-t-[36px] border-t border-black/10">
+        <DrawerContent data-enable-drag="true" className="rounded-t-[36px] border-t border-border">
           <DrawerHeader className="text-center pb-2 pt-2">
             <DrawerTitle className="text-xl font-semibold tracking-tight">Create</DrawerTitle>
             <DrawerDescription className="text-sm">Start bold. Build the trip people will talk about all year.</DrawerDescription>
@@ -199,11 +199,11 @@ export function BottomNav({ inline = false }: BottomNavProps) {
               Continue Draft
             </Button>
             <div className="mt-1 flex items-center justify-center">
-              <div className="h-32 w-80 overflow-hidden rounded-2xl border border-black/10">
+              <div className="h-32 w-80 overflow-hidden rounded-2xl border border-black/10 bg-white">
                 <img
                   src={premiumTravelImage}
                   alt="Hero"
-                  className="h-full w-full object-cover"
+                  className="h-full w-full bg-white object-cover"
                   loading="lazy"
                 />
               </div>

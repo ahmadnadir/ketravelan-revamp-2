@@ -41,15 +41,15 @@ export function GuidesSection() {
             className="shrink-0 snap-start min-w-[85vw] sm:min-w-0 sm:w-full"
           >
             <div className="relative aspect-[3/2] rounded-xl overflow-hidden bg-muted">
-              {/* Background Image */}
-              <img
-                src={mode.image}
-                alt={mode.title}
-                className="absolute inset-0 w-full h-full object-contain p-4"
-              />
+              <div className="absolute inset-x-0 top-0 h-[76%] bg-white">
+                <img
+                  src={mode.image}
+                  alt={mode.title}
+                  className="h-full w-full object-contain p-4"
+                />
+              </div>
 
-              {/* Dark Gradient Overlay */}
-              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent" />
+              <div className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-black via-black/90 to-transparent" />
 
               {/* Content Overlay */}
               <div className="absolute bottom-0 left-0 right-0 p-4 sm:p-6 text-white">

@@ -196,8 +196,8 @@ export function StoryCard({ story, restoreScope }: StoryCardProps) {
           />
           {showLikeFx && (
             <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
-              <span className="absolute h-20 w-20 rounded-full border-2 border-destructive/55 animate-ping" />
-              <Heart className="h-14 w-14 text-destructive fill-destructive drop-shadow-md animate-pulse" />
+              <span className="absolute h-20 w-20 rounded-full border-2 border-red-500/55 animate-ping" />
+              <Heart className="h-14 w-14 text-red-500 fill-red-500 drop-shadow-md animate-pulse" />
             </div>
           )}
           <div className="absolute top-2 left-2 sm:top-3 sm:left-3 flex flex-wrap gap-1 max-w-[70%]">
@@ -229,7 +229,7 @@ export function StoryCard({ story, restoreScope }: StoryCardProps) {
               <Heart
                 className={cn(
                   "h-3.5 w-3.5 sm:h-4 sm:w-4 transition-all duration-200",
-                  story.isLiked ? "fill-destructive text-destructive" : "text-muted-foreground"
+                  story.isLiked ? "fill-red-500 text-red-500 dark:fill-red-500 dark:text-red-500" : "text-muted-foreground"
                 )}
               />
             </button>

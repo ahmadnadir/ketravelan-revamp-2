@@ -878,7 +878,7 @@ export default function CreateTrip() {
                       "px-3 py-2 text-sm rounded-full border transition-all flex items-center gap-2 touch-manipulation md:active:scale-95",
                       draft.travelStyles.includes(category.id)
                         ? "bg-foreground text-background border-foreground font-medium"
-                        : "bg-white border-border text-muted-foreground md:hover:bg-foreground md:hover:text-background"
+                        : "bg-white border-border text-muted-foreground md:hover:bg-foreground md:hover:text-background dark:bg-transparent dark:border-border/70 dark:text-muted-foreground dark:md:hover:bg-foreground dark:md:hover:text-background"
                     )}
                   >
                     <span>{category.icon}</span>

@@ -1310,7 +1310,7 @@ export interface CreateTripData {
   budget_breakdown?: Record<string, any>;
   itinerary_type?: string;
   itinerary?: any[];
-  status?: 'draft' | 'published';
+  status?: 'draft' | 'published' | 'deleted';
   type: 'community' | 'guided';
   currency?: string;
   price?: number;

@@ -135,7 +135,7 @@ export function RequirementsSection({
                   "px-3 py-1.5 text-sm rounded-full border transition-all touch-manipulation md:active:scale-95",
                   expectations.includes(exp.label)
                     ? "bg-foreground text-background border-foreground font-medium"
-                    : "bg-white border-border text-muted-foreground md:hover:bg-foreground md:hover:text-background"
+                    : "bg-white border-border text-muted-foreground md:hover:bg-foreground md:hover:text-background dark:bg-transparent dark:border-border/70 dark:text-muted-foreground dark:md:hover:bg-foreground dark:md:hover:text-background"
                 )}
               >
                 {exp.emoji} {exp.label}
@@ -171,7 +171,7 @@ export function RequirementsSection({
                     "px-3 py-1.5 text-sm rounded-full border transition-all touch-manipulation md:active:scale-95",
                     expectations.includes(exp.label)
                       ? "bg-foreground text-background border-foreground font-medium"
-                      : "bg-white border-border text-muted-foreground md:hover:bg-foreground md:hover:text-background"
+                      : "bg-white border-border text-muted-foreground md:hover:bg-foreground md:hover:text-background dark:bg-transparent dark:border-border/70 dark:text-muted-foreground dark:md:hover:bg-foreground dark:md:hover:text-background"
                   )}
                 >
                   {exp.emoji} {exp.label}

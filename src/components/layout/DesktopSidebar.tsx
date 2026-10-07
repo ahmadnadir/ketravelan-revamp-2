@@ -13,6 +13,7 @@ import {
   Wallet,
   MessageSquare,
 } from "lucide-react";
+import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { useUnreadChatCount } from "@/hooks/useConversations";
@@ -66,7 +67,7 @@ export function DesktopSidebar() {
   };
 
   return (
-    <aside className="hidden lg:flex fixed top-[var(--header-total-height)] left-0 w-60 h-[calc(100dvh-var(--header-total-height))] flex-col bg-background border-r border-black/[0.07] z-40 overflow-y-auto">
+    <aside className="hidden lg:flex fixed top-[var(--header-total-height)] left-0 w-60 h-[calc(100dvh-var(--header-total-height))] flex-col bg-background border-r border-border z-40 overflow-y-auto">
       {/* Create Trip button */}
       <div className="px-3 pt-4 pb-2">
         <button
@@ -115,7 +116,8 @@ export function DesktopSidebar() {
       </nav>
 
       {/* Bottom section */}
-      <div className="px-3 pb-4 border-t border-black/[0.07] pt-3 space-y-0.5">
+      <div className="px-3 pb-4 border-t border-border pt-3 space-y-0.5">
+        <ThemeToggle />
         <Link
           to="/settings"
           className={cn(
@@ -156,7 +158,7 @@ export function DesktopSidebar() {
 
         <button
           onClick={handleSignOut}
-          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-destructive/70 hover:bg-destructive/10 hover:text-destructive transition-colors"
+          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-destructive/70 hover:bg-destructive/10 hover:text-destructive dark:text-red-400 dark:hover:bg-red-500/10 dark:hover:text-red-300 transition-colors"
         >
           <LogOut className="h-5 w-5 flex-none" />
           <span>Sign Out</span>

@@ -57,11 +57,12 @@ export function AppLayout({
 
         {/* Logo bar – top-left corner above the sidebar, visible on desktop only */}
         {isAuthenticated && (
-          <div className="hidden lg:flex fixed top-0 left-0 w-60 h-[var(--header-total-height)] flex-col bg-background border-r border-b border-black/[0.07] z-50" style={{ boxShadow: '0 0.5px 0 rgba(0,0,0,0.08)' }}>
+          <div className="hidden lg:flex fixed top-0 left-0 w-60 h-[var(--header-total-height)] flex-col bg-background border-r border-b border-border z-50" style={{ boxShadow: '0 0.5px 0 rgba(0,0,0,0.08)' }}>
             <div className="h-[var(--safe-top)]" />
             <div className="flex h-[var(--header-height)] items-center px-4 lg:px-5">
               <Link to="/explore" className="flex items-center flex-shrink-0 -ml-0.5">
-                <img src="/ketravelan_logo.png" alt="Ketravelan" className="h-8 w-auto" />
+                <img src="/ketravelan_logo.png" alt="Ketravelan" className="h-8 w-auto dark:hidden" />
+                <img src="/ketravelan_logo_white.png" alt="Ketravelan" aria-hidden="true" className="hidden h-8 w-auto dark:block" />
               </Link>
             </div>
           </div>

@@ -10,7 +10,7 @@ const SafetyNotice = () => {
   ];
 
   return (
-    <Card className="p-3 sm:p-4 border-border/50 bg-white">
+    <Card className="p-3 sm:p-4 border-border/70 bg-card text-card-foreground">
       <div className="flex items-start gap-3">
         <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
           <Shield className="h-4 w-4 text-primary" />
