@@ -42,7 +42,7 @@ export function FloatingNavigation({
     >
       <div
         className={cn(
-          "mx-auto border border-white/50 bg-white/70 px-3 py-2",
+          "mx-auto border border-border/80 bg-background/90 px-3 py-2 text-foreground shadow-md dark:border-white/60 dark:bg-card/95",
           fullWidth
             ? "max-w-none rounded-none border-x-0"
             : "max-w-[calc(100%-0.25rem)] rounded-[22px]",
@@ -65,7 +65,7 @@ export function FloatingNavigation({
               onClick={onBack}
               data-swipe-back-ignore="true"
               aria-label={backLabel}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/85"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-card text-foreground transition-colors hover:bg-muted dark:bg-background dark:hover:bg-muted"
             >
               <ChevronLeft className="h-5 w-5 text-foreground" />
             </button>

@@ -27,25 +27,54 @@ export function RouteBuilder({ stops, onChange, onStopsDetailsChange, primaryDes
   const [newStop, setNewStop] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const draggedIndexRef = useRef<number | null>(null);
+  const [dragPosition, setDragPosition] = useState<{ x: number; y: number; width: number } | null>(null);
+  const [dropIndex, setDropIndex] = useState<number | null>(null);
+  const dropIndexRef = useRef<number | null>(null);
   const [isSearching, setIsSearching] = useState(false);
   const [searchResults, setSearchResults] = useState<LocationResult[]>([]);
   const [stopsDetails, setStopsDetails] = useState<Array<{ name: string; place?: string; state?: string; country?: string }>>([]);
   const activeSearchSeqRef = useRef(0);
 
-  const handleDragStart = (index: number) => {
+  const handleStopPointerDown = (event: React.PointerEvent<HTMLButtonElement>, index: number) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const rowWidth = event.currentTarget.closest<HTMLElement>("[data-stop-index]")?.getBoundingClientRect().width ?? 280;
+    draggedIndexRef.current = index;
+    dropIndexRef.current = index;
     setDraggedIndex(index);
+    setDropIndex(index);
+    setDragPosition({ x: event.clientX, y: event.clientY, width: rowWidth });
   };
 
-  const handleDragOver = (e: React.DragEvent, index: number) => {
-    e.preventDefault();
-    if (draggedIndex !== null && draggedIndex !== index) {
-      moveStop(draggedIndex, index);
-      setDraggedIndex(index);
+  const handleStopPointerMove = (event: React.PointerEvent<HTMLButtonElement>) => {
+    if (draggedIndexRef.current === null) return;
+    setDragPosition((current) => current ? { ...current, x: event.clientX, y: event.clientY } : current);
+
+    const target = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>("[data-stop-index]");
+    if (!target) return;
+
+    const targetIndex = Number(target.dataset.stopIndex);
+    if (!Number.isInteger(targetIndex) || targetIndex < 0 || targetIndex >= stops.length) return;
+    const bounds = target.getBoundingClientRect();
+    const nextDropIndex = targetIndex + (event.clientY >= bounds.top + bounds.height / 2 ? 1 : 0);
+    dropIndexRef.current = nextDropIndex;
+    setDropIndex(nextDropIndex);
+  };
+
+  const handleStopPointerEnd = (shouldCommit: boolean) => {
+    const from = draggedIndexRef.current;
+    const insertionIndex = dropIndexRef.current;
+    if (shouldCommit && from !== null && insertionIndex !== null) {
+      const to = insertionIndex > from ? insertionIndex - 1 : insertionIndex;
+      if (to !== from) moveStop(from, to);
     }
-  };
-
-  const handleDragEnd = () => {
+    draggedIndexRef.current = null;
+    dropIndexRef.current = null;
     setDraggedIndex(null);
+    setDropIndex(null);
+    setDragPosition(null);
   };
 
   const addStop = (stop: string, locationData?: LocationResult) => {
@@ -183,20 +212,40 @@ export function RouteBuilder({ stops, onChange, onStopsDetailsChange, primaryDes
             return (
               <div
                 key={index}
-                draggable
-                onDragStart={() => handleDragStart(index)}
-                onDragOver={(e) => handleDragOver(e, index)}
-                onDragEnd={handleDragEnd}
+                data-stop-index={index}
                 className={cn(
-                  "flex items-center gap-2 p-2 bg-secondary/50 rounded-xl group cursor-grab active:cursor-grabbing",
-                  draggedIndex === index && "opacity-50"
+                  "relative flex items-center gap-2 p-2 bg-secondary/50 rounded-xl group",
+                  draggedIndex === index && "opacity-30 border border-dashed border-primary/60"
                 )}
               >
-                <div className="p-1 touch-none opacity-50 group-hover:opacity-100">
+                {draggedIndex !== null && draggedIndex !== index && dropIndex === index && (
+                  <span className="absolute inset-x-2 top-0 z-10 h-0.5 rounded-full bg-primary" />
+                )}
+                {draggedIndex !== null && draggedIndex !== index && dropIndex === index + 1 && (
+                  <span className="absolute inset-x-2 bottom-0 z-10 h-0.5 rounded-full bg-primary" />
+                )}
+                <button
+                  type="button"
+                  aria-label={`Reorder stop ${stop}`}
+                  onPointerDown={(event) => handleStopPointerDown(event, index)}
+                  onPointerMove={handleStopPointerMove}
+                  onPointerUp={() => handleStopPointerEnd(true)}
+                  onPointerCancel={() => handleStopPointerEnd(false)}
+                  onKeyDown={(event) => {
+                    if (event.key === "ArrowUp") {
+                      event.preventDefault();
+                      moveStop(index, index - 1);
+                    } else if (event.key === "ArrowDown") {
+                      event.preventDefault();
+                      moveStop(index, index + 1);
+                    }
+                  }}
+                  className="p-1 touch-none cursor-grab active:cursor-grabbing opacity-50 group-hover:opacity-100 focus-visible:opacity-100"
+                >
                   <GripVertical className="h-4 w-4 text-muted-foreground" />
-                </div>
+                </button>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-black">{stop}</p>
+                  <p className="text-sm font-medium text-foreground">{stop}</p>
                   {detail?.state && (
                     <p className="text-xs text-muted-foreground">{detail.state}</p>
                   )}
@@ -231,6 +280,26 @@ export function RouteBuilder({ stops, onChange, onStopsDetailsChange, primaryDes
           })}
         </div>
       )}
+
+        {draggedIndex !== null && dragPosition && stops[draggedIndex] && (
+          <div
+            aria-hidden="true"
+            className="pointer-events-none fixed z-[120] flex items-center gap-2 rounded-xl border border-primary/40 bg-card px-2 py-2 shadow-xl ring-2 ring-primary/20"
+            style={{
+              left: Math.max(8, Math.min(dragPosition.x + 14, window.innerWidth - dragPosition.width - 8)),
+              top: Math.max(8, Math.min(dragPosition.y + 14, window.innerHeight - 56)),
+              width: dragPosition.width,
+            }}
+          >
+            <GripVertical className="h-4 w-4 shrink-0 text-primary" />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium text-foreground">{stops[draggedIndex]}</p>
+              {stopsDetails[draggedIndex]?.state && (
+                <p className="truncate text-xs text-muted-foreground">{stopsDetails[draggedIndex].state}</p>
+              )}
+            </div>
+          </div>
+        )}
 
       {/* Add new stop */}
       {isAdding ? (

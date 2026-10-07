@@ -19,10 +19,27 @@
   animation: restore-trip-card 900ms ease-out;
 }
 
+.mdec-logo-outline {
+  filter:
+    drop-shadow(1px 0 0 #fff)
+    drop-shadow(-1px 0 0 #fff)
+    drop-shadow(0 1px 0 #fff)
+    drop-shadow(0 -1px 0 #fff)
+    drop-shadow(1px 1px 0 #fff)
+    drop-shadow(-1px 1px 0 #fff)
+    drop-shadow(1px -1px 0 #fff)
+    drop-shadow(-1px -1px 0 #fff);
+}
+
+html.dark img[src$="/default-trip-photo.jpeg"] {
+  content: url("/default-trip-photo-night.jpeg");
+}
+
 /* Ketravelan Design System - iOS-like, clean, airy */
 
 @layer base {
   :root {
+    color-scheme: light;
     /* Ketravelan Brand Colors */
     --background: 30 20% 97%; /* Off-white #F8F8F8 */
     --foreground: 220 20% 15%;
@@ -113,6 +130,7 @@
   }
 
   .dark {
+    color-scheme: dark;
     --background: 220 20% 10%;
     --foreground: 220 14% 95%;
 
@@ -167,7 +185,7 @@
   body,
   #root {
     height: 100%;
-    background-color: #ffffff;
+    background-color: hsl(var(--background));
   }
 
   * {
@@ -386,7 +404,7 @@
     padding-top: 0;
     padding-bottom: 0;
     min-height: 100vh;
-    background-color: #ffffff;
+    background-color: hsl(var(--background));
   }
 
   .native-animated-splash {

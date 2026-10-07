@@ -561,7 +561,7 @@ export function TripCard({
               <Heart 
                 className={cn(
                   "h-3.5 w-3.5 sm:h-4 sm:w-4 transition-all duration-200",
-                  isFavourited ? "fill-destructive text-destructive scale-110" : "fill-transparent"
+                  isFavourited ? "fill-red-500 text-red-500 dark:fill-red-500 dark:text-red-500 scale-110" : "fill-transparent"
                 )} 
               />
             </Button>

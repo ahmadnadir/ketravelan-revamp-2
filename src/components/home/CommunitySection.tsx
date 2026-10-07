@@ -106,7 +106,7 @@ export function CommunitySection() {
                 className={cn(
                   "flex items-center gap-2 px-6 py-2 rounded-full text-sm font-medium transition-all",
                   activeTab === "stories"
-                    ? "bg-white text-foreground shadow-sm"
+                    ? "bg-white text-foreground shadow-sm dark:text-gray-900"
                     : "text-muted-foreground hover:text-foreground"
                 )}
               >
@@ -118,7 +118,7 @@ export function CommunitySection() {
                 className={cn(
                   "flex items-center gap-2 px-6 py-2 rounded-full text-sm font-medium transition-all",
                   activeTab === "discussions"
-                    ? "bg-white text-foreground shadow-sm"
+                    ? "bg-white text-foreground shadow-sm dark:text-gray-900"
                     : "text-muted-foreground hover:text-foreground"
                 )}
               >

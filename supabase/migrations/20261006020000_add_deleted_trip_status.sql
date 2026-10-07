@@ -1,0 +1,1 @@
+alter type public.trip_status add value if not exists 'deleted';

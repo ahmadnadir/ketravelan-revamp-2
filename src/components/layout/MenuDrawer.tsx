@@ -1,5 +1,6 @@
 import { Home, Map, FileText, Heart, MessageSquare, Settings, LogOut, Wallet, BookOpen, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import {
   Sheet,
   SheetContent,
@@ -122,10 +123,12 @@ export function MenuDrawer({ open, onOpenChange }: MenuDrawerProps) {
             {/* Separator */}
             <div className="h-px bg-border my-3" />
 
+            <ThemeToggle />
+
             {/* Log Out (destructive) */}
             <button
               onClick={handleLogout}
-              className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-destructive/10 transition-colors text-destructive text-left"
+              className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-destructive/10 transition-colors text-destructive text-left dark:text-red-400 dark:hover:bg-red-500/10 dark:hover:text-red-300"
             >
               <LogOut className="h-5 w-5" />
               <span className="text-sm font-medium">Log Out</span>

@@ -2,6 +2,7 @@ import { createRoot } from "react-dom/client";
 import { HelmetProvider } from "react-helmet-async";
 import { Capacitor } from "@capacitor/core";
 import App from "./App.tsx";
+import { ThemeProvider } from "./components/theme/ThemeProvider";
 import "./index.css";
 
 const isBrowser = typeof window !== "undefined";
@@ -99,9 +100,11 @@ if (Capacitor.isNativePlatform()) {
 }
 
 createRoot(document.getElementById("root")!).render(
-  <HelmetProvider>
-    <App />
-  </HelmetProvider>
+  <ThemeProvider>
+    <HelmetProvider>
+      <App />
+    </HelmetProvider>
+  </ThemeProvider>
 );
 
 // Initialize Capacitor plugins after React mounts (non-blocking)

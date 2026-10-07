@@ -54,7 +54,7 @@ import { supabase } from "@/lib/supabase";
 import SafetyNotice from "@/components/trip-details/SafetyNotice";
 import { tripCategories } from "@/data/categories";
 import { cn } from "@/lib/utils";
-import { createJoinRequest, fetchJoinRequests, createTripInvite, cancelTrip, deleteDraftTrip, resolveMemberRoleLabel } from "@/lib/trips";
+import { createJoinRequest, fetchJoinRequests, createTripInvite, cancelTrip, deleteDraftTrip, updateTrip, resolveMemberRoleLabel } from "@/lib/trips";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTripDetails, useJoinRequestStatus } from "@/hooks/useTrips";
 import { useQueryClient } from "@tanstack/react-query";
@@ -191,8 +191,10 @@ export default function TripDetails() {
   const [inviteEmail, setInviteEmail] = useState("");
   const [isInviting, setIsInviting] = useState(false);
   const [isCancellingTrip, setIsCancellingTrip] = useState(false);
+  const [isDeletingTrip, setIsDeletingTrip] = useState(false);
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const [showDeleteTripConfirm, setShowDeleteTripConfirm] = useState(false);
   const [heroHeight, setHeroHeight] = useState(0);
   const mobileHeroRef = useRef<HTMLDivElement | null>(null);
   const { scrollY } = useScrollProgress({ containerSelector: ".app-shell-content" });
@@ -957,7 +959,7 @@ export default function TripDetails() {
     : (returnTo === "my-trips" ? "Back to My Trips" : "Back to Explore");
   const mobileActionBtnBase = "h-9 w-9 rounded-full flex items-center justify-center transition-all duration-[250ms] [transition-timing-function:cubic-bezier(0.2,0.8,0.2,1)]";
   const mobileActionBtnHero = "border border-white/40 bg-black/30 text-white shadow-lg backdrop-blur-md";
-  const mobileActionBtnBar = "bg-white/85 text-foreground";
+  const mobileActionBtnBar = "bg-muted text-foreground dark:bg-background";
 
   const renderMobileHeaderActions = (variant: "hero" | "bar") => {
     if (isDraftTrip) return null;
@@ -975,7 +977,7 @@ export default function TripDetails() {
             className={cn(
               "h-4.5 w-4.5 transition-all duration-300",
               isFavourited
-                ? "fill-destructive text-destructive scale-110"
+                ? "fill-red-500 text-red-500 dark:fill-red-500 dark:text-red-500 scale-110"
                 : (variant === "hero" ? "fill-transparent text-white" : "fill-transparent text-foreground")
             )}
           />
@@ -1024,10 +1026,17 @@ export default function TripDetails() {
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 onSelect={() => setShowCancelConfirm(true)}
-                className="text-destructive focus:text-destructive"
-                disabled={isCancellingTrip}
+                className="text-red-600 focus:text-red-600 dark:text-red-400 dark:focus:text-red-300"
+                disabled={isCancellingTrip || isDeletingTrip}
               >
                 {isCancellingTrip ? "Cancelling..." : "Cancel trip"}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() => setShowDeleteTripConfirm(true)}
+                className="text-red-600 focus:text-red-600 dark:text-red-400 dark:focus:text-red-300"
+                disabled={isCancellingTrip || isDeletingTrip}
+              >
+                Delete trip
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -1304,6 +1313,35 @@ export default function TripDetails() {
     } finally {
       setIsCancellingTrip(false);
       setShowCancelConfirm(false);
+    }
+  };
+
+  const handleDeleteTrip = async () => {
+    if (!dbTrip?.id) return;
+    try {
+      setIsDeletingTrip(true);
+      await updateTrip(dbTrip.id, { status: "deleted" });
+      queryClient.setQueriesData<any[]>({ queryKey: ["userTrips"] }, (cachedTrips) =>
+        cachedTrips?.filter((trip) => trip.id !== dbTrip.id)
+      );
+      await queryClient.invalidateQueries({ queryKey: ["userTrips"] });
+      const { error: emailError } = await supabase.functions.invoke("send-trip-deleted-email", {
+        body: { tripId: dbTrip.id },
+      });
+      if (emailError) {
+        console.warn("Trip was deleted, but its confirmation email could not be sent", emailError);
+      }
+      toast({ title: "Trip deleted", description: "The trip was removed from listings." });
+      navigate("/my-trips");
+    } catch (error) {
+      toast({
+        title: "Delete failed",
+        description: error instanceof Error ? error.message : "Could not delete trip.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsDeletingTrip(false);
+      setShowDeleteTripConfirm(false);
     }
   };
 
@@ -1694,6 +1732,37 @@ export default function TripDetails() {
         </Dialog>
       )}
 
+      {isDbTrip && isOrganizer && (
+        <Dialog open={showDeleteTripConfirm} onOpenChange={setShowDeleteTripConfirm}>
+          <DialogContent className="sm:max-w-md w-[calc(100%-2rem)] sm:w-full rounded-2xl">
+            <DialogHeader>
+              <DialogTitle>Delete this trip?</DialogTitle>
+              <DialogDescription>
+                This will mark the trip as deleted and remove it from public listings. It won&apos;t send the cancellation notification.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex gap-2 pt-2">
+              <Button
+                variant="outline"
+                onClick={() => setShowDeleteTripConfirm(false)}
+                disabled={isDeletingTrip}
+                className="flex-1"
+              >
+                Keep trip
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={handleDeleteTrip}
+                disabled={isDeletingTrip}
+                className="flex-1"
+              >
+                {isDeletingTrip ? "Deleting..." : "Delete trip"}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+
       <AppLayout wideLayout>
         <FloatingNavigation
           title={tripData.title}
@@ -1776,7 +1845,7 @@ export default function TripDetails() {
                       <Heart
                         className={`h-4 w-4 sm:h-5 sm:w-5 transition-all duration-300 ${
                           isFavourited
-                            ? 'fill-destructive text-destructive scale-110'
+                            ? 'fill-red-500 text-red-500 dark:fill-red-500 dark:text-red-500 scale-110'
                             : 'fill-transparent text-foreground'
                         }`}
                       />
@@ -1816,10 +1885,17 @@ export default function TripDetails() {
                           <DropdownMenuSeparator />
                           <DropdownMenuItem
                             onSelect={() => setShowCancelConfirm(true)}
-                            className="text-destructive focus:text-destructive"
-                            disabled={isCancellingTrip}
+                            className="text-red-600 focus:text-red-600 dark:text-red-400 dark:focus:text-red-300"
+                            disabled={isCancellingTrip || isDeletingTrip}
                           >
                             {isCancellingTrip ? "Cancelling..." : "Cancel trip"}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onSelect={() => setShowDeleteTripConfirm(true)}
+                            className="text-red-600 focus:text-red-600 dark:text-red-400 dark:focus:text-red-300"
+                            disabled={isCancellingTrip || isDeletingTrip}
+                          >
+                            Delete trip
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
@@ -1916,7 +1992,7 @@ export default function TripDetails() {
                 return (
                   <span
                     key={tag}
-                    className="px-3 py-2 text-sm rounded-full border bg-white border-border text-muted-foreground flex items-center gap-2"
+                    className="inline-flex items-center gap-2 whitespace-nowrap rounded-full border border-border/70 bg-transparent px-3 py-2 text-sm text-muted-foreground"
                   >
                     {icon && <span>{icon}</span>}
                     {getExpectationLabel(tag)}
@@ -2293,13 +2369,13 @@ export default function TripDetails() {
         >
           <div
             className={cn(
-              "flex items-center justify-between gap-3",
+              "flex items-center justify-between gap-3 dark:border-white/60 dark:bg-card/95",
               showDesktopStickyHeader
                 ? "rounded-xl border border-border/50 bg-background/95 px-4 py-2.5 shadow-sm backdrop-blur"
                 : "rounded-2xl border border-white/45 bg-white/70 px-3.5 py-2.5 shadow-lg backdrop-blur-xl"
             )}
           >
-            <div className="flex min-w-0 items-center gap-2.5">
+            <div className="flex min-w-0 max-w-[40%] flex-1 items-center gap-2.5">
               <button
                 type="button"
                 onClick={handleBackNavigation}
@@ -2307,7 +2383,8 @@ export default function TripDetails() {
                 aria-label={backLabel}
                 className={cn(
                   "flex h-9 w-9 items-center justify-center rounded-full transition-colors",
-                  showDesktopStickyHeader ? "hover:bg-secondary" : "bg-white/85 hover:bg-white"
+                  showDesktopStickyHeader ? "hover:bg-secondary" : "bg-white/85 hover:bg-white",
+                  "dark:bg-background dark:hover:bg-muted"
                 )}
               >
                 <ChevronLeft className="h-5 w-5 text-foreground" />
@@ -2316,29 +2393,33 @@ export default function TripDetails() {
             </div>
 
             {!isDraftTrip && (
-              <div className="flex shrink-0 items-center gap-1.5">
-                <button
-                  onClick={handleFavourite}
+              <button
+                onClick={handleFavourite}
+                className={cn(
+                  "absolute left-1/2 top-1/2 flex h-9 w-9 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full transition-all duration-300",
+                  showDesktopStickyHeader ? "hover:bg-secondary" : "bg-white/85 hover:bg-white",
+                  "dark:bg-background dark:hover:bg-muted",
+                  isAnimating ? "scale-125" : ""
+                )}
+                aria-label="Toggle favourite"
+              >
+                <Heart
                   className={cn(
-                    "h-9 w-9 rounded-full flex items-center justify-center transition-all duration-300",
-                    showDesktopStickyHeader ? "hover:bg-secondary" : "bg-white/85 hover:bg-white",
-                    isAnimating ? "scale-125" : ""
+                    "h-4.5 w-4.5 transition-all duration-300",
+                    isFavourited ? "fill-red-500 text-red-500 dark:fill-red-500 dark:text-red-500 scale-110" : "fill-transparent text-foreground"
                   )}
-                  aria-label="Toggle favourite"
-                >
-                  <Heart
-                    className={cn(
-                      "h-4.5 w-4.5 transition-all duration-300",
-                      isFavourited ? "fill-destructive text-destructive scale-110" : "fill-transparent text-foreground"
-                    )}
-                  />
-                </button>
+                />
+              </button>
+            )}
 
+            {!isDraftTrip && (
+              <div className="flex shrink-0 items-center gap-1.5">
                 <button
                   onClick={handleShare}
                   className={cn(
                     "h-9 w-9 rounded-full flex items-center justify-center transition-colors",
-                    showDesktopStickyHeader ? "hover:bg-secondary" : "bg-white/85 hover:bg-white"
+                    showDesktopStickyHeader ? "hover:bg-secondary" : "bg-white/85 hover:bg-white",
+                    "dark:bg-background dark:hover:bg-muted"
                   )}
                   aria-label="Share trip"
                 >
@@ -2357,7 +2438,8 @@ export default function TripDetails() {
                         type="button"
                         className={cn(
                           "h-9 w-9 rounded-full flex items-center justify-center transition-colors text-foreground",
-                          showDesktopStickyHeader ? "hover:bg-secondary" : "bg-white/85 hover:bg-white"
+                          showDesktopStickyHeader ? "hover:bg-secondary" : "bg-white/85 hover:bg-white",
+                          "dark:bg-background dark:hover:bg-muted"
                         )}
                         aria-label="Trip actions"
                       >
@@ -2373,7 +2455,8 @@ export default function TripDetails() {
                       <button
                         className={cn(
                           "h-9 w-9 rounded-full flex items-center justify-center transition-colors",
-                          showDesktopStickyHeader ? "hover:bg-secondary" : "bg-white/85 hover:bg-white"
+                          showDesktopStickyHeader ? "hover:bg-secondary" : "bg-white/85 hover:bg-white",
+                          "dark:bg-background dark:hover:bg-muted"
                         )}
                         aria-label="Trip actions"
                       >
@@ -2387,10 +2470,17 @@ export default function TripDetails() {
                       <DropdownMenuSeparator />
                       <DropdownMenuItem
                         onSelect={() => setShowCancelConfirm(true)}
-                        className="text-destructive focus:text-destructive"
-                        disabled={isCancellingTrip}
+                        className="text-red-600 focus:text-red-600 dark:text-red-400 dark:focus:text-red-300"
+                        disabled={isCancellingTrip || isDeletingTrip}
                       >
                         {isCancellingTrip ? "Cancelling..." : "Cancel trip"}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onSelect={() => setShowDeleteTripConfirm(true)}
+                        className="text-red-600 focus:text-red-600 dark:text-red-400 dark:focus:text-red-300"
+                        disabled={isCancellingTrip || isDeletingTrip}
+                      >
+                        Delete trip
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>

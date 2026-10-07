@@ -17,7 +17,7 @@ export function FooterSection() {
           {/* Powered by MDEC */}
           <div className="flex items-center gap-2 pt-2">
             <span className="text-xs text-muted-foreground">Powered by</span>
-            <img src="/mdec-logo.png" alt="MDEC" className="h-5 w-auto object-contain" />
+            <img src="/mdec-logo.png" alt="MDEC" className="mdec-logo-outline h-5 w-auto object-contain" />
           </div>
         </div>
 

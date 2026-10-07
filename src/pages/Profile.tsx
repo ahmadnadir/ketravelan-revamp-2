@@ -818,7 +818,7 @@ export default function Profile() {
               <Button
                 variant="outline"
                 onClick={handleLogout}
-                className="w-full rounded-xl text-destructive hover:text-destructive text-sm sm:text-base border-destructive hover:border-destructive"
+                className="w-full rounded-xl text-destructive hover:text-destructive text-sm sm:text-base border-destructive hover:border-destructive dark:text-red-400 dark:hover:text-red-300 dark:border-red-400"
               >
                 Log Out
               </Button>
@@ -1070,7 +1070,13 @@ export default function Profile() {
                 {travelStyles.map((style) => {
                   const meta = resolveTravelStyle(style);
                   return (
-                    <PillChip key={style} label={meta.label} icon={meta.emoji} size="sm" />
+                    <PillChip
+                      key={style}
+                      label={meta.label}
+                      icon={meta.emoji}
+                      size="sm"
+                      className="dark:border-border/70 dark:bg-transparent dark:text-muted-foreground"
+                    />
                   );
                 })}
               </div>
@@ -1290,7 +1296,7 @@ export default function Profile() {
                 <Button
                   variant="outline"
                   onClick={handleLogout}
-                  className="w-full rounded-xl text-destructive hover:text-destructive text-sm sm:text-base border-destructive hover:border-destructive"
+                  className="w-full rounded-xl text-destructive hover:text-destructive text-sm sm:text-base border-destructive hover:border-destructive dark:text-red-400 dark:hover:text-red-300 dark:border-red-400"
                 >
                   Log Out
                 </Button>

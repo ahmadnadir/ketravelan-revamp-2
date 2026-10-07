@@ -30,8 +30,8 @@ function isVisibleConversation(participant: any) {
   const conv = participant?.conversation;
   if (!conv || conv.is_deleted) return false;
 
-  // Hide trip-group chats when the linked trip has been permanently deleted.
-  if (conv.conversation_type === 'trip_group' && !conv.trip) {
+  // Hide trip-group chats when the linked trip is missing or soft-deleted.
+  if (conv.conversation_type === 'trip_group' && (!conv.trip || conv.trip.status === 'deleted')) {
     return false;
   }
 

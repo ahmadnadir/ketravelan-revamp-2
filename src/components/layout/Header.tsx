@@ -18,7 +18,7 @@ export function Header({ onNotificationsClick, onMenuClick }: HeaderProps) {
   });
 
   return (
-    <header className="h-full bg-white/[0.97] backdrop-blur-xl border-b border-black/[0.07] safe-x" style={{ boxShadow: '0 0.5px 0 rgba(0,0,0,0.08)' }}>
+    <header className="h-full bg-background/95 backdrop-blur-xl border-b border-border safe-x" style={{ boxShadow: '0 0.5px 0 rgba(0,0,0,0.08)' }}>
       <div className="h-[var(--safe-top)]" />
       <div className="mx-auto max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-none flex h-[var(--header-height)] items-center justify-between px-4 lg:px-8">
         {/* Logo */}
@@ -26,7 +26,13 @@ export function Header({ onNotificationsClick, onMenuClick }: HeaderProps) {
           <img
             src="/ketravelan_logo.png"
             alt="Ketravelan"
-            className="h-8 w-auto"
+            className="h-8 w-auto dark:hidden"
+          />
+          <img
+            src="/ketravelan_logo_white.png"
+            alt="Ketravelan"
+            aria-hidden="true"
+            className="hidden h-8 w-auto dark:block"
           />
         </Link>
 
@@ -36,14 +42,14 @@ export function Header({ onNotificationsClick, onMenuClick }: HeaderProps) {
             <>
               <button
                 type="button"
-                className="relative flex items-center justify-center w-11 h-11 rounded-2xl text-foreground/70 hover:text-foreground active:bg-black/[0.06] transition-colors"
+                className="relative flex items-center justify-center w-11 h-11 rounded-2xl text-foreground/70 hover:text-foreground active:bg-foreground/5 transition-colors"
                 onClick={onNotificationsClick}
                 aria-label="Notifications"
               >
                 <Bell className="w-[22px] h-[22px]" strokeWidth={1.8} />
                 {unreadCount > 0 && (
                   <span className={cn(
-                    "absolute top-2 right-2 flex items-center justify-center rounded-full bg-destructive text-white font-bold ring-[1.5px] ring-white",
+                    "absolute top-2 right-2 flex items-center justify-center rounded-full bg-destructive text-white font-bold ring-[1.5px] ring-background",
                     unreadCount > 99 ? "text-[7px] min-w-[15px] h-[15px] px-0.5" : "text-[8px] min-w-[14px] h-[14px]"
                   )}>
                     {unreadCount > 99 ? '99+' : unreadCount}
@@ -52,7 +58,7 @@ export function Header({ onNotificationsClick, onMenuClick }: HeaderProps) {
               </button>
               <button
                 type="button"
-                className="lg:hidden flex items-center justify-center w-11 h-11 rounded-2xl text-foreground/70 hover:text-foreground active:bg-black/[0.06] transition-colors"
+                className="lg:hidden flex items-center justify-center w-11 h-11 rounded-2xl text-foreground/70 hover:text-foreground active:bg-foreground/5 transition-colors"
                 onClick={onMenuClick}
                 aria-label="Menu"
               >

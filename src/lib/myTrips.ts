@@ -47,5 +47,5 @@ export async function fetchUserTrips(userId: string) {
     ),
   ];
 
-  return allTrips;
+  return allTrips.filter((trip: any) => trip.status !== 'deleted');
 }

@@ -71,14 +71,14 @@ const SettingItem = ({ icon, label, description, onClick, trailing, destructive 
   <button
     onClick={onClick}
     className={`w-full flex items-center gap-3 p-3 hover:bg-muted/50 transition-colors text-left ${
-      destructive ? "text-destructive" : ""
+      destructive ? "text-destructive dark:text-red-400 hover:bg-destructive/10 dark:hover:bg-red-500/10" : ""
     }`}
   >
-    <div className={`${destructive ? "text-destructive" : "text-muted-foreground"}`}>
+    <div className={`${destructive ? "text-destructive dark:text-red-400" : "text-muted-foreground"}`}>
       {icon}
     </div>
     <div className="flex-1 min-w-0">
-      <p className={`text-sm font-medium ${destructive ? "text-destructive" : "text-foreground"}`}>
+      <p className={`text-sm font-medium ${destructive ? "text-destructive dark:text-red-400" : "text-foreground"}`}>
         {label}
       </p>
       {description && (

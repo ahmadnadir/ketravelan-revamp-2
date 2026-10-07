@@ -23,19 +23,19 @@ export default function Feedback() {
 
   return (
     <AppLayout focusedFlow hideBottomNav>
-      <div className="relative min-h-dvh bg-[radial-gradient(circle_at_top,rgba(17,24,39,0.04),transparent_38%),linear-gradient(180deg,rgba(255,255,255,0.96),rgba(248,250,252,0.98))] px-4 pb-[calc(env(safe-area-inset-bottom)+2rem)] pt-[calc(env(safe-area-inset-top)+1rem)] sm:px-5 lg:px-8 lg:py-8">
+      <div className="relative min-h-dvh bg-[radial-gradient(circle_at_top,rgba(17,24,39,0.04),transparent_38%),linear-gradient(180deg,rgba(255,255,255,0.96),rgba(248,250,252,0.98))] px-4 pb-[calc(env(safe-area-inset-bottom)+2rem)] pt-[calc(env(safe-area-inset-top)+1rem)] sm:px-5 lg:px-8 lg:py-8 dark:bg-none dark:bg-background">
         <button
           type="button"
           onClick={() => navigate(-1)}
-          className="absolute right-4 top-[calc(env(safe-area-inset-top)+0.75rem)] flex h-10 w-10 items-center justify-center rounded-full bg-black/[0.06] text-foreground/70 transition-colors hover:bg-black/10 active:bg-black/15 lg:right-8 lg:top-6"
+          className="absolute right-4 top-[calc(env(safe-area-inset-top)+0.75rem)] flex h-10 w-10 items-center justify-center rounded-full bg-foreground/10 text-foreground/70 transition-colors hover:bg-foreground/15 active:bg-foreground/20 lg:right-8 lg:top-6"
           aria-label="Close"
         >
           <X className="h-5 w-5" strokeWidth={2} />
         </button>
         <div className="mx-auto grid w-full max-w-5xl gap-6 lg:grid-cols-[minmax(18rem,24rem)_minmax(28rem,1fr)] lg:items-start lg:justify-center xl:max-w-[72rem] xl:gap-8">
-          <section className="space-y-5 text-center lg:sticky lg:top-8 lg:space-y-5 lg:rounded-[30px] lg:border lg:border-border/60 lg:bg-white/70 lg:p-7 lg:text-left lg:shadow-[0_20px_60px_rgba(15,23,42,0.08)] lg:backdrop-blur-xl">
+          <section className="space-y-5 text-center lg:sticky lg:top-8 lg:space-y-5 lg:rounded-[30px] lg:border lg:border-border/60 lg:bg-card/70 lg:p-7 lg:text-left lg:shadow-[0_20px_60px_rgba(15,23,42,0.08)] lg:backdrop-blur-xl">
             <div className="space-y-4">
-              <div className="inline-flex items-center rounded-full border border-border/60 bg-white/80 px-3 py-1 text-xs font-medium text-muted-foreground lg:bg-background/80">
+              <div className="inline-flex items-center rounded-full border border-border/60 bg-background/80 px-3 py-1 text-xs font-medium text-muted-foreground">
                 Product feedback channel
               </div>
               <div className="space-y-3">
@@ -54,11 +54,13 @@ export default function Feedback() {
             </div>
 
             <div className="py-1 lg:pt-1">
-              <img
-                src={feedbackIllustration}
-                alt="Tour guide and tourist exploring together"
-                className="mx-auto w-full max-w-[220px] sm:max-w-xs lg:max-w-[18rem] xl:max-w-[19.5rem]"
-              />
+              <div className="mx-auto w-fit max-w-full rounded-3xl border border-border/60 bg-white p-3 shadow-sm">
+                <img
+                  src={feedbackIllustration}
+                  alt="Tour guide and tourist exploring together"
+                  className="mx-auto w-full max-w-[220px] sm:max-w-xs lg:max-w-[18rem] xl:max-w-[19.5rem]"
+                />
+              </div>
             </div>
           </section>
 

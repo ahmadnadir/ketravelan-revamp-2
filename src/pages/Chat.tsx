@@ -182,8 +182,8 @@ export default function Chat() {
       .filter((p: any) => {
         const conv = p?.conversation;
         if (!conv) return false;
-        // Safety guard: hide orphaned trip chats when trip was deleted.
-        if ((conv.trip_id || conv.trip?.id) && !conv.trip) return false;
+        // Hide cached trip chats when their linked trip is missing or deleted.
+        if ((conv.trip_id || conv.trip?.id) && (!conv.trip || conv.trip.status === 'deleted')) return false;
 
         // Hide direct conversations for users I have blocked.
         if (!conv.trip_id && user?.id) {
