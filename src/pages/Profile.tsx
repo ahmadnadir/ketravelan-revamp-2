@@ -189,7 +189,6 @@ export default function Profile() {
   const isOwnProfile = !userId || userId === user?.id;
   const profile = isOwnProfile ? currentUserProfile : viewedProfile;
   const [coverPhoto, setCoverPhoto] = useState<string | null>(profile?.cover_image || null);
-  const [avatarModalOpen, setAvatarModalOpen] = useState(false);
   const [avatarViewOpen, setAvatarViewOpen] = useState(false);
   const [avatarCropOpen, setAvatarCropOpen] = useState(false);
   const [avatarImageToCrop, setAvatarImageToCrop] = useState<string>("");
@@ -551,7 +550,6 @@ export default function Profile() {
   };
 
   const handleRemoveAvatar = async () => {
-    setAvatarModalOpen(false);
     await updateAvatarUrl(null, "Photo removed", "Your profile photo has been removed.");
   };
 
@@ -743,7 +741,7 @@ export default function Profile() {
             <div className="flex flex-col items-center -mt-12">
               <button
                 type="button"
-                onClick={() => setAvatarModalOpen(true)}
+                onClick={() => setAvatarViewOpen(true)}
                 className="rounded-full focus:outline-none focus:ring-2 focus:ring-primary/60"
               >
                 <Avatar className="h-24 w-24 border-4 border-background shadow-lg">
@@ -956,7 +954,7 @@ export default function Profile() {
           <div className="flex flex-col items-center -mt-12">
             <button
               type="button"
-              onClick={() => setAvatarModalOpen(true)}
+              onClick={() => setAvatarViewOpen(true)}
               className="rounded-full focus:outline-none focus:ring-2 focus:ring-primary/60"
             >
               <Avatar className="h-24 w-24 border-4 border-background shadow-lg bg-white">
@@ -1412,52 +1410,6 @@ export default function Profile() {
         </DialogContent>
       </Dialog>
 
-      {/* Avatar options modal: view or change */}
-      <Dialog open={avatarModalOpen} onOpenChange={setAvatarModalOpen}>
-        <DialogContent className="max-w-sm w-[90vw] border-border/50 p-4 flex flex-col gap-3">
-          <DialogHeader className="items-center">
-            <DialogTitle className="text-base">Profile Photo</DialogTitle>
-          </DialogHeader>
-          <Button
-            type="button"
-            variant="outline"
-            className="w-full rounded-xl"
-            onClick={() => {
-              setAvatarModalOpen(false);
-              setAvatarViewOpen(true);
-            }}
-          >
-            View Photo
-          </Button>
-          {isOwnProfile && (
-            <>
-              <Button
-                type="button"
-                className="w-full rounded-xl"
-                onClick={() => {
-                  setAvatarModalOpen(false);
-                  setChangePhotoOptionsOpen(true);
-                }}
-                disabled={uploadingAvatar}
-              >
-                Change Photo
-              </Button>
-
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full rounded-xl text-destructive border-destructive hover:text-destructive"
-                onClick={handleRemoveAvatar}
-                disabled={uploadingAvatar}
-              >
-                <Trash2 className="h-4 w-4 mr-2" />
-                Remove Photo
-              </Button>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
-
       <Dialog open={changePhotoOptionsOpen} onOpenChange={setChangePhotoOptionsOpen}>
         <DialogContent className="max-w-sm w-[90vw] border-border/50 p-4 flex flex-col gap-3">
           <DialogHeader className="items-center">
@@ -1488,6 +1440,22 @@ export default function Profile() {
           >
             Choose Avatar
           </Button>
+
+          {profile?.avatar_url && (
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full rounded-xl text-destructive border-destructive hover:text-destructive"
+              onClick={() => {
+                setChangePhotoOptionsOpen(false);
+                handleRemoveAvatar();
+              }}
+              disabled={uploadingAvatar}
+            >
+              <Trash2 className="h-4 w-4 mr-2" />
+              Remove Photo
+            </Button>
+          )}
         </DialogContent>
       </Dialog>
 
@@ -1596,30 +1564,38 @@ export default function Profile() {
 
       {/* Full-screen avatar viewer */}
       <Dialog open={avatarViewOpen} onOpenChange={setAvatarViewOpen}>
-        <DialogContent className="max-w-4xl w-[100vw] h-[100vh] sm:w-[90vw] border-border/50 p-0 overflow-hidden flex flex-col [&>button]:hidden">
-          <DialogHeader className="px-4 pt-[calc(env(safe-area-inset-top)+0.75rem)] pb-2 border-b border-border/50 flex-none relative">
-            <DialogTitle className="text-center w-full">Profile Photo</DialogTitle>
-            <button
+        <DialogContent className="!max-w-none !max-h-none w-screen h-[100dvh] left-0 top-0 translate-x-0 translate-y-0 data-[state=open]:slide-in-from-left-0 data-[state=open]:slide-in-from-top-0 rounded-none border-0 bg-black p-0 overflow-hidden [&>button]:hidden">
+          <DialogTitle className="sr-only">Profile Photo</DialogTitle>
+          <div className="relative w-full h-full flex flex-col items-center justify-center gap-8">
+          <button
+            type="button"
+            onClick={() => setAvatarViewOpen(false)}
+            className="absolute right-4 top-[calc(env(safe-area-inset-top,0px)+1rem)] z-10 h-10 w-10 rounded-full flex items-center justify-center text-white hover:bg-white/10 transition-colors"
+            aria-label="Close profile photo"
+          >
+            <X className="h-6 w-6" />
+          </button>
+          {avatarUrl ? (
+            <img
+              src={avatarUrl}
+              alt={displayName}
+              className="w-[85vw] h-[85vw] max-w-[28rem] max-h-[28rem] rounded-full object-cover bg-white"
+            />
+          ) : (
+            <div className="w-[85vw] h-[85vw] max-w-[28rem] max-h-[28rem] rounded-full bg-white/10 flex items-center justify-center">
+              <p className="text-white/60">No profile photo</p>
+            </div>
+          )}
+          {isOwnProfile && (
+            <Button
               type="button"
-              onClick={() => setAvatarViewOpen(false)}
-              className="h-8 w-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors absolute right-4 bottom-2"
-              aria-label="Close profile photo"
+              className="rounded-full bg-white/15 text-white hover:bg-white/25 px-8 h-12 text-base font-medium"
+              onClick={() => setChangePhotoOptionsOpen(true)}
+              disabled={uploadingAvatar}
             >
-              <X className="h-5 w-5" />
-            </button>
-          </DialogHeader>
-          <div className="flex-1 bg-black flex items-center justify-center">
-            {avatarUrl ? (
-              <img
-                src={avatarUrl}
-                alt={displayName}
-                className="max-w-full max-h-[85vh] object-contain"
-              />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center">
-                <p className="text-muted-foreground">No profile photo</p>
-              </div>
-            )}
+              Change photo
+            </Button>
+          )}
           </div>
         </DialogContent>
       </Dialog>

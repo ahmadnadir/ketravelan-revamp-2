@@ -3,7 +3,16 @@ import { ThemeProvider as NextThemesProvider, useTheme } from "next-themes";
 import { configureIOSStatusBarForLightHeader } from "@/lib/capacitor";
 
 function ThemeEffects() {
-  const { resolvedTheme } = useTheme();
+  const { resolvedTheme, setTheme } = useTheme();
+
+  // OS theme and the manual toggle sit at the same level: the toggle overrides
+  // until the OS theme changes, at which point we follow the OS again.
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const onChange = () => setTheme("system");
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }, [setTheme]);
 
   useEffect(() => {
     if (!resolvedTheme) return;
