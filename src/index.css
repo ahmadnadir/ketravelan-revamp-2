@@ -638,7 +638,7 @@ html.dark img[src$="/default-trip-photo.jpeg"] {
   }
 
   /* iOS native: recentre dialog inside the shrinking --vv-height area */
-  body.native-ios-no-safe-area .dialog-keyboard-aware {
+  body.native-ios-no-safe-area .dialog-keyboard-aware:not(.dialog-fullscreen) {
     top: calc(var(--vv-height, 100dvh) / 2) !important;
     max-height: calc(var(--vv-height, 100dvh) - 2rem) !important;
   }

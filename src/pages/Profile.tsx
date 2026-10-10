@@ -1564,7 +1564,7 @@ export default function Profile() {
 
       {/* Full-screen avatar viewer */}
       <Dialog open={avatarViewOpen} onOpenChange={setAvatarViewOpen}>
-        <DialogContent className="!max-w-none !max-h-none w-screen h-[100dvh] left-0 top-0 translate-x-0 translate-y-0 data-[state=open]:slide-in-from-left-0 data-[state=open]:slide-in-from-top-0 rounded-none border-0 bg-black p-0 overflow-hidden [&>button]:hidden">
+        <DialogContent className="dialog-fullscreen !max-w-none !max-h-none w-screen h-[100dvh] left-0 top-0 translate-x-0 translate-y-0 data-[state=open]:slide-in-from-left-0 data-[state=open]:slide-in-from-top-0 rounded-none border-0 bg-black p-0 overflow-hidden [&>button]:hidden">
           <DialogTitle className="sr-only">Profile Photo</DialogTitle>
           <div className="relative w-full h-full flex flex-col items-center justify-center gap-8">
           <button

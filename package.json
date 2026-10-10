@@ -2,7 +2,7 @@
   "name": "vite_react_shadcn_ts",
   "private": true,
   "version": "2.6.5",
-  "appBuild": "32",
+  "appBuild": "34",
   "type": "module",
   "scripts": {
     "dev": "vite",
