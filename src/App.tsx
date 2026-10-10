@@ -24,6 +24,7 @@ import { AdminLayout } from "./admin/components/AdminLayout";
 import { OfflineBanner } from "./components/layout/OfflineBanner";
 import { NetworkStatusProvider } from "./contexts/NetworkStatusContext";
 import { AppInitializer } from "./components/AppInitializer";
+import { AnalyticsSessionTracker } from "./components/AnalyticsSessionTracker";
 import { TermsAcceptanceModal } from "./components/modals/TermsAcceptanceModal";
 import React, { Suspense, useEffect, useRef, useState } from "react";
 import { AlertDialog, AlertDialogAction, AlertDialogContent, AlertDialogDescription, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
@@ -85,6 +86,26 @@ const VerificationPending = React.lazy(() => import("./pages/VerificationPending
 const Onboarding = React.lazy(() => import("./pages/Onboarding"));
 const WelcomeOnboarding = React.lazy(() => import("./pages/WelcomeOnboarding"));
 const AdminDashboard = React.lazy(() => import("./admin/pages/AdminDashboard"));
+const AdminUsers = React.lazy(() => import("./admin/pages/AdminUsers"));
+const AdminTrips = React.lazy(() => import("./admin/pages/AdminTrips"));
+const AdminTripDetail = React.lazy(() => import("./admin/pages/AdminTripDetail"));
+const AdminModeration = React.lazy(() => import("./admin/pages/AdminModeration"));
+const AdminModerationDetail = React.lazy(() => import("./admin/pages/AdminModerationDetail"));
+const AdminTransactions = React.lazy(() => import("./admin/pages/AdminTransactions"));
+const AdminTransactionDetail = React.lazy(() => import("./admin/pages/AdminTransactionDetail"));
+const AdminAffiliateRevenue = React.lazy(() => import("./admin/pages/AdminAffiliateRevenue"));
+const AdminAnalytics = React.lazy(() => import("./admin/pages/AdminAnalytics"));
+const AdminAnalyticsDetail = React.lazy(() => import("./admin/pages/AdminAnalyticsDetail"));
+const AdminNotifications = React.lazy(() => import("./admin/pages/AdminNotifications"));
+const AdminFeedback = React.lazy(() => import("./admin/pages/AdminFeedback"));
+const AdminFeedbackDetail = React.lazy(() => import("./admin/pages/AdminFeedbackDetail"));
+
+function LegacyAdminSettlementRedirect() {
+  const { settlementId } = useParams();
+  return <Navigate to={`/admin/transactions/settlements/${settlementId}`} replace />;
+}
+const AdminAdministration = React.lazy(() => import("./admin/pages/AdminAdministration"));
+const AdminAuditLogs = React.lazy(() => import("./admin/pages/AdminAuditLogs"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -651,6 +672,7 @@ const App = () => (
             <IOSStatusBarInitializer />
             <GlobalSwipeBackHandler />
             <AppInitializer />
+            <AnalyticsSessionTracker />
             <FamiliesSafetyReminderGate />
             <TermsAcceptanceModal />
             <ScrollToTop />
@@ -712,15 +734,41 @@ const App = () => (
               <Route path="/help-center" element={<HelpCenter />} />
               <Route path="/help-center/:slug" element={<HelpArticleDetail />} />
               <Route path="/install" element={<Install />} />
-              <Route path="/admin" element={<ProtectedRoute><AdminGuard><AdminLayout><AdminDashboard /></AdminLayout></AdminGuard></ProtectedRoute>} />
-              <Route path="/admin/users" element={<ProtectedRoute><AdminGuard><AdminLayout><AdminDashboard /></AdminLayout></AdminGuard></ProtectedRoute>} />
-              <Route path="/admin/trips" element={<ProtectedRoute><AdminGuard><AdminLayout><AdminDashboard /></AdminLayout></AdminGuard></ProtectedRoute>} />
-              <Route path="/admin/moderation" element={<ProtectedRoute><AdminGuard><AdminLayout><AdminDashboard /></AdminLayout></AdminGuard></ProtectedRoute>} />
-              <Route path="/admin/transactions" element={<ProtectedRoute><AdminGuard><AdminLayout><AdminDashboard /></AdminLayout></AdminGuard></ProtectedRoute>} />
-              <Route path="/admin/affiliate" element={<ProtectedRoute><AdminGuard><AdminLayout><AdminDashboard /></AdminLayout></AdminGuard></ProtectedRoute>} />
-              <Route path="/admin/analytics" element={<ProtectedRoute><AdminGuard><AdminLayout><AdminDashboard /></AdminLayout></AdminGuard></ProtectedRoute>} />
-              <Route path="/admin/notifications" element={<ProtectedRoute><AdminGuard><AdminLayout><AdminDashboard /></AdminLayout></AdminGuard></ProtectedRoute>} />
-              <Route path="/admin/settings" element={<ProtectedRoute><AdminGuard><AdminLayout><AdminDashboard /></AdminLayout></AdminGuard></ProtectedRoute>} />
+              <Route path="/admin" element={<ProtectedRoute><AdminGuard permission="analytics.view"><AdminLayout><AdminDashboard /></AdminLayout></AdminGuard></ProtectedRoute>} />
+              <Route path="/admin/users" element={<ProtectedRoute><AdminGuard permission="users.view"><AdminLayout><AdminUsers /></AdminLayout></AdminGuard></ProtectedRoute>} />
+              <Route path="/admin/users/:userId" element={<ProtectedRoute><AdminGuard permission="users.view"><AdminLayout><AdminUsers /></AdminLayout></AdminGuard></ProtectedRoute>} />
+              <Route path="/admin/trips" element={<ProtectedRoute><AdminGuard permission="trips.view"><AdminLayout><AdminTrips /></AdminLayout></AdminGuard></ProtectedRoute>} />
+              <Route path="/admin/trips/:tripId" element={<ProtectedRoute><AdminGuard permission="trips.view"><AdminLayout><AdminTripDetail /></AdminLayout></AdminGuard></ProtectedRoute>} />
+              <Route path="/admin/moderation" element={<ProtectedRoute><AdminGuard permission="moderation.view"><AdminLayout><AdminModeration /></AdminLayout></AdminGuard></ProtectedRoute>} />
+              <Route path="/admin/moderation/:reportId" element={<ProtectedRoute><AdminGuard permission="moderation.view"><AdminLayout><AdminModerationDetail /></AdminLayout></AdminGuard></ProtectedRoute>} />
+              <Route path="/admin/transactions" element={<ProtectedRoute><AdminGuard permission="transactions.view"><AdminLayout><AdminTransactions /></AdminLayout></AdminGuard></ProtectedRoute>} />
+              <Route path="/admin/transactions/standard_payments" element={<ProtectedRoute><AdminGuard permission="transactions.view"><AdminLayout><AdminTransactions /></AdminLayout></AdminGuard></ProtectedRoute>} />
+              <Route path="/admin/transactions/guided_payments" element={<ProtectedRoute><AdminGuard permission="transactions.view"><AdminLayout><AdminTransactions /></AdminLayout></AdminGuard></ProtectedRoute>} />
+              <Route path="/admin/transactions/settlements" element={<ProtectedRoute><AdminGuard permission="transactions.view"><AdminLayout><AdminTransactions /></AdminLayout></AdminGuard></ProtectedRoute>} />
+              <Route path="/admin/transactions/settlements/:settlementId" element={<ProtectedRoute><AdminGuard permission="transactions.view"><AdminLayout><AdminTransactionDetail /></AdminLayout></AdminGuard></ProtectedRoute>} />
+              <Route path="/admin/transactions/legacy_settlements" element={<Navigate to="/admin/transactions" replace />} />
+              <Route path="/admin/standard_payments" element={<Navigate to="/admin/transactions/standard_payments" replace />} />
+              <Route path="/admin/guided_payments" element={<Navigate to="/admin/transactions/guided_payments" replace />} />
+              <Route path="/admin/settlements" element={<Navigate to="/admin/transactions/settlements" replace />} />
+              <Route path="/admin/settlements/:settlementId" element={<LegacyAdminSettlementRedirect />} />
+              <Route path="/admin/legacy_settlements" element={<Navigate to="/admin/transactions" replace />} />
+              <Route path="/admin/affiliate" element={<ProtectedRoute><AdminGuard permission="affiliate.view"><AdminLayout><AdminAffiliateRevenue /></AdminLayout></AdminGuard></ProtectedRoute>} />
+              <Route path="/admin/affiliate/providers" element={<ProtectedRoute><AdminGuard permission="affiliate.view"><AdminLayout><AdminAffiliateRevenue /></AdminLayout></AdminGuard></ProtectedRoute>} />
+              <Route path="/admin/affiliate/programs" element={<ProtectedRoute><AdminGuard permission="affiliate.view"><AdminLayout><AdminAffiliateRevenue /></AdminLayout></AdminGuard></ProtectedRoute>} />
+              <Route path="/admin/affiliate/campaigns" element={<ProtectedRoute><AdminGuard permission="affiliate.view"><AdminLayout><AdminAffiliateRevenue /></AdminLayout></AdminGuard></ProtectedRoute>} />
+              <Route path="/admin/affiliate/links" element={<ProtectedRoute><AdminGuard permission="affiliate.view"><AdminLayout><AdminAffiliateRevenue /></AdminLayout></AdminGuard></ProtectedRoute>} />
+              <Route path="/admin/affiliate/clicks" element={<ProtectedRoute><AdminGuard permission="affiliate.view"><AdminLayout><AdminAffiliateRevenue /></AdminLayout></AdminGuard></ProtectedRoute>} />
+              <Route path="/admin/affiliate/conversions" element={<ProtectedRoute><AdminGuard permission="affiliate.view"><AdminLayout><AdminAffiliateRevenue /></AdminLayout></AdminGuard></ProtectedRoute>} />
+              <Route path="/admin/affiliate/commissions" element={<ProtectedRoute><AdminGuard permission="affiliate.view"><AdminLayout><AdminAffiliateRevenue /></AdminLayout></AdminGuard></ProtectedRoute>} />
+              <Route path="/admin/affiliate/reconciliation" element={<ProtectedRoute><AdminGuard permission="affiliate.view"><AdminLayout><AdminAffiliateRevenue /></AdminLayout></AdminGuard></ProtectedRoute>} />
+              <Route path="/admin/analytics/details/:metric" element={<ProtectedRoute><AdminGuard permission="analytics.view"><AdminLayout><AdminAnalyticsDetail /></AdminLayout></AdminGuard></ProtectedRoute>} />
+              <Route path="/admin/analytics" element={<ProtectedRoute><AdminGuard permission="analytics.view"><AdminLayout><AdminAnalytics /></AdminLayout></AdminGuard></ProtectedRoute>} />
+              <Route path="/admin/notifications" element={<ProtectedRoute><AdminGuard permission="notifications.manage"><AdminLayout><AdminNotifications /></AdminLayout></AdminGuard></ProtectedRoute>} />
+              <Route path="/admin/feedback" element={<ProtectedRoute><AdminGuard permission="feedback.view"><AdminLayout><AdminFeedback /></AdminLayout></AdminGuard></ProtectedRoute>} />
+              <Route path="/admin/feedback/:id" element={<ProtectedRoute><AdminGuard permission="feedback.view"><AdminLayout><AdminFeedbackDetail /></AdminLayout></AdminGuard></ProtectedRoute>} />
+              <Route path="/admin/settings" element={<ProtectedRoute><AdminGuard permission="settings.manage"><AdminLayout><AdminDashboard /></AdminLayout></AdminGuard></ProtectedRoute>} />
+              <Route path="/admin/administration" element={<ProtectedRoute><AdminGuard permission="administration.manage"><AdminLayout><AdminAdministration /></AdminLayout></AdminGuard></ProtectedRoute>} />
+              <Route path="/admin/audit-logs" element={<ProtectedRoute><AdminGuard permission="audit.view"><AdminLayout><AdminAuditLogs /></AdminLayout></AdminGuard></ProtectedRoute>} />
               {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
               <Route path="*" element={<NotFound />} />
             </Routes>

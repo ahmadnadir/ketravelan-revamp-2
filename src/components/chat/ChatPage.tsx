@@ -239,7 +239,6 @@ export function ChatPage({
   const [reportTarget, setReportTarget] = useState<{ messageId: string; reportedUserId: string } | null>(null);
   const [reportReason, setReportReason] = useState<ReportReasonValue>('spam');
   const [reportDescription, setReportDescription] = useState('');
-  const [confirmReport, setConfirmReport] = useState(false);
   const [isSubmittingAction, setIsSubmittingAction] = useState(false);
   const [jumpHighlightMessageId, setJumpHighlightMessageId] = useState<string | null>(null);
   const [swipePreview, setSwipePreview] = useState<{ messageId: string; offset: number; dragging: boolean } | null>(null);
@@ -1151,6 +1150,10 @@ export function ChatPage({
 
   const submitReportAction = async () => {
     if (!reportTarget || !messageReportType) return;
+    if (!isUuid(reportTarget.messageId) || !isUuid(reportTarget.reportedUserId)) {
+      toast.error('This message report is missing a valid message or user ID.');
+      return;
+    }
     setIsSubmittingAction(true);
     try {
       await submitReport({
@@ -1161,7 +1164,6 @@ export function ChatPage({
         description: reportDescription,
       });
       toast.success('Thank you. This report has been submitted.');
-      setConfirmReport(false);
       setReportTarget(null);
       setReportReason('spam');
       setReportDescription('');
@@ -2113,32 +2115,15 @@ export function ChatPage({
               </Button>
               <Button
                 type="button"
-                onClick={() => setConfirmReport(true)}
+                onClick={() => void submitReportAction()}
                 disabled={isSubmittingAction}
               >
-                Continue
+                {isSubmittingAction ? 'Submitting…' : 'Submit Report'}
               </Button>
             </div>
           </div>
         </DialogContent>
       </Dialog>
-
-      <AlertDialog open={confirmReport} onOpenChange={setConfirmReport}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Are you sure you want to report this content?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This report will be submitted to moderators for review.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isSubmittingAction}>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void submitReportAction()} disabled={isSubmittingAction}>
-              Submit Report
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
 
       <AlertDialog open={Boolean(confirmAction)} onOpenChange={(open) => !open && setConfirmAction(null)}>
         <AlertDialogContent>

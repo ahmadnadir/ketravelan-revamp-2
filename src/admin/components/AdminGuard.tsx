@@ -2,9 +2,19 @@ import { ReactNode, useEffect, useState } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { ShieldAlert } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import { verifyAdminAccess } from '@/admin/lib/adminAccess';
+import {
+  getAdminAccess,
+  hasPermission,
+  type AdminPermission,
+} from '@/admin/lib/adminAccess';
 
-export function AdminGuard({ children }: { children: ReactNode }) {
+export function AdminGuard({
+  children,
+  permission,
+}: {
+  children: ReactNode;
+  permission?: AdminPermission;
+}) {
   const { isAuthenticated, loading } = useAuth();
   const location = useLocation();
   const [checking, setChecking] = useState(true);
@@ -12,22 +22,23 @@ export function AdminGuard({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let active = true;
+    setChecking(true);
     if (!isAuthenticated) {
       setChecking(false);
       setAllowed(false);
       return;
     }
 
-    void verifyAdminAccess().then((result) => {
+    void getAdminAccess().then((access) => {
       if (!active) return;
-      setAllowed(result);
+      setAllowed(permission ? hasPermission(access, permission) : access.isAdmin);
       setChecking(false);
     });
 
     return () => {
       active = false;
     };
-  }, [isAuthenticated]);
+  }, [isAuthenticated, permission]);
 
   if (loading || checking) {
     return (

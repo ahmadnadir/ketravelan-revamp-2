@@ -22,6 +22,7 @@ import { isTripSaved, saveTrip, unsaveTrip } from "@/lib/savedTrips";
 import { buildPublicUrl, buildTripShareUrl } from "@/lib/publicUrl";
 import { savePendingListItemRestore } from "@/hooks/useListItemRestore";
 import { DEFAULT_TRIP_IMAGE, getTripImageUrl } from "@/lib/tripImage";
+import { recordTripShare } from "@/lib/analyticsTracking";
 
 const formatTripDateLabel = (value: string): string => {
   const trimmed = String(value || "").trim();
@@ -327,6 +328,7 @@ export function TripCard({
           text: shareText,
           url: tripShareUrl,
         });
+        void recordTripShare(id, "native_share");
       } catch (err) {
         // User cancelled or share failed - fall back to modal
         if ((err as Error).name !== 'AbortError') {
@@ -342,6 +344,7 @@ export function TripCard({
   const handleCopyLink = async () => {
     try {
       await navigator.clipboard.writeText(tripShareUrl);
+      void recordTripShare(id, "copy_link");
       setCopied(true);
       toast({
         title: "Link copied!",
@@ -362,7 +365,7 @@ export function TripCard({
       name: "WhatsApp",
       icon: MessageCircle,
       color: "bg-green-500",
-      onClick: () => window.open(`https://wa.me/?text=${encodeURIComponent(shareText + " " + tripShareUrl)}`, "_blank"),
+      onClick: () => { void recordTripShare(id, "whatsapp"); window.open(`https://wa.me/?text=${encodeURIComponent(shareText + " " + tripShareUrl)}`, "_blank"); },
     },
     {
       name: "Facebook",
@@ -372,7 +375,7 @@ export function TripCard({
         </svg>
       ),
       color: "bg-blue-600",
-      onClick: () => window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(tripShareUrl)}`, "_blank"),
+      onClick: () => { void recordTripShare(id, "facebook"); window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(tripShareUrl)}`, "_blank"); },
     },
     {
       name: "Twitter",
@@ -382,7 +385,7 @@ export function TripCard({
         </svg>
       ),
       color: "bg-black dark:bg-white dark:text-black",
-      onClick: () => window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(tripShareUrl)}`, "_blank"),
+      onClick: () => { void recordTripShare(id, "twitter"); window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(tripShareUrl)}`, "_blank"); },
     },
     {
       name: "Telegram",
@@ -392,7 +395,7 @@ export function TripCard({
         </svg>
       ),
       color: "bg-sky-500",
-      onClick: () => window.open(`https://t.me/share/url?url=${encodeURIComponent(tripShareUrl)}&text=${encodeURIComponent(shareText)}`, "_blank"),
+      onClick: () => { void recordTripShare(id, "telegram"); window.open(`https://t.me/share/url?url=${encodeURIComponent(tripShareUrl)}&text=${encodeURIComponent(shareText)}`, "_blank"); },
     },
   ];
 

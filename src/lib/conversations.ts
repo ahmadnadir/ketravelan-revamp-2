@@ -3,6 +3,7 @@ import { supabase } from './supabase';
 import { isMessagingBlockedBetweenUsers } from '@/lib/blockUser';
 import { getBlockedRelationshipUserIds } from '@/lib/moderation';
 import { ensureCurrentUserCanStartDirectChat, enforceCurrentUserSocialWritePolicy } from '@/lib/familiesSafety';
+import { recordMessageSent } from '@/lib/analyticsTracking';
 
 // Module-level profile cache shared across all fetches and subscriptions.
 // Populated eagerly from conversations list so chat never needs a fresh profile fetch.
@@ -429,6 +430,7 @@ export async function sendMessage(conversationId: string, content: string, clien
     .single();
 
   if (error) throw error;
+  void recordMessageSent(conversationId, data.id);
   return data;
 }
 

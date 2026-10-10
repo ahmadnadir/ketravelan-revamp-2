@@ -65,7 +65,6 @@ export function ModerationMenu({
 }: ModerationMenuProps) {
   const { user } = useAuth();
   const [reportOpen, setReportOpen] = useState(false);
-  const [confirmReportOpen, setConfirmReportOpen] = useState(false);
   const [confirmBlockOpen, setConfirmBlockOpen] = useState(false);
   const [reason, setReason] = useState<ReportReasonValue | ''>('');
   const [description, setDescription] = useState('');
@@ -77,7 +76,6 @@ export function ModerationMenu({
   const resetReportState = () => {
     setReason('');
     setDescription('');
-    setConfirmReportOpen(false);
   };
 
   const handleSubmitReport = async () => {
@@ -215,29 +213,12 @@ export function ModerationMenu({
             <Button variant="outline" onClick={() => setReportOpen(false)} disabled={isSubmitting}>
               Cancel
             </Button>
-            <Button onClick={() => setConfirmReportOpen(true)} disabled={!reason || isSubmitting}>
-              Submit Report
+            <Button type="button" onClick={() => void handleSubmitReport()} disabled={!reason || isSubmitting}>
+              {isSubmitting ? 'Submitting…' : 'Submit Report'}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      <AlertDialog open={confirmReportOpen} onOpenChange={setConfirmReportOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Confirm report</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to report this content?
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isSubmitting}>Cancel</AlertDialogCancel>
-            <AlertDialogAction disabled={isSubmitting} onClick={() => void handleSubmitReport()}>
-              {isSubmitting ? 'Submitting...' : 'Confirm'}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
 
       <AlertDialog open={confirmBlockOpen} onOpenChange={setConfirmBlockOpen}>
         <AlertDialogContent>

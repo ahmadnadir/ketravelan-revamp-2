@@ -31,6 +31,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { ModerationMenu } from "@/components/moderation/ModerationMenu";
+import { REPORT_REASON_OPTIONS, submitReport as submitCanonicalReport, type ReportReasonValue } from "@/lib/moderation";
 
 type SortBy = "top" | "new" | "oldest";
 
@@ -261,38 +262,30 @@ export default function DiscussionDetail() {
   };
 
   const submitReport = async () => {
-    if (!reportReason || !selectedReplyForReport) return;
+    if (!reportReason || !selectedReplyForReport || !id) return;
+
+    if (!isAuthenticated || !user?.id) {
+      toast({
+        title: "Sign in required",
+        description: "Please sign in before submitting a report.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     setIsSubmittingReport(true);
     try {
-      const reportEmail = `
-        Report Submitted for Discussion Comment
-        ---
-        Comment ID: ${selectedReplyForReport.id}
-        Author: ${selectedReplyForReport.author.name}
-        Discussion ID: ${id}
-        
-        Reason: ${reportReason}
-        Details: ${reportDetails || "No additional details provided"}
-        
-        Reported by: ${user?.email || "Anonymous"}
-        Date: ${new Date().toISOString()}
-      `;
-
-      // Send email to no-reply@ketravelan.com
-      await fetch("/api/send-report", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          to: "no-reply@ketravelan.com",
-          subject: `New Comment Report - Discussion ${id}`,
-          body: reportEmail,
-        }),
+      await submitCanonicalReport({
+        reportType: "DISCUSSION_REPLY",
+        targetId: selectedReplyForReport.id,
+        reportedUserId: selectedReplyForReport.author.id,
+        reason: reportReason as ReportReasonValue,
+        description: reportDetails,
       });
 
       toast({
         title: "Report submitted",
-        description: "Thank you for helping us keep the community safe. We'll review this shortly.",
+        description: "Thank you for helping us keep the community safe. Moderators will review your report.",
       });
 
       setShowReportModal(false);
@@ -1098,11 +1091,9 @@ export default function DiscussionDetail() {
                 className="w-full px-3 py-2 border border-border rounded-md bg-background text-foreground text-sm"
               >
                 <option value="">Select a reason...</option>
-                <option value="spam">Spam</option>
-                <option value="harassment">Harassment</option>
-                <option value="inappropriate">Inappropriate content</option>
-                <option value="misinformation">Misinformation</option>
-                <option value="other">Other</option>
+                {REPORT_REASON_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
               </select>
             </div>
 

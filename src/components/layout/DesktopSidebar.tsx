@@ -12,6 +12,7 @@ import {
   Plus,
   Wallet,
   MessageSquare,
+  ShieldCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
@@ -128,6 +129,16 @@ export function DesktopSidebar() {
           <Settings className="h-5 w-5 flex-none" strokeWidth={isActive("/settings") ? 2.25 : 1.75} />
           <span>Settings</span>
         </Link>
+
+        {profile?.is_admin && (
+          <Link
+            to="/admin"
+            className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-foreground/60 hover:bg-secondary/60 hover:text-foreground transition-colors"
+          >
+            <ShieldCheck className="h-5 w-5 flex-none" strokeWidth={1.75} />
+            <span>Switch to Admin</span>
+          </Link>
+        )}
 
         {/* User profile row */}
         <Link

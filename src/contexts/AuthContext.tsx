@@ -121,6 +121,7 @@ interface Profile {
   is_deleted?: boolean | null;
   deleted_at?: string | null;
   is_admin: boolean;
+  admin_account_status?: 'active' | 'suspended' | 'deleted' | 'unavailable';
   budget_min?: number | null;
   budget_max?: number | null;
   social_links?: Record<string, string> | null;
@@ -325,7 +326,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       } else {
         // data will be null if no profile exists, or the profile object if it exists
-        setProfile(data);
+        if (data) {
+          const { data: accountStatus, error: accountStatusError } = await supabase.rpc('get_current_account_status');
+          const accountStatusFunctionMissing =
+            accountStatusError?.code === 'PGRST202' ||
+            accountStatusError?.code === '42883';
+          if (accountStatusError) {
+            if (accountStatusFunctionMissing) {
+              console.warn('Account status migration is not available yet; using the legacy profile deletion flag.');
+            } else {
+              console.error('Error fetching account status:', accountStatusError);
+            }
+          }
+          setProfile({
+            ...data,
+            admin_account_status: accountStatusError
+              ? accountStatusFunctionMissing
+                ? (data.is_deleted ? 'deleted' : 'active')
+                : 'unavailable'
+              : (accountStatus as Profile['admin_account_status']) || 'active',
+          });
+        } else {
+          setProfile(null);
+        }
       }
     } catch (error) {
       console.error('Error fetching profile:', error);
@@ -445,15 +468,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     if (error) {
-      const fnError = error as {
-        message?: string;
-        context?: { error?: string; message?: string; status?: number };
-      };
-      const message =
-        fnError?.context?.error ||
-        fnError?.context?.message ||
-        fnError?.message ||
-        "Failed to delete account";
+      const fnError = error as { message?: string; context?: unknown };
+      let message = fnError?.message || "Failed to delete account";
+      // FunctionsHttpError carries the raw Response in `context`; read the JSON body for the real message.
+      if (fnError.context instanceof Response) {
+        try {
+          const body = await fnError.context.clone().json();
+          if (typeof body?.error === "string" && body.error) {
+            message = body.requestId ? `${body.error} (ref ${String(body.requestId).slice(0, 8)})` : body.error;
+          }
+        } catch {
+          // Body was not JSON; keep the default message.
+        }
+      }
 
       if (message.toLowerCase().includes("failed to send a request to the edge function")) {
         throw new Error("Delete account service is not reachable. Please try again in a moment.");

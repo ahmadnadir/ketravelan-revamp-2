@@ -4,13 +4,14 @@ import { blockUser } from '@/lib/blockUser';
 export type ReportReasonValue =
   | 'spam'
   | 'harassment'
+  | 'misinformation'
   | 'hate_speech'
   | 'inappropriate'
   | 'scam_or_fraud'
   | 'violence'
   | 'other';
 
-export type ReportType = 'TRIP' | 'STORY' | 'DISCUSSION' | 'TRIP_CHAT' | 'DIRECT_CHAT' | 'USER';
+export type ReportType = 'TRIP' | 'STORY' | 'DISCUSSION' | 'DISCUSSION_REPLY' | 'TRIP_CHAT' | 'DIRECT_CHAT' | 'USER';
 
 export interface ReportReasonOption {
   value: ReportReasonValue;
@@ -51,9 +52,33 @@ export interface ModerationReportRecord {
   } | null;
 }
 
+interface ModerationProfileSummary {
+  id: string;
+  full_name?: string | null;
+  username?: string | null;
+  avatar_url?: string | null;
+}
+
+interface ModerationReportRow {
+  id: string;
+  content_type: string;
+  content_id: string;
+  reported_user_id: string | null;
+  reporter_id: string;
+  reason: string;
+  description?: string | null;
+  details?: string | null;
+  status: ModerationReportRecord['status'];
+  created_at: string;
+  reported_at?: string | null;
+  reporter?: ModerationProfileSummary | ModerationProfileSummary[] | null;
+  reported_user?: ModerationProfileSummary | ModerationProfileSummary[] | null;
+}
+
 export const REPORT_REASON_OPTIONS: ReportReasonOption[] = [
   { value: 'spam', label: 'Spam' },
   { value: 'harassment', label: 'Harassment' },
+  { value: 'misinformation', label: 'Misinformation' },
   { value: 'hate_speech', label: 'Hate Speech' },
   { value: 'inappropriate', label: 'Inappropriate Content' },
   { value: 'scam_or_fraud', label: 'Scam or Fraud' },
@@ -65,6 +90,7 @@ const REPORT_TYPE_MAP: Record<ReportType, string> = {
   TRIP: 'trip',
   STORY: 'story',
   DISCUSSION: 'discussion',
+  DISCUSSION_REPLY: 'discussion_reply',
   TRIP_CHAT: 'trip_chat_message',
   DIRECT_CHAT: 'direct_chat_message',
   USER: 'user_profile',
@@ -79,7 +105,13 @@ function isMissingColumn(error: unknown, column: string): boolean {
   );
 }
 
-function mapModerationReport(row: any): ModerationReportRecord {
+function getMissingReportColumn(error: unknown): string | null {
+  const candidate = error as { code?: string; message?: string } | null;
+  if (candidate?.code !== 'PGRST204' || typeof candidate.message !== 'string') return null;
+  return candidate.message.match(/'([^']+)' column/)?.[1] || null;
+}
+
+function mapModerationReport(row: ModerationReportRow): ModerationReportRecord {
   return {
     id: row.id,
     reportType: String(row.content_type || '').toUpperCase(),
@@ -112,25 +144,26 @@ export async function submitReport(input: SubmitReportInput): Promise<void> {
     status: 'open',
   };
 
-  const { error } = await supabase.from('reports').insert(payload);
+  const insertPayload = { ...payload };
+  const optionalColumns = new Set(['description', 'reported_at', 'reported_user_id']);
 
-  if (!error) return;
-  const missingDescription = isMissingColumn(error, 'description');
-  const missingReportedAt = isMissingColumn(error, 'reported_at');
-  if (!missingDescription && !missingReportedAt) throw error;
+  for (let attempt = 0; attempt <= optionalColumns.size; attempt += 1) {
+    const { error } = await supabase.from('reports').insert(insertPayload);
+    if (!error) return;
 
-  // Backward-compatible fallback while DB schema/cache doesn't include newer columns yet.
-  const { error: fallbackError } = await supabase.from('reports').insert({
-    content_type: payload.content_type,
-    content_id: payload.content_id,
-    reported_user_id: payload.reported_user_id,
-    reporter_id: payload.reporter_id,
-    reason: payload.reason,
-    details: payload.details,
-    status: payload.status,
-  });
+    const missingColumn = getMissingReportColumn(error);
+    if (!missingColumn || !optionalColumns.has(missingColumn)) throw error;
 
-  if (fallbackError) throw fallbackError;
+    if (missingColumn === 'description') {
+      delete (insertPayload as { description?: string }).description;
+    } else if (missingColumn === 'reported_at') {
+      delete (insertPayload as { reported_at?: string }).reported_at;
+    } else {
+      delete (insertPayload as { reported_user_id?: string | null }).reported_user_id;
+    }
+  }
+
+  throw new Error('Unable to submit report with the available reports schema.');
 }
 
 export async function blockUserViaApi(blockedUserId: string): Promise<void> {

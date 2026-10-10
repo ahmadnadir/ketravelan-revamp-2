@@ -11,12 +11,57 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY")!;
 const RESEND_FROM = Deno.env.get("RESEND_FROM") ?? "Ketravelan <no-reply@ketravelan.com>";
-const RESEND_RESET_TEMPLATE_ID = Deno.env.get("RESEND_RESET_TEMPLATE_ID") ?? Deno.env.get("RESEND_TEMPLATE_ID_RESET");
 const DEFAULT_REDIRECT = Deno.env.get("SITE_URL") ?? "https://ketravelan.app/auth/callback";
 
 const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
+
+const DEFAULT_SUBJECT = "Reset your Ketravelan password";
+
+// Built-in copy of the 'password_reset' template, used if the notification_templates row is missing.
+const DEFAULT_RESET_TEMPLATE = {
+  email_subject_template: "Reset your Ketravelan password",
+  email_html_template: "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\" /><meta name=\"viewport\" content=\"width=device-width\" /><title>Ketravelan</title></head><body style=\"margin:0;background:#f4f6f8;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial\"><div style=\"display:none;font-size:1px;color:#f4f6f8;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden\">Reset your Ketravelan password.</div><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"padding:32px 0;\"><tr><td align=\"center\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"max-width:520px;background:#ffffff;border-radius:16px;border:1px solid #e5e7eb;box-shadow:0 10px 28px rgba(15,23,42,.08);\"><tr><td align=\"center\" style=\"padding:24px 20px\"><img src=\"https://ketravelan.com/ketravelan_logo.png\" alt=\"Ketravelan\" style=\"display:block;border:0;outline:none;text-decoration:none;height:28px;width:auto\" /></td></tr><tr><td style=\"height:1px;background:#e5e7eb\" aria-hidden=\"true\"></td></tr><tr><td style=\"padding:28px\"><h1 style=\"font-size:22px;font-weight:700;margin:0 0 8px;color:#020617;text-align:center\">Reset your password</h1><div style=\"font-size:15px;line-height:1.65;color:#475569;margin-bottom:24px;text-align:center\">We received a request to reset the password for your Ketravelan account. Tap the button below to choose a new one.</div><table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\" width=\"100%\"><tr><td align=\"center\"><a href=\"{{action_url}}\" target=\"_blank\" style=\"display:inline-block;padding:14px 26px;border-radius:10px;background:#000000;color:#ffffff;text-decoration:none;font-weight:600\">Reset Password</a></td></tr></table></td></tr><tr><td style=\"padding:24px 28px;font-size:12px;color:#64748b;line-height:1.6\">If you didn\u2019t request this, you can safely ignore this email \u2014 your password won\u2019t change.<br><br>If the button doesn\u2019t work, copy this link:<br><a href=\"{{action_url}}\" style=\"color:#2563eb;word-break:break-all\">{{action_url}}</a><br><br><strong>The Ketravelan Crew</strong></td></tr></table></td></tr></table></body></html>",
+  email_text_template: "Reset your password\n\nWe received a request to reset the password for your Ketravelan account. Open the link below to choose a new one:\n\n{{action_url}}\n\nIf you didn't request this, you can safely ignore this email. Your password won't change.\n\nThe Ketravelan Crew",
+};
+
+function escapeHtml(v: string) {
+  return v
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+// {{variable}} rendering, same syntax as notification-dispatcher.
+function render(template: string, values: Record<string, string>, escape = false) {
+  return template.replace(/\{\{\s*([A-Za-z0-9_.-]+)\s*\}\}/g, (_m, key: string) => {
+    const value = values[key] ?? "";
+    return escape ? escapeHtml(value) : value;
+  });
+}
+
+// The design lives in notification_templates (type = 'password_reset') so it can be edited in the admin
+// Notification Center. Falls back to the built-in copy if the row is missing, inactive or unreadable.
+async function loadResetTemplate() {
+  try {
+    const { data, error } = await admin
+      .from("notification_templates")
+      .select("email_subject_template, email_html_template, email_text_template, is_active")
+      .eq("type", "password_reset")
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    if (data && data.is_active !== false && data.email_html_template) {
+      return data as { email_subject_template: string | null; email_html_template: string; email_text_template: string | null };
+    }
+  } catch (err) {
+    console.error("send-password-reset: could not load email template, using built-in", err instanceof Error ? err.message : err);
+  }
+  return DEFAULT_RESET_TEMPLATE;
+}
 
 function buildCorsHeaders(req: Request): Record<string, string> {
   const origin = req.headers.get("origin") || "*";
@@ -58,19 +103,13 @@ async function sendResendEmail(opts: { to: string; subject: string; variables?: 
   if (opts.templateId) {
     payload["template"] = { id: opts.templateId, data: opts.variables ?? {} };
   } else {
-    // This path should normally not be used when templates are configured.
-    const ctaUrl = (opts.variables?.ctaUrl as string) || "#";
-    const html = [
-      "<!doctype html>",
-      "<html><body>",
-      `<h2>Password reset for Ketravelan</h2>`,
-      `<p>Click the link below to reset your password:</p>`,
-      `<p><a href="${ctaUrl}">Reset Password</a></p>`,
-      `<p>If the button doesn't work, copy this link:</p>`,
-      `<p>${ctaUrl}</p>`,
-      "</body></html>",
-    ].join("");
-    payload["html"] = html;
+    const template = await loadResetTemplate();
+    const values = { action_url: (opts.variables?.ctaUrl as string) || "" };
+    payload["subject"] = opts.subject === DEFAULT_SUBJECT && template.email_subject_template
+      ? render(template.email_subject_template, values)
+      : opts.subject;
+    payload["html"] = render(template.email_html_template, values, true);
+    payload["text"] = render(template.email_text_template || "{{action_url}}", values);
   }
   const resp = await fetch("https://api.resend.com/emails", {
     method: "POST",
@@ -113,21 +152,17 @@ serve(async (req: Request) => {
     }
     const resetUrl = linkData.properties.action_link as string;
 
-    // Send email via Resend, prefer template (like signup)
+    // Send email via Resend. Design comes from notification_templates ('password_reset');
+    // an explicit templateId in the request still selects a Resend-hosted template instead.
     const variables = { ctaUrl: resetUrl };
-    const subject = body.subject || "Reset your Ketravelan password";
+    const subject = body.subject || DEFAULT_SUBJECT;
     const useTemplate = body.useTemplate !== false; // default true
-    if (useTemplate) {
-      const tid = body.templateId ?? RESEND_RESET_TEMPLATE_ID;
-      if (tid) {
-        await sendResendEmail({ to: body.email, subject, variables, templateId: tid });
-      } else {
-        // Graceful fallback to raw HTML when template is not configured
-        await sendResendEmail({ to: body.email, subject, variables });
-      }
-    } else {
-      await sendResendEmail({ to: body.email, subject, variables });
-    }
+    await sendResendEmail({
+      to: body.email,
+      subject,
+      variables,
+      templateId: useTemplate ? body.templateId : undefined,
+    });
 
     return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } });
   } catch (err: unknown) {

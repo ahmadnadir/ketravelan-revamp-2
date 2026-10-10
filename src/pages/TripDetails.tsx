@@ -1,4 +1,5 @@
 import { buildPublicUrl, buildTripShareUrl, getPublicBaseUrl } from "@/lib/publicUrl";
+import { recordTripJoinRequest, recordTripShare, recordTripView } from "@/lib/analyticsTracking";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
@@ -229,6 +230,12 @@ export default function TripDetails() {
   const { data: dbTrip, isLoading: dbTripLoading, isFetching: dbTripFetching, error } = useTripDetails(id);
   // Show skeleton while either the minimum polish delay OR the real request is still in flight
   const isLoading = isSimulatedLoading || dbTripLoading;
+  const trackedViewIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!dbTrip?.id || trackedViewIdRef.current === dbTrip.id) return;
+    trackedViewIdRef.current = dbTrip.id;
+    void recordTripView(dbTrip.id);
+  }, [dbTrip?.id]);
   // Fetch join request status
   const { data: joinRequest } = useJoinRequestStatus(
     dbTrip?.id,
@@ -1049,6 +1056,7 @@ export default function TripDetails() {
           text: shareText,
           url: tripShareUrl,
         });
+        void recordTripShare(shareTripId, "native_share");
       } catch (err) {
         // User cancelled or share failed - fall back to modal
         if ((err as Error).name !== 'AbortError') {
@@ -1064,6 +1072,7 @@ export default function TripDetails() {
   const handleCopyLink = async () => {
     try {
       await navigator.clipboard.writeText(tripShareUrl);
+      void recordTripShare(shareTripId, "copy_link");
       setCopied(true);
       toast({
         title: "Link copied!",
@@ -1084,7 +1093,7 @@ export default function TripDetails() {
       name: "WhatsApp",
       icon: MessageCircle,
       color: "bg-green-500",
-      onClick: () => window.open(`https://wa.me/?text=${encodeURIComponent(shareText + " " + tripShareUrl)}`, "_blank"),
+      onClick: () => { void recordTripShare(shareTripId, "whatsapp"); window.open(`https://wa.me/?text=${encodeURIComponent(shareText + " " + tripShareUrl)}`, "_blank"); },
     },
     {
       name: "Facebook",
@@ -1094,7 +1103,7 @@ export default function TripDetails() {
         </svg>
       ),
       color: "bg-blue-600",
-      onClick: () => window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(tripShareUrl)}`, "_blank"),
+      onClick: () => { void recordTripShare(shareTripId, "facebook"); window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(tripShareUrl)}`, "_blank"); },
     },
     {
       name: "Twitter",
@@ -1104,7 +1113,7 @@ export default function TripDetails() {
         </svg>
       ),
       color: "bg-black dark:bg-white dark:text-black",
-      onClick: () => window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(tripShareUrl)}`, "_blank"),
+      onClick: () => { void recordTripShare(shareTripId, "twitter"); window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(tripShareUrl)}`, "_blank"); },
     },
     {
       name: "Telegram",
@@ -1114,7 +1123,7 @@ export default function TripDetails() {
         </svg>
       ),
       color: "bg-sky-500",
-      onClick: () => window.open(`https://t.me/share/url?url=${encodeURIComponent(tripShareUrl)}&text=${encodeURIComponent(shareText)}`, "_blank"),
+      onClick: () => { void recordTripShare(shareTripId, "telegram"); window.open(`https://t.me/share/url?url=${encodeURIComponent(tripShareUrl)}&text=${encodeURIComponent(shareText)}`, "_blank"); },
     },
   ];
 
@@ -1180,6 +1189,7 @@ export default function TripDetails() {
     }
     try {
       await createJoinRequest(tripUUID, joinNote.trim() || undefined);
+      void recordTripJoinRequest(tripUUID);
       setShowJoinConfirmModal(false);
       setJoinNote("");
       

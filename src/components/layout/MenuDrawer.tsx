@@ -1,4 +1,4 @@
-import { Home, Map, FileText, Heart, MessageSquare, Settings, LogOut, Wallet, BookOpen, X } from "lucide-react";
+import { Home, Map, FileText, Heart, MessageSquare, Settings, LogOut, Wallet, BookOpen, ShieldCheck, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import {
   Sheet,
@@ -118,6 +118,17 @@ export function MenuDrawer({ open, onOpenChange }: MenuDrawerProps) {
                 </button>
               );
             })}
+
+            {profile?.is_admin && (
+              <button
+                type="button"
+                onClick={() => handleNavigation("/admin")}
+                className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-secondary transition-colors text-left"
+              >
+                <ShieldCheck className="h-5 w-5 text-muted-foreground" />
+                <span className="text-sm font-medium">Switch to Admin</span>
+              </button>
+            )}
 
             {/* Separator */}
             <div className="h-px bg-border my-3" />

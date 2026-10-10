@@ -6,7 +6,7 @@ import { AppLayout } from '@/components/layout/AppLayout';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/lib/supabase';
 import {
   fetchModerationReports,
   type ModerationReportRecord,
@@ -23,7 +23,9 @@ const FILTERS: Array<{ label: string; value: ModerationReportRecord['status'] | 
 
 export default function ModerationReports() {
   const navigate = useNavigate();
-  const { profile } = useAuth();
+  const [canModerate, setCanModerate] = useState(false);
+  const [canManageModeration, setCanManageModeration] = useState(false);
+  const [checkingAccess, setCheckingAccess] = useState(true);
   const [reports, setReports] = useState<ModerationReportRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<(typeof FILTERS)[number]['value']>('open');
@@ -31,7 +33,18 @@ export default function ModerationReports() {
   const [notesById, setNotesById] = useState<Record<string, string>>({});
 
   useEffect(() => {
+    let active = true;
+    void Promise.all([
+      supabase.rpc('admin_has_permission', { p_permission: 'moderation.view' }),
+      supabase.rpc('admin_has_permission', { p_permission: 'moderation.manage' }),
+    ]).then(([viewResult, manageResult]) => {
+      if (!active) return;
+      setCanModerate(!viewResult.error && viewResult.data === true);
+      setCanManageModeration(!manageResult.error && manageResult.data === true);
+      setCheckingAccess(false);
+    });
     void loadReports();
+    return () => { active = false; };
   }, []);
 
   async function loadReports() {
@@ -66,7 +79,11 @@ export default function ModerationReports() {
     return reports.filter((report) => report.status === filter);
   }, [filter, reports]);
 
-  if (!profile?.is_admin) {
+  if (checkingAccess) {
+    return <AppLayout><div className="flex min-h-screen items-center justify-center text-sm text-muted-foreground">Checking moderation access…</div></AppLayout>;
+  }
+
+  if (!canModerate) {
     return (
       <AppLayout>
         <div className="flex min-h-screen items-center justify-center px-4">
@@ -181,7 +198,7 @@ export default function ModerationReports() {
                       type="button"
                       variant="outline"
                       size="sm"
-                      disabled={updatingId === report.id}
+                      disabled={!canManageModeration || updatingId === report.id}
                       onClick={() => void handleStatusChange(report.id, 'under_review')}
                     >
                       Under Review
@@ -189,7 +206,7 @@ export default function ModerationReports() {
                     <Button
                       type="button"
                       size="sm"
-                      disabled={updatingId === report.id}
+                      disabled={!canManageModeration || updatingId === report.id}
                       onClick={() => void handleStatusChange(report.id, 'resolved')}
                     >
                       Resolve
@@ -198,7 +215,7 @@ export default function ModerationReports() {
                       type="button"
                       variant="ghost"
                       size="sm"
-                      disabled={updatingId === report.id}
+                      disabled={!canManageModeration || updatingId === report.id}
                       onClick={() => void handleStatusChange(report.id, 'dismissed')}
                     >
                       Dismiss

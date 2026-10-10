@@ -199,3 +199,28 @@ enabled = true
 verify_jwt = false
 entrypoint = "./functions/send-note-edited/index.ts"
 
+[functions.admin-notification-center]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/admin-notification-center/index.ts"
+
+[functions.notification-dispatcher]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/notification-dispatcher/index.ts"
+
+[functions.resend-control]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/resend-control/index.ts"
+
+[functions.resend-webhook]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/resend-webhook/index.ts"
+
+[functions.admin-feedback-actions]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/admin-feedback-actions/index.ts"
+
